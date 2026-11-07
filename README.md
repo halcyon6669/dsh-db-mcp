@@ -1,6 +1,6 @@
 # dsh-db-mcp
 
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
 DSH plugin that adds a **Database** entry to the sidebar with a data-source
 management panel, backed by a Python MCP server that lets the agent query those
@@ -259,7 +259,7 @@ first.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+Apache License 2.0 — see [LICENSE](LICENSE).
 
 ## Runtime layout
 

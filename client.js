@@ -37,7 +37,6 @@ window.__ModuleLoader__.load({
         'action.import': 'Import from DBeaver',
         'action.save': 'Save',
         'action.saving': 'Saving…',
-        'action.cancel': 'Cancel',
         'action.edit': 'Edit',
         'action.test': 'Test',
         'action.testing': 'Testing…',
@@ -174,7 +173,6 @@ window.__ModuleLoader__.load({
         'action.import': '从 DBeaver 导入',
         'action.save': '保存',
         'action.saving': '保存中…',
-        'action.cancel': '取消',
         'action.edit': '编辑',
         'action.test': '测试',
         'action.testing': '测试中…',
@@ -344,11 +342,12 @@ window.__ModuleLoader__.load({
         appearance: none;
         border: 0;
         background: none;
-        padding: 0;
+        padding: 4px 2px;
         font: inherit;
         color: var(--dsw-alias-brand-primary);
         cursor: pointer;
         border-radius: 4px;
+        border-bottom: 2px solid transparent;
       }
       .dbmcp-crumb:hover {
         text-decoration: underline;
@@ -358,9 +357,23 @@ window.__ModuleLoader__.load({
         cursor: default;
         font-weight: 500;
         text-decoration: none;
+        border-bottom-color: var(--dsw-alias-brand-primary);
       }
       .dbmcp-crumb-sep {
         color: var(--dsw-alias-label-secondary);
+      }
+      .dbmcp-title-switch {
+        appearance: none;
+        border: 0;
+        background: none;
+        padding: 0;
+        font: inherit;
+        color: inherit;
+        cursor: pointer;
+        border-radius: 4px;
+      }
+      .dbmcp-title-switch:hover {
+        color: var(--dsw-alias-brand-primary);
       }
       .dbmcp-schema-head {
         margin-bottom: 10px;
@@ -1479,11 +1492,6 @@ window.__ModuleLoader__.load({
               { type: 'button', className: 'dbmcp-btn is-primary', disabled: busy, onClick: submit },
               busy ? t('action.saving') : t('action.save'),
             ),
-            h(
-              'button',
-              { type: 'button', className: 'dbmcp-btn', disabled: busy, onClick: props.onCancel },
-              t('action.cancel'),
-            ),
           ),
         ),
       )
@@ -1603,7 +1611,6 @@ window.__ModuleLoader__.load({
             { type: 'button', className: 'dbmcp-btn is-primary', disabled: busy || selected.length === 0, onClick: runImport },
             busy ? t('action.importing') : `${t('action.importSelected')} (${selected.length})`,
           ),
-          h('button', { type: 'button', className: 'dbmcp-btn', disabled: busy, onClick: props.onCancel }, t('action.cancel')),
         ),
       )
     }
@@ -2152,7 +2159,27 @@ window.__ModuleLoader__.load({
         'div',
         { className: 'dbmcp-page' },
         h('style', null, CSS),
-        h('header', { className: 'dbmcp-head' }, h('h1', null, t('panel.title')), h('p', { className: 'dbmcp-sub' }, t('panel.subtitle'))),
+        h(
+          'header',
+          { className: 'dbmcp-head' },
+          h(
+            'h1',
+            null,
+            view.mode === 'list'
+              ? t('panel.title')
+              : h(
+                  'button',
+                  {
+                    type: 'button',
+                    className: 'dbmcp-title-switch',
+                    title: t('panel.title'),
+                    onClick: () => setView({ mode: 'list' }),
+                  },
+                  t('panel.title'),
+                ),
+          ),
+          h('p', { className: 'dbmcp-sub' }, t('panel.subtitle')),
+        ),
         view.mode === 'list'
           ? null
           : h(Breadcrumbs, {
