@@ -44,7 +44,6 @@ window.__ModuleLoader__.load({
         'action.delete': 'Delete',
         'action.deleteConfirm': 'Delete for real',
         'action.makeDefault': 'Make default',
-        'action.back': 'Back to list',
         'action.importSelected': 'Import selected',
         'action.importing': 'Importing…',
         'state.connected': 'connected',
@@ -182,7 +181,6 @@ window.__ModuleLoader__.load({
         'action.delete': '删除',
         'action.deleteConfirm': '确认删除',
         'action.makeDefault': '设为默认',
-        'action.back': '返回列表',
         'action.importSelected': '导入所选',
         'action.importing': '导入中…',
         'state.connected': '已连接',
@@ -333,6 +331,39 @@ window.__ModuleLoader__.load({
         flex-wrap: wrap;
         gap: 10px;
         margin: 18px 0;
+      }
+      .dbmcp-crumbs {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin: 14px 0 0;
+        font-size: 13px;
+      }
+      .dbmcp-crumb {
+        appearance: none;
+        border: 0;
+        background: none;
+        padding: 0;
+        font: inherit;
+        color: var(--dsw-alias-brand-primary);
+        cursor: pointer;
+        border-radius: 4px;
+      }
+      .dbmcp-crumb:hover {
+        text-decoration: underline;
+      }
+      .dbmcp-crumb.is-current {
+        color: var(--dsw-alias-label-primary);
+        cursor: default;
+        font-weight: 500;
+        text-decoration: none;
+      }
+      .dbmcp-crumb-sep {
+        color: var(--dsw-alias-label-secondary);
+      }
+      .dbmcp-schema-head {
+        margin-bottom: 10px;
       }
       .dbmcp-btn {
         appearance: none;
@@ -1739,14 +1770,32 @@ window.__ModuleLoader__.load({
       return h(
         'div',
         { className: 'dbmcp-schema-wrap' },
-        h(
-          'div',
-          { className: 'dbmcp-toolbar' },
-          h('button', { type: 'button', className: 'dbmcp-btn', onClick: onBack }, t('action.back')),
-          h('span', { className: 'dbmcp-hint' }, fmt(t('schema.title'), { name: source.name || source.id })),
-        ),
+        h('div', { className: 'dbmcp-schema-head' }, h('span', { className: 'dbmcp-hint' }, fmt(t('schema.title'), { name: source.name || source.id }))),
         content,
       )
+    }
+
+    function crumbLabel(t, view) {
+      if (view.mode === 'schema' && view.source) return view.source.name || view.source.id
+      if (view.mode === 'create') return t('action.new')
+      if (view.mode === 'edit' && view.source) return fmt(t('form.edit'), { name: view.source.name || view.source.id })
+      if (view.mode === 'import') return t('action.import')
+      return t('panel.title')
+    }
+
+    function Breadcrumbs({ t, trail }) {
+      const items = []
+      trail.forEach((step, index) => {
+        if (index > 0) items.push(h('span', { key: `sep-${index}`, className: 'dbmcp-crumb-sep' }, '/'))
+        if (typeof step.onSelect === 'function') {
+          items.push(
+            h('button', { key: `step-${index}`, type: 'button', className: 'dbmcp-crumb', onClick: step.onSelect }, step.label),
+          )
+        } else {
+          items.push(h('span', { key: `step-${index}`, className: 'dbmcp-crumb is-current' }, step.label))
+        }
+      })
+      return h('nav', { className: 'dbmcp-crumbs', 'aria-label': t('panel.title') }, items)
     }
 
     function MainPanel() {
@@ -2104,6 +2153,15 @@ window.__ModuleLoader__.load({
         { className: 'dbmcp-page' },
         h('style', null, CSS),
         h('header', { className: 'dbmcp-head' }, h('h1', null, t('panel.title')), h('p', { className: 'dbmcp-sub' }, t('panel.subtitle'))),
+        view.mode === 'list'
+          ? null
+          : h(Breadcrumbs, {
+              t,
+              trail: [
+                { label: t('panel.title'), onSelect: () => setView({ mode: 'list' }) },
+                { label: crumbLabel(t, view) },
+              ],
+            }),
         h(
           'div',
           { className: 'dbmcp-toolbar' },
@@ -2168,7 +2226,7 @@ window.__ModuleLoader__.load({
     return {
       inject: ['slots', 'locale'],
       /** Parser and components exposed for the offline tests in dev/. */
-      __test: { parseConnectionText, uniqueId, slugId, canonicalUrl, emptyDraft, draftFromSource, SourceForm, SchemaView, MainPanel },
+      __test: { parseConnectionText, uniqueId, slugId, canonicalUrl, emptyDraft, draftFromSource, SourceForm, SchemaView, Breadcrumbs, MainPanel },
       apply(ctx) {
         localeService = ctx.locale
         ctx.effect(() => ctx.locale.register(NS, 'en', DICT.en))

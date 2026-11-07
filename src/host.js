@@ -33,7 +33,7 @@ const { createBridge } = await import(new URL(`./tools.js?v=${GENERATION}`, impo
 
 const API_PREFIX = '/plugins/db-mcp/api'
 const PLUGIN_NAME = 'dsh-db-mcp'
-const PLUGIN_VERSION = '0.5.0'
+const PLUGIN_VERSION = '0.5.1'
 const SCHEMA_VERSION = 1
 const REGISTRY_FILE = 'datasources.json'
 const SECRETS_FILE = 'secrets.json'
@@ -450,10 +450,41 @@ function parseOracleUrl(url) {
   return { host: match[1], port: match[2] ? Number(match[2]) : 1521, serviceName: match[3] }
 }
 
+/**
+ * DBeaver stores a connection either field-by-field (host/port/database) or, for
+ * the URL configuration type, only as a JDBC URL — the MySQL connection created
+ * through the driver dialog has just `host`, `port` and the URL, with the
+ * database and the user only inside the URL. Parse it so both shapes import.
+ */
+function parseJdbcUrl(url) {
+  const text = trimmed(url)
+  if (!text) return null
+  const body = text.replace(/^jdbc:/i, '')
+  const match = /^([a-z0-9+]+):\/\/(?:([^:@/]+)(?::([^@/]*))?@)?(\[[^\]]+\]|[^:/?]+)(?::(\d+))?(?:\/([^?;]*))?/i.exec(body)
+  if (!match) return null
+  return {
+    scheme: match[1].toLowerCase(),
+    user: match[2] ? decodeURIComponent(match[2]) : '',
+    password: match[3] ? decodeURIComponent(match[3]) : '',
+    host: match[4].replace(/^\[|\]$/g, ''),
+    port: match[5] ? Number(match[5]) : null,
+    database: match[6] ? decodeURIComponent(match[6].split(';')[0]) : '',
+  }
+}
+
 function mapDBeaverConnection(connection) {
   const cfg = cleanRecord(connection && connection.configuration)
   const kind = mapDBeaverProvider(connection && connection.provider, connection && connection.driver)
   if (!kind) return { ok: false, reason: `unsupported provider: ${(connection && connection.provider) || 'unknown'}` }
+  const fromUrl = parseJdbcUrl(cfg.url)
+  // With configurationType=URL the URL is what DBeaver actually connects with,
+  // so its values win over the (possibly stale) form fields.
+  const preferUrl = /^url$/i.test(trimmed(cfg.configurationType))
+  const pick = (fromUrlValue, fieldValue, fallback = '') => {
+    const url = fromUrlValue === undefined || fromUrlValue === null ? '' : fromUrlValue
+    const field = typeof fieldValue === 'string' ? fieldValue.trim() : fieldValue
+    return (preferUrl ? url || field : field || url) ?? fallback
+  }
 
   if (kind === 'sqlite') {
     const file = trimmed(cfg.database) || trimmed(cfg.url).replace(/^jdbc:sqlite:/i, '')
@@ -462,10 +493,10 @@ function mapDBeaverConnection(connection) {
   }
 
   if (kind === 'oracle') {
-    const fromUrl = parseOracleUrl(cfg.url)
-    const host = trimmed(cfg.host) || (fromUrl && fromUrl.host) || ''
-    const port = Number(cfg.port) || (fromUrl && fromUrl.port) || 1521
-    const serviceName = trimmed(cfg.serviceName) || (fromUrl && fromUrl.serviceName) || ''
+    const thin = parseOracleUrl(cfg.url)
+    const host = pick(thin && thin.host, trimmed(cfg.host))
+    const port = Number(pick(thin && thin.port, Number(cfg.port)) || 0) || 1521
+    const serviceName = trimmed(cfg.serviceName) || (thin && thin.serviceName) || ''
     const sid = trimmed(cfg.sid) || ''
     if (!host || (!serviceName && !sid)) return { ok: false, reason: 'incomplete Oracle host/service in the DBeaver entry' }
     return {
@@ -476,25 +507,37 @@ function mapDBeaverConnection(connection) {
     }
   }
 
-  const host = trimmed(cfg.host)
-  const database = trimmed(cfg.database)
-  if (!host || !database) return { ok: false, reason: 'incomplete host/database in the DBeaver entry' }
+  const host = pick(fromUrl && fromUrl.host, trimmed(cfg.host))
+  const database = pick(fromUrl && fromUrl.database, trimmed(cfg.database))
+  const user = pick(fromUrl && fromUrl.user, trimmed(cfg.user))
+  const port = Number(pick(fromUrl && fromUrl.port, Number(cfg.port)) || 0) || DEFAULT_PORTS[kind]
+  if (!host || !database) {
+    const seen = [
+      `host=${host || '?'}`,
+      `database=${database || '?'}`,
+      `url=${trimmed(cfg.url) || '-'}`,
+    ].join(', ')
+    return { ok: false, reason: `incomplete host/database in the DBeaver entry (${seen})` }
+  }
   return {
     ok: true,
     kind,
     config: {
       host,
-      port: Number(cfg.port) || DEFAULT_PORTS[kind],
+      port,
       database,
-      user: trimmed(cfg.user),
+      user,
       schema: trimmed(cfg.schema),
       sslMode: trimmed(cfg.sslMode),
     },
-    user: trimmed(cfg.user),
+    user,
   }
 }
 
-async function scanDBeaver() {
+async function scanDBeaver(options = {}) {
+  // The scanning endpoint must never hand a password to the page, but the
+  // import path needs it to seed secrets.json, so it is opt-in here.
+  const withSecrets = options.withSecrets === true
   const roots = dbeaverRoots()
   const files = []
   for (const root of roots) {
@@ -547,17 +590,21 @@ async function scanDBeaver() {
         continue
       }
       const credential = credentials ? pickCredential(credentials[id]) : null
+      const config = { ...mapped.config }
+      const credentialUser = (credential && credential.user) || ''
+      if (!config.user && credentialUser) config.user = credentialUser
       items.push({
         id,
         name: (connection && connection.name) || id,
         provider: (connection && connection.provider) || null,
         driver: (connection && connection.driver) || null,
         kind: mapped.kind,
-        config: mapped.config,
-        user: mapped.user || (credential && credential.user) || '',
-        target: describeTarget(mapped.kind, mapped.config),
+        config,
+        user: config.user || '',
+        target: describeTarget(mapped.kind, config),
         hasPassword: Boolean(credential && credential.password),
         importable: true,
+        ...(withSecrets && credential && credential.password ? { password: credential.password } : {}),
       })
     }
     sources.push({ file, credentialsFile, credentialsFound: Boolean(credentials), connections: items })
@@ -1012,7 +1059,7 @@ export function createHost(options = {}) {
   async function importDatasources(payload) {
     const ids = Array.isArray(payload.ids) ? payload.ids.map((id) => trimmed(id)).filter(Boolean) : []
     if (ids.length === 0) return { status: 400, body: { ok: false, error: 'ids is required' } }
-    const scan = await scanDBeaver()
+    const scan = await scanDBeaver({ withSecrets: true })
     const available = scan.sources.flatMap((source) =>
       source.connections.filter((item) => item.importable).map((item) => ({ ...item })),
     )
@@ -1022,6 +1069,7 @@ export function createHost(options = {}) {
     const { secrets } = await readSecrets()
     const imported = []
     const failed = []
+    const warnings = []
 
     for (const id of ids) {
       const found = available.find((item) => item.id === id)
@@ -1029,7 +1077,11 @@ export function createHost(options = {}) {
         failed.push({ id, error: 'not found in DBeaver' })
         continue
       }
-      const slug = id.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 32) || 'imported'
+      const slug = (trimmed(found.name) || id)
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 32) || 'imported'
       let candidate = slug
       let counter = 2
       while (list.some((item) => item.id === candidate)) {
@@ -1050,6 +1102,18 @@ export function createHost(options = {}) {
       }
       list.push(profile)
       if (found.password) secrets[candidate] = { password: found.password }
+      if (profile.kind !== 'sqlite' && !trimmed(profile.config && profile.config.user)) {
+        warnings.push({
+          id: candidate,
+          message: 'DBeaver stored no user for this connection; open Edit and fill it in',
+        })
+      }
+      if (profile.kind !== 'sqlite' && found.hasPassword === false) {
+        warnings.push({
+          id: candidate,
+          message: 'DBeaver did not save a password for this connection; the source was imported without one',
+        })
+      }
       imported.push({ ...publicProfile(profile, secrets), sourceId: id })
     }
 
@@ -1063,6 +1127,7 @@ export function createHost(options = {}) {
         ok: failed.length === 0,
         imported,
         failed,
+        warnings,
         datasources: list.map((item) => publicProfile(item, secrets)),
       },
     }
@@ -1179,6 +1244,7 @@ export function createHost(options = {}) {
   return {
     version: PLUGIN_VERSION,
     handle,
+    __test: { parseJdbcUrl, mapDBeaverConnection },
     dispose: async () => {
       await bridge.dispose()
     },

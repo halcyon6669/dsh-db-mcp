@@ -169,7 +169,20 @@ if (schemaView) {
     schemaView,
     (node) => node.type === 'button' && String(node.children[0]) === 'action.back',
   )
-  check('schema view: back button present', backButton.length === 1, `got ${backButton.length}`)
+  check('schema view: no page-level back button (breadcrumb owns navigation)', backButton.length === 0, `got ${backButton.length}`)
+}
+
+const { Breadcrumbs } = mod.__test
+const crumbs = render('breadcrumbs', () =>
+  Breadcrumbs({ t, trail: [{ label: 'panel.title', onSelect: noop }, { label: 'form.new' }] }),
+)
+if (crumbs) {
+  const nav = collect(crumbs, (node) => node.type === 'nav')
+  const links = collect(crumbs, (node) => node.type === 'button' && node.props.className === 'dbmcp-crumb')
+  const current = collect(crumbs, (node) => node.type === 'span' && node.props.className === 'dbmcp-crumb is-current')
+  check('breadcrumbs: nav rendered', nav.length === 1)
+  check('breadcrumbs: root step is a button', links.length === 1)
+  check('breadcrumbs: current step is plain text', current.length === 1)
 }
 
 const total = passed + failures.length

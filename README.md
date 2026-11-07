@@ -135,6 +135,19 @@ see `Tatsh/dbeaver-creds`). A workspace that never saved passwords simply
 imports the connection with an empty password, which the UI shows as
 `no password`.
 
+Connections created through the DBeaver driver dialog carry only a JDBC URL
+(`configurationType: URL`) — no `database` field at all and no `user`. The
+importer therefore parses `jdbc:mysql://host:port/db`,
+`jdbc:postgresql://…` and `jdbc:oracle:thin:@…` for whatever the form fields
+omit, and takes the user from the decrypted credentials when it is stored
+there. The imported source is named after the DBeaver connection name (slugged
+into an id), keeps `readOnly: true`, and gets the saved password copied into
+`secrets.json`. Anything still missing is reported in `warnings`.
+
+The panel navigates with breadcrumbs (`数据库 / 新建数据源`): the trailing step
+is plain text, every earlier step is a link back, and no page needs a separate
+"back to list" button.
+
 ## Test databases in Docker
 
 Nothing has to be installed on the host; every engine below is a throwaway
@@ -190,10 +203,10 @@ open reads the live catalog.
 ## Development
 
 ```
-node dev/selftest.mjs     # mounts src/host.js on a throwaway port, 26 checks
+node dev/selftest.mjs     # mounts src/host.js on a throwaway port, 29 checks
 node dev/shims.test.mjs   # mounts index.js, checks routes, /reload, tool publication
 node dev/parse.test.mjs   # 24 checks: connection-string parser (DSN/JDBC/TNS/paths)
-node dev/render.test.mjs  # 28 checks: components render with a stub React
+node dev/render.test.mjs  # 32 checks: components render with a stub React
 node dev/i18n.test.mjs    # 12 checks: en/zh parity, no dead keys, no stray copy
 node dev/p5.test.mjs      # 15 checks: settings, audit log, python environment
 node dev/mcp.test.mjs     # 19 checks: real Python server over stdio, real SQLite + Oracle logins

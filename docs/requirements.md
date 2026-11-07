@@ -763,3 +763,54 @@ PostgreSQL/MySQL/Oracle 只做 TCP 端口探测，无法证明口令与服务的
   （`.venv/`、`logs/`、`__pycache__/`、`node_modules/` 由 `.gitignore` 排除）。
 - 版本同步：`node dev/bump.mjs <x.y.z>` 同时改 `package.json` 与
   `src/host.js` 的 `PLUGIN_VERSION`，避免手工改版本号时的正则事故。
+
+## 21. 0.5.1：DBeaver 导入补齐与面包屑导航
+
+### 21.1 问题
+
+- 通过 DBeaver「驱动属性 / JDBC URL」对话框建的连接，`data-sources.json` 里只有
+  `configuration.host`、`configuration.port`、`configuration.url`，**没有 `database`，
+  也没有 `user`**（`configurationType: "URL"`）。旧实现只读字段，于是导入列表里显示
+  `incomplete host/database in the DBeaver entry`，无法导入。
+- 即使导入成功，口令也进不了 `secrets.json`：`scanDBeaver()` 只回 `hasPassword` 布尔值，
+  而 `importDatasources()` 读的是 `found.password`，恒为 `undefined`。
+
+### 21.2 服务端（0.5.1）
+
+- 新增 `parseJdbcUrl(url)`：去掉 `jdbc:` 前缀后按
+  `scheme://[user[:password]@]host[:port][/database]` 解析，支持 IPv6 方括号主机与
+  `;param=value` 尾巴。
+- `mapDBeaverConnection()` 改为「字段 + URL 合并」：`configurationType === 'URL'` 时 URL
+  的值优先，否则字段优先、URL 兜底；host / port / database / user 四者都按这个顺序取。
+  Oracle 走 `parseOracleUrl()`，逻辑不变。
+- 错误文案带上实际读到的值：
+  `incomplete host/database in the DBeaver entry (host=?, database=?, url=…)`。
+- `scanDBeaver({ withSecrets })`：只有导入路径传 `withSecrets: true`，扫描接口永远不会把
+  口令送回浏览器；用户字段缺失时用 `credentials-config.json` 里的 `user` 回填。
+- `importDatasources()` 生成的 id 改用连接**显示名**做 slug（`mysql` 而不是
+  `mysql8-1a1b66e47b5-12104…`），冲突时照旧加 `-2`、`-3`。
+- 响应新增 `warnings: [{id, message}]`：没有 user、没有保存口令时给出可操作的提示。
+- `createHost()` 的返回值新增 `__test: { parseJdbcUrl, mapDBeaverConnection }` 供自检调用。
+
+### 21.3 客户端（0.5.1）
+
+- 新增 `Breadcrumbs` 组件与 `crumbLabel(t, view)`：进入新建/编辑/导入/结构视图后，标题下方
+  显示 `数据库 / 新建数据源` 这类面包屑；最后一步是纯文本，前面的每一步都是可点击的
+  `button.dbmcp-crumb`。
+- 删除 `SchemaView` 的「返回列表」按钮与对应的 `action.back` 词条（i18n 死键检查要求
+  词条与用法一一对应），返回动作统一由面包屑承担。
+- 新增样式 `.dbmcp-crumbs`、`.dbmcp-crumb`、`.dbmcp-crumb.is-current`、
+  `.dbmcp-crumb-sep`、`.dbmcp-schema-head`，颜色全部走 `--dsw-alias-*`。
+
+### 21.4 验证
+
+- `dev/selftest.mjs` 增加 3 项（URL-only 条目可映射、host/port/database 解析、
+  `jdbc:postgresql://` 的 user/port/database）→ 29/29。
+- `dev/render.test.mjs` 把「返回按钮存在」改为「不再有页面级返回按钮」并新增 3 项
+  面包屑断言 → 32/32。
+- 线上：`POST /reload` → `0.5.1`；`GET /dbeaver/scan` 的 mysql 条目变为
+  `user=demo, hasPassword=true, target=127.0.0.1:3306 / demo`；
+  `POST /dbeaver/import {ids:[…]}` 建出 `id=mysql` 的源（`hasSecret: true`），
+  `POST /datasources/test {id:'mysql'}` 返回
+  `MySQL 8.0.46 · demo@%@demo · select version() ok`。
+- 其余套件全绿：parse 24/24、render 32/32、i18n 12/12、p5 15/15、mcp 19/19、shims ok。

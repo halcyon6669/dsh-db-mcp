@@ -85,6 +85,32 @@ try {
   const all = (scan.body.sources || []).flatMap((source) => source.connections)
   check('dbeaver scan finds the sample connection', all.some((entry) => entry.kind === 'sqlite'), `${all.length} connection(s)`)
 
+  // A connection saved through the DBeaver driver dialog carries only the JDBC
+  // URL; host/database/user must come out of it.
+  const urlOnly = host.__test.mapDBeaverConnection({
+    provider: 'mysql',
+    driver: 'mysql8',
+    name: 'mysql',
+    configuration: {
+      host: 'localhost',
+      port: '3306',
+      url: 'jdbc:mysql://127.0.0.1:3306/demo',
+      configurationType: 'URL',
+    },
+  })
+  check('dbeaver URL-only entry maps', urlOnly.ok === true, urlOnly.reason)
+  check(
+    'dbeaver URL-only entry reads host/port/database',
+    urlOnly.config?.host === '127.0.0.1' && urlOnly.config?.port === 3306 && urlOnly.config?.database === 'demo',
+    JSON.stringify(urlOnly.config),
+  )
+  const pgUrl = host.__test.parseJdbcUrl('jdbc:postgresql://alice@db.internal:6543/orders?sslmode=require')
+  check(
+    'jdbc url parse keeps user/port/database',
+    pgUrl?.host === 'db.internal' && pgUrl?.port === 6543 && pgUrl?.database === 'orders' && pgUrl?.user === 'alice',
+    JSON.stringify(pgUrl),
+  )
+
   const importable = all.find((entry) => entry.importable && entry.kind === 'sqlite')
   if (importable) {
     const imported = await call('POST', '/dbeaver/import', { ids: [importable.id] })
