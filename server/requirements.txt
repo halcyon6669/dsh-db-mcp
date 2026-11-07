@@ -1,0 +1,10 @@
+# Installed into <DSH_HOME>/db-mcp/.venv by the Database panel (P5 will do this
+# automatically). Until then:
+#
+#   <DSH_HOME>\db-mcp\.venv\Scripts\python.exe -m pip install -r server\requirements.txt
+#
+# mcp 1.x is required: 2.x renamed FastMCP to MCPServer and moved the module.
+mcp>=1.9,<2
+psycopg[binary]>=3.2
+PyMySQL>=1.1
+oracledb>=2.0

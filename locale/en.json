@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Database",
+    "description": "Data-source management for databases exposed to the agent through a Python MCP server."
+  }
+}

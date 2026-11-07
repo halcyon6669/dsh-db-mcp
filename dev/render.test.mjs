@@ -1,0 +1,170 @@
+// Render smoke test: runs the React components of client.js with a stub React.
+// It cannot check pixels, but it does prove that every component executes
+// without throwing and produces the expected input controls.
+
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const here = path.dirname(fileURLToPath(import.meta.url))
+const source = fs.readFileSync(path.join(here, '..', 'client.js'), 'utf8')
+
+const ReactStub = {
+  Fragment: 'fragment',
+  // Like React: a function component is invoked and its output takes its place.
+  createElement: (type, props, ...children) => {
+    const element = { type, props: props || {}, children }
+    if (typeof type === 'function') {
+      return type({ ...(props || {}), children: children.length <= 1 ? children[0] : children })
+    }
+    return element
+  },
+  useState: (value) => [typeof value === 'function' ? value() : value, () => {}],
+  useEffect: () => {},
+  useCallback: (fn) => fn,
+  useMemo: (fn) => fn(),
+  useRef: (value) => ({ current: value }),
+  useSyncExternalStore: (subscribe, getSnapshot) => getSnapshot(),
+}
+
+let captured = null
+const fakeWindow = { __ModuleLoader__: { load: (mod) => { captured = mod } } }
+const requireShim = (id) => {
+  if (id === 'react') return ReactStub
+  throw new Error(`unexpected require: ${id}`)
+}
+
+new Function('window', 'require', source)(fakeWindow, requireShim)
+const mod = captured.factory(requireShim)
+const { SourceForm, MainPanel, emptyDraft, draftFromSource } = mod.__test
+
+const t = (key) => key
+
+function walk(node, visit) {
+  if (node == null || typeof node !== 'object') return
+  visit(node)
+  for (const child of node.children || []) {
+    if (Array.isArray(child)) child.forEach((item) => walk(item, visit))
+    else walk(child, visit)
+  }
+}
+
+function collect(tree, predicate) {
+  const found = []
+  walk(tree, (node) => {
+    if (predicate(node)) found.push(node)
+  })
+  return found
+}
+
+let passed = 0
+const failures = []
+function check(name, condition, extra) {
+  if (condition) {
+    passed += 1
+    return
+  }
+  failures.push(`${name}${extra ? ` — ${extra}` : ''}`)
+}
+
+function render(name, factory, options) {
+  let tree
+  try {
+    tree = factory()
+  } catch (error) {
+    check(name, false, String((error && error.message) || error))
+    return null
+  }
+  check(name, tree != null && typeof tree === 'object')
+  if (!tree || !options) return tree
+  if (options.inputs != null) {
+    const inputs = collect(tree, (node) => node.type === 'input')
+    check(`${name}: input count`, inputs.length === options.inputs, `got ${inputs.length}`)
+  }
+  if (options.selects != null) {
+    const selects = collect(tree, (node) => node.type === 'select')
+    check(`${name}: select count`, selects.length === options.selects, `got ${selects.length}`)
+  }
+  if (options.details != null) {
+    const details = collect(tree, (node) => node.type === 'details')
+    check(`${name}: advanced block`, (details.length > 0) === options.details, `got ${details.length}`)
+  }
+  for (const label of options.labels || []) {
+    const found = collect(tree, (node) => node.type === 'label' && String(node.children[0]) === label)
+    check(`${name}: label ${label}`, found.length > 0)
+  }
+  return tree
+}
+
+const noop = () => {}
+
+const sqliteTree = render(
+  'create form (sqlite)',
+  () => SourceForm({ t, draft: emptyDraft(), editing: null, takenIds: [], onSaved: noop, onCancel: noop }),
+  {
+    inputs: 8,
+    selects: 1,
+    details: true,
+    labels: ['form.paste', 'form.user', 'form.password', 'form.file'],
+  },
+)
+if (sqliteTree) {
+  const summary = collect(sqliteTree, (node) => node.type === 'summary')
+  check('create form: more-settings summary', summary.length === 1 && String(summary[0].children[0]) === 'form.more')
+}
+
+const pgDraft = emptyDraft()
+pgDraft.kind = 'postgres'
+pgDraft.config = { ...pgDraft.config, host: 'localhost', port: '5432', database: 'app', user: 'alice' }
+render(
+  'create form (postgres)',
+  () => SourceForm({ t, draft: pgDraft, editing: null, takenIds: ['app'], onSaved: noop, onCancel: noop }),
+  { inputs: 11, selects: 2, details: true, labels: ['form.host', 'form.port', 'form.database'] },
+)
+
+const oracleDraft = emptyDraft()
+oracleDraft.kind = 'oracle'
+oracleDraft.config = { ...oracleDraft.config, host: 'ora', port: '1521', serviceName: 'XEPDB1', user: 'system' }
+render(
+  'create form (oracle)',
+  () => SourceForm({ t, draft: oracleDraft, editing: null, takenIds: [], onSaved: noop, onCancel: noop }),
+  { labels: ['form.serviceName', 'form.sid'] },
+)
+
+const editingDraft = draftFromSource({
+  id: 'chinook',
+  name: 'Chinook',
+  kind: 'sqlite',
+  readOnly: true,
+  hasSecret: false,
+  config: { file: 'C:\\data\\chinook.db' },
+})
+const editTree = render(
+  'edit form (sqlite)',
+  () => SourceForm({ t, draft: editingDraft, editing: { id: 'chinook' }, takenIds: ['chinook'], onSaved: noop, onCancel: noop }),
+  { labels: ['form.paste', 'form.file'] },
+)
+if (editTree) {
+  const idInput = collect(editTree, (node) => node.type === 'input' && node.props.disabled === true)
+  check('edit form: identifier is locked', idInput.length === 1, `got ${idInput.length}`)
+  const firstInput = collect(editTree, (node) => node.type === 'input')[0]
+  check(
+    'edit form: connection box is prefilled',
+    Boolean(firstInput) && String(firstInput.props.value || '').includes('chinook.db'),
+    JSON.stringify(firstInput && firstInput.props.value),
+  )
+}
+
+const panel = render('main panel', () => MainPanel({ t: (key) => key, useResource: undefined, useWorkspaces: undefined }))
+if (panel) {
+  const header = collect(panel, (node) => node.type === 'h1')
+  check('main panel: title rendered', header.length === 1)
+}
+
+const total = passed + failures.length
+if (failures.length > 0) {
+  console.log(`render.test: ${passed}/${total} passed`)
+  for (const failure of failures) console.log(`  FAIL ${failure}`)
+  process.exit(1)
+}
+console.log(`render.test: ${passed}/${total} passed`)

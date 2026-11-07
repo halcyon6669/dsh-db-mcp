@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "数据库",
+    "description": "通过 Python MCP 服务向 AI 暴露数据库，并在这里管理数据源连接。"
+  }
+}

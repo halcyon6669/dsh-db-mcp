@@ -1,0 +1,63 @@
+{
+  "name": "dsh-db-mcp",
+  "version": "0.5.0",
+  "private": true,
+  "description": "DSH database plugin: a data-source management panel plus a Python MCP server that exposes those sources to the agent.",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "mcp",
+    "database",
+    "postgresql",
+    "mysql",
+    "oracle",
+    "sqlite"
+  ],
+  "license": "MIT",
+  "author": "dsh-db-mcp contributors",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/halcyon6669/dsh-db-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/halcyon6669/dsh-db-mcp/issues"
+  },
+  "homepage": "https://github.com/halcyon6669/dsh-db-mcp#readme",
+  "type": "module",
+  "icon": "icon.svg",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "src/*.js",
+    "client.js",
+    "locale/*.json",
+    "icon.svg",
+    "cordis.patch.yml",
+    "server/*.py",
+    "server/requirements.txt",
+    "docs/*.md",
+    "LICENSE",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node dev/selftest.mjs && node dev/shims.test.mjs && node dev/parse.test.mjs && node dev/render.test.mjs && node dev/i18n.test.mjs && node dev/p5.test.mjs",
+    "test:mcp": "node dev/mcp.test.mjs"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-locale"
+      ]
+    }
+  }
+}
