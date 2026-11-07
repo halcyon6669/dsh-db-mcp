@@ -751,7 +751,7 @@ PostgreSQL/MySQL/Oracle 只做 TCP 端口探测，无法证明口令与服务的
   - Oracle：`/schema?datasource=oracle-demo` → `EMPLOYEES`；
     `&table=EMPLOYEES` → `ID NUMBER pk / NAME VARCHAR2(60) / DEPT VARCHAR(20)
     / SALARY NUMBER(10,2)`。
-- 其它套件全绿：parse 24/24、render 26/26、i18n 12/12、p5 15/15、mcp 19/19、
+- 其它套件全绿：parse 24/24、render 28/28、i18n 12/12、p5 15/15、mcp 19/19、
   shims ok。
 
 ## 20. 发布（0.5.0）

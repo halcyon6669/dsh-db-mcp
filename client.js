@@ -2168,7 +2168,7 @@ window.__ModuleLoader__.load({
     return {
       inject: ['slots', 'locale'],
       /** Parser and components exposed for the offline tests in dev/. */
-      __test: { parseConnectionText, uniqueId, slugId, canonicalUrl, emptyDraft, draftFromSource, SourceForm, MainPanel },
+      __test: { parseConnectionText, uniqueId, slugId, canonicalUrl, emptyDraft, draftFromSource, SourceForm, SchemaView, MainPanel },
       apply(ctx) {
         localeService = ctx.locale
         ctx.effect(() => ctx.locale.register(NS, 'en', DICT.en))

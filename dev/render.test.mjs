@@ -36,7 +36,7 @@ const requireShim = (id) => {
 
 new Function('window', 'require', source)(fakeWindow, requireShim)
 const mod = captured.factory(requireShim)
-const { SourceForm, MainPanel, emptyDraft, draftFromSource } = mod.__test
+const { SourceForm, SchemaView, MainPanel, emptyDraft, draftFromSource } = mod.__test
 
 const t = (key) => key
 
@@ -159,6 +159,17 @@ const panel = render('main panel', () => MainPanel({ t: (key) => key, useResourc
 if (panel) {
   const header = collect(panel, (node) => node.type === 'h1')
   check('main panel: title rendered', header.length === 1)
+}
+
+const schemaView = render('schema view', () =>
+  SchemaView({ t, source: { id: 'chinook', name: 'Chinook', kind: 'sqlite' }, onBack: noop }),
+)
+if (schemaView) {
+  const backButton = collect(
+    schemaView,
+    (node) => node.type === 'button' && String(node.children[0]) === 'action.back',
+  )
+  check('schema view: back button present', backButton.length === 1, `got ${backButton.length}`)
 }
 
 const total = passed + failures.length
