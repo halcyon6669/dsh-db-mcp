@@ -182,7 +182,7 @@ window.__ModuleLoader__.load({
         'group.new': 'New group',
         'group.newPlaceholder': 'Group name',
         'group.add': 'Add group',
-        'group.rename': 'Rename',
+        'group.renameHint': 'Double-click to rename',
         'group.save': 'Save',
         'group.cancel': 'Cancel',
         'group.delete': 'Delete',
@@ -354,7 +354,7 @@ window.__ModuleLoader__.load({
         'group.new': '新建分组',
         'group.newPlaceholder': '分组名称',
         'group.add': '新建',
-        'group.rename': '重命名',
+        'group.renameHint': '双击重命名',
         'group.save': '保存',
         'group.cancel': '取消',
         'group.delete': '删除',
@@ -852,7 +852,7 @@ window.__ModuleLoader__.load({
       }
       .dbmcp-group-head {
         display: flex;
-        align-items: baseline;
+        align-items: center;
         gap: 8px;
         padding: 0 2px;
         border-bottom: 1px solid var(--dsw-alias-border-l1);
@@ -883,7 +883,16 @@ window.__ModuleLoader__.load({
         display: flex;
         align-items: center;
         gap: 6px;
-        flex: 0 1 320px;
+        flex: 0 1 auto;
+      }
+      .dbmcp-group-edit .dbmcp-input {
+        width: 170px;
+      }
+      .dbmcp-group-edit .dbmcp-btn,
+      .dbmcp-item-rename .dbmcp-btn {
+        flex: 0 0 auto;
+        white-space: nowrap;
+        padding: 3px 10px;
       }
       .dbmcp-group.is-over {
         outline: 1px dashed var(--dsw-alias-brand-primary);
@@ -959,6 +968,19 @@ window.__ModuleLoader__.load({
         font-size: 12px;
         word-break: break-all;
         margin-top: 2px;
+      }
+      .dbmcp-item-name > .is-renamable,
+      .dbmcp-group-name.is-renamable {
+        cursor: text;
+      }
+      .dbmcp-item-rename {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .dbmcp-item-rename .dbmcp-input {
+        flex: 0 0 200px;
+        width: 200px;
       }
       .dbmcp-item-actions {
         display: flex;
@@ -1226,6 +1248,7 @@ window.__ModuleLoader__.load({
         disabled: props.disabled === true,
         title: props.title || undefined,
         onChange: (event) => props.onChange(event.target.value),
+        onKeyDown: props.onKeyDown || undefined,
       })
     }
 
@@ -2128,6 +2151,7 @@ window.__ModuleLoader__.load({
       const [pendingGroupDelete, setPendingGroupDelete] = React.useState(null)
       const [draggingId, setDraggingId] = React.useState(null)
       const [dragOverGroup, setDragOverGroup] = React.useState(null)
+      const [renamingSource, setRenamingSource] = React.useState(null)
 
       /** Switching a tab only swaps the card below; the chrome never moves. */
       const selectTab = (id) => {
@@ -2339,6 +2363,34 @@ window.__ModuleLoader__.load({
         }
       }
 
+      /** A source keeps its id; double-clicking the name only changes the label. */
+      const renameSource = async () => {
+        if (!renamingSource) return
+        const name = String(renamingSource.name || '').trim()
+        const source = sources.find((item) => item.id === renamingSource.id)
+        if (!source || !name) {
+          setRenamingSource(null)
+          return
+        }
+        try {
+          await apiPost('/datasources/save', {
+            id: source.id,
+            name,
+            kind: source.kind,
+            readOnly: source.readOnly,
+            isDefault: source.isDefault,
+            tags: source.tags,
+            group: source.group,
+            config: source.config,
+          })
+          setRenamingSource(null)
+          setNotice({ message: t('notice.saved').replace('{name}', name), isError: false })
+          load()
+        } catch (error) {
+          reportError(error)
+        }
+      }
+
       const removeGroup = async (name) => {
         if (pendingGroupDelete !== name) {
           setPendingGroupDelete(name)
@@ -2405,15 +2457,52 @@ window.__ModuleLoader__.load({
           ),
           h(
             'div',
-            { className: 'dbmcp-item-main', onClick: () => toggleSelected(source.id) },
-            h(
-              'div',
-              { className: 'dbmcp-item-name' },
-              h('span', null, source.name || source.id),
-              h('span', { className: 'dbmcp-pill' }, source.kind),
-              source.isDefault ? h('span', { className: 'dbmcp-pill' }, t('sources.default')) : null,
-              h('span', { className: 'dbmcp-pill' }, source.readOnly ? t('sources.readonly') : t('sources.readwrite')),
-            ),
+            { className: 'dbmcp-item-main' },
+            renamingSource && renamingSource.id === source.id
+              ? h(
+                  'form',
+                  {
+                    className: 'dbmcp-item-rename',
+                    onClick: (event) => event.stopPropagation(),
+                    onSubmit: (event) => {
+                      event.preventDefault()
+                      void renameSource()
+                    },
+                  },
+                  h(TextInput, {
+                    value: renamingSource.name,
+                    onChange: (value) => setRenamingSource({ id: source.id, name: value }),
+                    autoFocus: true,
+                    onKeyDown: (event) => {
+                      if (event.key === 'Escape') setRenamingSource(null)
+                    },
+                  }),
+                  h('button', { type: 'submit', className: 'dbmcp-btn is-small is-primary' }, t('group.save')),
+                  h(
+                    'button',
+                    { type: 'button', className: 'dbmcp-btn is-small', onClick: () => setRenamingSource(null) },
+                    t('group.cancel'),
+                  ),
+                )
+              : h(
+                  'div',
+                  { className: 'dbmcp-item-name' },
+                  h(
+                    'span',
+                    {
+                      className: 'is-renamable',
+                      title: t('group.renameHint'),
+                      onDoubleClick: (event) => {
+                        event.stopPropagation()
+                        setRenamingSource({ id: source.id, name: source.name || source.id })
+                      },
+                    },
+                    source.name || source.id,
+                  ),
+                  h('span', { className: 'dbmcp-pill' }, source.kind),
+                  source.isDefault ? h('span', { className: 'dbmcp-pill' }, t('sources.default')) : null,
+                  h('span', { className: 'dbmcp-pill' }, source.readOnly ? t('sources.readonly') : t('sources.readwrite')),
+                ),
             h('div', { className: 'dbmcp-item-target' }, [source.target, source.id].filter(Boolean).join(' · ')),
             h(
               'div',
@@ -2503,22 +2592,30 @@ window.__ModuleLoader__.load({
                     value: editingGroup.name,
                     onChange: (value) => setEditingGroup({ from: name, name: value }),
                     autoFocus: true,
+                    onKeyDown: (event) => {
+                      if (event.key === 'Escape') setEditingGroup(null)
+                    },
                   }),
                   h('button', { type: 'submit', className: 'dbmcp-btn is-small is-primary' }, t('group.save')),
                   h('button', { type: 'button', className: 'dbmcp-btn is-small', onClick: () => setEditingGroup(null) }, t('group.cancel')),
                 )
-              : h('span', { className: 'dbmcp-group-name' }, name || t('group.unassigned')),
+              : h(
+                  'span',
+                  {
+                    className: 'dbmcp-group-name' + (name ? ' is-renamable' : ''),
+                    title: name ? t('group.renameHint') : undefined,
+                    onDoubleClick: () => {
+                      if (name) setEditingGroup({ from: name, name })
+                    },
+                  },
+                  name || t('group.unassigned'),
+                ),
             h('span', { className: 'dbmcp-hint' }, t('group.count').replace('{n}', String(items.length))),
             name === '' || renaming
               ? null
               : h(
                   'span',
                   { className: 'dbmcp-group-actions' },
-                  h(
-                    'button',
-                    { type: 'button', className: 'dbmcp-btn is-small', onClick: () => setEditingGroup({ from: name, name }) },
-                    t('group.rename'),
-                  ),
                   h(
                     'button',
                     {

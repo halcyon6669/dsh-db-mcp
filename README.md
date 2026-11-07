@@ -223,10 +223,12 @@ open reads the live catalog.
 
 Every source carries an optional **group** label (`group` in the registry,
 editable under *More settings*). Groups are user-owned: type a name in the
-**新建分组** box to create one, rename or delete it from the group header, and drag
-a source row onto a group to move it there (drag it onto **未分组** to clear the
-label). The list renders one section per group, sorted by name with the ungrouped
-sources last; while no group exists the list keeps its flat look.
+**新建分组** box to create one, **double-click a group name to rename it** (or the
+trash button to delete the group), and drag a source row onto a group to move it
+there (drag it onto **未分组** to clear the label). Double-clicking a source name
+renames just that source — its id never changes. The list renders one section per
+group, sorted by name with the ungrouped sources last; while no group exists the
+list keeps its flat look.
 
 Each group header carries a select-all box, so sources inside a group take part in
 bulk work exactly like loose ones. Tick any row (or click its text) to open the

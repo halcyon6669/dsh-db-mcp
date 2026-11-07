@@ -958,3 +958,26 @@ PostgreSQL/MySQL/Oracle 只做 TCP 端口探测，无法证明口令与服务的
 - `dev/selftest.mjs` 新增 5 项断言，共 **46/46**：扫描标记重复、重复导入被跳过、删掉重复项后可再次导入、第二次导入被跳过、`sourceIdentity` 对大小写与端口字符串不敏感。
 - 其余：render 37/37、parse 24/24、i18n 12/12、p5 15/15、mcp 19/19、shims ok。
 - 线上：`GET /dbeaver/scan` 两条连接均为 `alreadyImported: true`（sqlite → `dbeaver-sample-database-sqlite-1`，mysql → `mysql`）。
+
+## 27. 0.6.5：双击重命名（分组与数据源）
+
+### 27.0 0.6.5 修订
+- 首次实现保留了「点正文即选中」，结果是双击组名/数据源名会先切换选中、再进入编辑，观感是「双击只选中了，没重命名」。现已移除行正文的 `onClick`，选中统一由复选框负责。
+
+
+### 27.1 交互
+- 分组头不再有「重命名」按钮，只保留「删除」。双击组名进入内联编辑，回车保存、Esc 取消。
+- 数据源名称同理：双击名称进入内联编辑，只改显示名称，id 不变；提交走 `POST /datasources/save`，其余字段原样带回（口令仍由 secrets.json 持有，不参与往返）。
+- 「未分组」是投放目标，不是真实分组，因此不可重命名。
+- 行正文不再承担「点一下就选中」的职责：选中只走复选框（含组头全选），否则双击必然先触发两次 `click`，与重命名抢事件。
+
+### 27.2 实现
+- `TextInput` 增加 `onKeyDown` 透传，用于 Escape 取消。
+- `renderGroup` 的组名改为 `span.dbmcp-group-name.is-renamable` + `onDoubleClick`，标题提示用 `group.renameHint`。
+- `renderItem` 在 `renamingSource.id === source.id` 时渲染 `form.dbmcp-item-rename`（输入框 + 保存），否则渲染可双击的名称。
+- 新增状态 `renamingSource`；新增 `renameSource()`；CSS 增加 `.is-renamable { cursor: text }` 与 `.dbmcp-item-rename` 布局。
+- 字典：删除 `group.rename`（按钮文案），新增 `group.renameHint`（`Double-click to rename` / `双击重命名`），避免死键。
+
+### 27.3 验证
+- `node --check client.js` 通过；i18n 12/12（无死键）、render 37/37、selftest 46/46、parse 24/24、p5 15/15、shims ok。
+- 版本 0.6.5。
