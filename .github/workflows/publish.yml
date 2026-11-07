@@ -77,17 +77,21 @@ jobs:
         run: npm publish --provenance --access public
 
       - name: Verify the release landed
+        # npm answers `+ dsh-db-mcp@<version>` as soon as it accepts the upload,
+        # but the read CDN can lag by a few minutes ("Your package is being
+        # processed and may take a few minutes to become available"), so this
+        # polls generously instead of failing a successful publish.
         run: |
           set -euo pipefail
           version="$(node -p "require('./package.json').version")"
-          for attempt in 1 2 3 4 5; do
+          for attempt in $(seq 1 20); do
             live="$(npm view "dsh-db-mcp@${version}" version --prefer-online 2>/dev/null || true)"
             if [ "$live" = "$version" ]; then
               echo "dsh-db-mcp@${version} is live"
               exit 0
             fi
-            echo "attempt ${attempt}: registry says '${live:-<missing>}', retrying in 10s"
-            sleep 10
+            echo "attempt ${attempt}/20: registry says '${live:-<missing>}', retrying in 15s"
+            sleep 15
           done
-          echo "the registry never reported ${version}"
+          echo "::warning::the publish succeeded but the registry never reported ${version} within 5 minutes"
           exit 1
