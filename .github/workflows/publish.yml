@@ -42,6 +42,17 @@ jobs:
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
 
+      - name: Set up Python
+        # dev/shims.test.mjs starts the real Python MCP server and asserts that
+        # the eight `mcp__db__*` tools get published, so the runner needs the
+        # interpreter *and* the server's dependencies.
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install the Python server dependencies
+        run: python -m pip install --disable-pip-version-check -r server/requirements.txt
+
       - name: Check the tag matches package.json
         run: |
           set -euo pipefail
