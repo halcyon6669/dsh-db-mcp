@@ -21,6 +21,7 @@ const entry = join(packageDir, 'server', 'main.py')
 
 let pass = 0
 let fail = 0
+let skip = 0
 function check(name, condition, detail = '') {
   if (condition) {
     pass += 1
@@ -29,6 +30,23 @@ function check(name, condition, detail = '') {
     fail += 1
     console.log(`  FAIL ${name}${detail ? ` — ${detail}` : ''}`)
   }
+}
+
+/** The demo Oracle container is not always running; a closed port is a skip, not a failure. */
+async function reachable(host, port) {
+  const { Socket } = await import('node:net')
+  return await new Promise((resolve) => {
+    const socket = new Socket()
+    const done = (value) => {
+      socket.destroy()
+      resolve(value)
+    }
+    socket.setTimeout(1500)
+    socket.once('connect', () => done(true))
+    socket.once('timeout', () => done(false))
+    socket.once('error', () => done(false))
+    socket.connect(port, host)
+  })
 }
 
 const client = new McpClient({
@@ -88,15 +106,23 @@ try {
 
   const oracle = sources.parsed?.datasources?.find((source) => source.kind === 'oracle')
   if (oracle) {
-    const probe = await client.callTool('test_connection', { datasource: oracle.id })
-    check(
-      'test_connection logs in to Oracle',
-      probe.parsed?.ok === true && /Oracle/i.test(String(probe.parsed?.message)),
-      probe.text?.slice(0, 300),
-    )
-    if (probe.parsed?.ok) {
-      const rows = await client.callTool('run_query', { datasource: oracle.id, sql: 'select 1 as n from dual', max_rows: 3 })
-      check('Oracle query returns a row', rows.parsed?.ok === true && rows.parsed?.rows?.length === 1, rows.text?.slice(0, 300))
+    const match = /^([^:]+):(\d+)/.exec(String(oracle.target || ''))
+    const host = match ? match[1] : '127.0.0.1'
+    const port = match ? Number(match[2]) : 1521
+    if (await reachable(host, port)) {
+      const probe = await client.callTool('test_connection', { datasource: oracle.id })
+      check(
+        'test_connection logs in to Oracle',
+        probe.parsed?.ok === true && /Oracle/i.test(String(probe.parsed?.message)),
+        probe.text?.slice(0, 300),
+      )
+      if (probe.parsed?.ok) {
+        const rows = await client.callTool('run_query', { datasource: oracle.id, sql: 'select 1 as n from dual', max_rows: 3 })
+        check('Oracle query returns a row', rows.parsed?.ok === true && rows.parsed?.rows?.length === 1, rows.text?.slice(0, 300))
+      }
+    } else {
+      skip += 1
+      console.log(`  skip test_connection logs in to Oracle — ${host}:${port} is not listening (start the demo container)`)
     }
 
     const inline = await client.callTool('test_connection', {
@@ -117,5 +143,5 @@ try {
   await client.stop()
 }
 
-console.log(`\n${pass} passed, ${fail} failed`)
+console.log(`\n${pass} passed, ${fail} failed${skip ? `, ${skip} skipped` : ''}`)
 process.exit(fail === 0 ? 0 : 1)

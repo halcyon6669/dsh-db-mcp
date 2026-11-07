@@ -814,3 +814,23 @@ PostgreSQL/MySQL/Oracle 只做 TCP 端口探测，无法证明口令与服务的
   `POST /datasources/test {id:'mysql'}` 返回
   `MySQL 8.0.46 · demo@%@demo · select version() ok`。
 - 其余套件全绿：parse 24/24、render 32/32、i18n 12/12、p5 15/15、mcp 19/19、shims ok。
+
+## 22. 0.5.2：标题即导航、去掉取消按钮、改为 Apache-2.0
+
+### 22.1 交互
+
+- 面板标题在非列表视图（新建 / 编辑 / 导入 / 结构）时渲染成 `button.dbmcp-title-switch`，点击回到数据源列表；样式继承 h1 字号，hover 变品牌色，与 dsh-mnemon 的标签式页头一致。
+- 面包屑向标签观感靠拢：`.dbmcp-crumb` 增加 `padding: 4px 2px` 与 2px 透明下边框，当前段用 `border-bottom-color: var(--dsw-alias-brand-primary)` + `font-weight: 500` 表示选中，前面的段落 hover 加下划线。
+- 删除 `SourceForm` 与 `ImportView` 里的「取消」按钮：返回列表统一由标题和面包屑承担，表单一屏内只留主操作，减少一次点击。
+
+### 22.2 许可
+
+- `LICENSE` 换成 Apache License 2.0 原文（11358 字节，无 BOM），`package.json` 的 `license` 字段改为 `Apache-2.0`，README 顶部徽章与 License 段落同步更新。
+- 说明：Apache 软件基金会没有 3.0 版本的 Apache License，当前最新即 2.0，因此按 Apache-2.0 处理。
+
+### 22.3 验证
+
+- `dev/i18n.test.mjs` 12/12（`action.cancel` 词条已随用法一并删除，死键检查仍然通过）。
+- `dev/render.test.mjs` 32/32、`dev/selftest.mjs` 29/29、`parse` 24/24、`p5` 15/15、`shims` ok。
+- `dev/mcp.test.mjs` 19/19：Oracle 段的真实登录改为先探测 `target` 里的 host:port，容器未启动时记为 skip 而不是失败，避免本机环境让整套测试变红。
+- `POST /plugins/db-mcp/api/reload` → `0.5.2`、phase P7。
