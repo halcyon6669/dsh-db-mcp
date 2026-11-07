@@ -169,6 +169,8 @@ if (panel) {
   check('main panel: back-to-chat button', back.length === 1, String(back.length))
   const crumbs = collect(panel, (node) => node.props.className === 'dbmcp-crumbs')
   check('main panel: tabs replace the breadcrumb trail', crumbs.length === 0, String(crumbs.length))
+  const toolbar = collect(panel, (node) => node.props.className === 'dbmcp-toolbar')
+  check('main panel: no second navigation row', toolbar.length === 0, `got ${toolbar.length}`)
 }
 
 const schemaView = render('schema view', () =>

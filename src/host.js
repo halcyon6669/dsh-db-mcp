@@ -33,7 +33,7 @@ const { createBridge } = await import(new URL(`./tools.js?v=${GENERATION}`, impo
 
 const API_PREFIX = '/plugins/db-mcp/api'
 const PLUGIN_NAME = 'dsh-db-mcp'
-const PLUGIN_VERSION = '0.6.2'
+const PLUGIN_VERSION = '0.6.3'
 const SCHEMA_VERSION = 1
 const REGISTRY_FILE = 'datasources.json'
 const SECRETS_FILE = 'secrets.json'
@@ -149,6 +149,10 @@ function publicProfile(profile, secrets) {
 }
 
 /** Validate raw user input, returning { profile, password, error }. */
+function groupName(value) {
+  return typeof value === 'string' ? value.trim().slice(0, 48) : ''
+}
+
 function normalizeInput(input, existing) {
   const raw = cleanRecord(input)
   const kind = trimmed(raw.kind) || (existing && existing.kind) || ''
@@ -701,14 +705,46 @@ export function createHost(options = {}) {
 
   async function readRegistry() {
     const read = await readJson(registryFile)
-    if (read.missing) return { datasources: [], error: null, missing: true }
-    if (read.error) return { datasources: [], error: read.error, missing: false }
+    if (read.missing) return { datasources: [], groups: [], error: null, missing: true }
+    if (read.error) return { datasources: [], groups: [], error: read.error, missing: false }
     const list = read.value && Array.isArray(read.value.datasources) ? read.value.datasources : []
-    return { datasources: list.filter((item) => item && typeof item === 'object'), error: null, missing: false }
+    const declared = read.value && Array.isArray(read.value.groups) ? read.value.groups : []
+    const names = [
+      ...declared.map((name) => groupName(name)),
+      ...list.map((item) => groupName(item && item.group)),
+    ].filter(Boolean)
+    return {
+      datasources: list.filter((item) => item && typeof item === 'object'),
+      groups: [...new Set(names)],
+      error: null,
+      missing: false,
+    }
   }
 
-  async function writeRegistry(datasources) {
-    await writeJsonAtomic(registryFile, { schemaVersion: SCHEMA_VERSION, updatedAt: isoNow(), datasources }, 0o600)
+  /**
+   * Groups are user-created; a group that still holds sources survives even when
+   * the caller does not pass the list again, so every existing write keeps them.
+   */
+  async function writeRegistry(datasources, groups) {
+    let kept = groups
+    if (!Array.isArray(kept)) {
+      const read = await readJson(registryFile)
+      kept = read.value && Array.isArray(read.value.groups) ? read.value.groups : []
+    }
+    const names = [
+      ...kept.map((name) => groupName(name)),
+      ...datasources.map((item) => groupName(item && item.group)),
+    ].filter(Boolean)
+    await writeJsonAtomic(
+      registryFile,
+      {
+        schemaVersion: SCHEMA_VERSION,
+        updatedAt: isoNow(),
+        groups: [...new Set(names)],
+        datasources,
+      },
+      0o600,
+    )
   }
 
   async function readSecrets() {
@@ -850,6 +886,7 @@ export function createHost(options = {}) {
 
   async function health() {
     const listing = await listDatasources()
+    const registry = await readRegistry()
     const python = await detectPython(config, pythonCache)
     const mcpState = bridge.status()
     if (mcpState.phase === 'idle') void ensureMcp()
@@ -873,6 +910,7 @@ export function createHost(options = {}) {
         dbeaverRoots: dbeaverRoots(),
       },
       datasources: listing.datasources,
+      groups: registry.groups || [],
       settings: await readSettings(),
       mcp: {
         serverName: trimmed(config.mcpServerName) || 'db',
@@ -1019,6 +1057,64 @@ export function createHost(options = {}) {
     return {
       status: 200,
       body: { ok: true, action, affected: target.length, datasources: next.map((item) => publicProfile(item, secrets)) },
+    }
+  }
+
+  /**
+   * User-created groups. A group is just a name shared by some sources, so
+   * creating one writes an empty group, renaming rewrites the members and
+   * deleting empties them.
+   */
+  async function listGroups() {
+    const registry = await readRegistry()
+    if (registry.error) return { status: 500, body: { ok: false, error: registry.error } }
+    return { status: 200, body: { ok: true, groups: registry.groups } }
+  }
+
+  async function saveGroup(payload) {
+    const name = groupName(payload.name)
+    const from = groupName(payload.from)
+    if (!name) return { status: 400, body: { ok: false, error: 'group name is required' } }
+    if (name.length > 48) return { status: 400, body: { ok: false, error: 'group name must be at most 48 characters' } }
+
+    const registry = await readRegistry()
+    if (registry.error) return { status: 500, body: { ok: false, error: registry.error } }
+    if (from && from !== name && !registry.groups.includes(from)) {
+      return { status: 404, body: { ok: false, error: `unknown group: ${from}` } }
+    }
+    if (name !== from && registry.groups.includes(name)) {
+      return { status: 400, body: { ok: false, error: `group already exists: ${name}` } }
+    }
+
+    const datasources = from && from !== name
+      ? registry.datasources.map((item) => (groupName(item.group) === from ? { ...item, group: name, updatedAt: isoNow() } : item))
+      : registry.datasources
+    const groups = [...new Set(registry.groups.map((item) => (item === from ? name : item)).concat([name]))]
+    await writeRegistry(datasources, groups)
+    const { secrets } = await readSecrets()
+    return {
+      status: 200,
+      body: { ok: true, groups, datasources: datasources.map((item) => publicProfile(item, secrets)) },
+    }
+  }
+
+  async function deleteGroup(payload) {
+    const name = groupName(payload.name)
+    if (!name) return { status: 400, body: { ok: false, error: 'group name is required' } }
+    const registry = await readRegistry()
+    if (registry.error) return { status: 500, body: { ok: false, error: registry.error } }
+    if (!registry.groups.includes(name)) {
+      return { status: 404, body: { ok: false, error: `unknown group: ${name}` } }
+    }
+    const datasources = registry.datasources.map((item) =>
+      groupName(item.group) === name ? { ...item, group: '', updatedAt: isoNow() } : item,
+    )
+    const groups = registry.groups.filter((item) => item !== name)
+    await writeRegistry(datasources, groups)
+    const { secrets } = await readSecrets()
+    return {
+      status: 200,
+      body: { ok: true, groups, datasources: datasources.map((item) => publicProfile(item, secrets)) },
     }
   }
 
@@ -1247,6 +1343,10 @@ export function createHost(options = {}) {
           const listing = await listDatasources()
           return sendJson(response, 200, { ok: listing.error === null, ...listing })
         }
+        if (route === '/groups') {
+          const result = await listGroups()
+          return sendJson(response, result.status, result.body)
+        }
         if (route === '/dbeaver/scan') return sendJson(response, 200, { ok: true, ...(await scanDBeaver()) })
         if (route === '/schema') {
           const search = new URL(request.url, 'http://localhost').searchParams
@@ -1291,6 +1391,14 @@ export function createHost(options = {}) {
       }
       if (route === '/datasources/bulk') {
         const result = await bulkDatasources(payload)
+        return sendJson(response, result.status, result.body)
+      }
+      if (route === '/groups/save') {
+        const result = await saveGroup(payload)
+        return sendJson(response, result.status, result.body)
+      }
+      if (route === '/groups/delete') {
+        const result = await deleteGroup(payload)
         return sendJson(response, result.status, result.body)
       }
       if (route === '/dbeaver/import') {

@@ -1,4 +1,4 @@
-﻿# dsh-db-mcp
+# dsh-db-mcp
 
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
@@ -197,11 +197,12 @@ The page follows the same chrome as the other first-party panels:
   the `数据库` title, and the connection/version pills;
 - a tab row — **数据源列表 / 新建数据源 / 从 DBeaver 导入 / 运行时诊断 / 审计日志** — with
   the active tab underlined;
-- the action bar under the tabs (new, import, refresh, restart MCP), always visible;
 
 Picking **新建数据源** or **从 DBeaver 导入** swaps only the card below the tabs — the
-masthead, the tabs and the action bar stay put. Editing reuses the **新建数据源** tab;
-the structure browser is a sub-view of **数据源列表** with its own `← 数据源` link.
+masthead and the tabs stay put. Editing reuses the **新建数据源** tab; the structure
+browser is a sub-view of **数据源列表** with its own `← 数据源` link. There is no second
+action bar: **刷新** and **重启 MCP** sit in the source-list card header, and the list
+itself owns the group tools.
 
 ## Schema overview
 The **Structure** button on a source row opens a read-only browser: the tables
@@ -214,23 +215,26 @@ open reads the live catalog.
 ## Groups and bulk actions
 
 Every source carries an optional **group** label (`group` in the registry,
-editable under *More settings*). The list renders one section per group, sorted by
-name with the ungrouped sources last; a source with no group keeps the flat list
-look until at least one group exists.
+editable under *More settings*). Groups are user-owned: type a name in the
+**新建分组** box to create one, rename or delete it from the group header, and drag
+a source row onto a group to move it there (drag it onto **未分组** to clear the
+label). The list renders one section per group, sorted by name with the ungrouped
+sources last; while no group exists the list keeps its flat look.
 
-Tick the checkbox on a row to open the bulk bar: test all selected sources, flip
-them to read-only or writable, move them into a group, or delete them (two-step
-confirmation). Bulk work goes through `POST /datasources/bulk` with
-`{ action: 'test' | 'readOnly' | 'group' | 'delete', ids: [...], … }`, so one
-request does the whole batch and the response carries the refreshed list.
+Each group header carries a select-all box, so sources inside a group take part in
+bulk work exactly like loose ones. Tick any row (or click its text) to open the
+bulk bar: test all selected sources, flip them to read-only or writable, move them
+into a group, or delete them (two-step confirmation). Bulk moves go through
+`POST /datasources/bulk` with `{ action: 'test' | 'readOnly' | 'group' | 'delete', ids: [...], … }`,
+while group CRUD uses `GET /groups`, `POST /groups/save` and `POST /groups/delete`.
 
 ## Development
 
 ```
-node dev/selftest.mjs     # mounts src/host.js on a throwaway port, 36 checks
+node dev/selftest.mjs     # mounts src/host.js on a throwaway port, 42 checks
 node dev/shims.test.mjs   # mounts index.js, checks routes, /reload, tool publication
 node dev/parse.test.mjs   # 24 checks: connection-string parser (DSN/JDBC/TNS/paths)
-node dev/render.test.mjs  # 36 checks: components render with a stub React
+node dev/render.test.mjs  # 37 checks: components render with a stub React
 node dev/i18n.test.mjs    # 12 checks: en/zh parity, no dead keys, no stray copy
 node dev/p5.test.mjs      # 15 checks: settings, audit log, python environment
 node dev/mcp.test.mjs     # 19 checks: real Python server over stdio, real SQLite + Oracle logins

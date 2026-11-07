@@ -28,7 +28,7 @@ function check(name, condition, detail = '') {
     console.log(`  ok   ${name}`)
   } else {
     fail += 1
-    console.log(`  FAIL ${name}${detail ? ` 鈥?${detail}` : ''}`)
+    console.log(`  FAIL ${name}${detail ? ` —${detail}` : ''}`)
   }
 }
 
@@ -122,7 +122,7 @@ try {
       }
     } else {
       skip += 1
-      console.log(`  skip test_connection logs in to Oracle 鈥?${host}:${port} is not listening (start the demo container)`)
+      console.log(`  skip test_connection logs in to Oracle —${host}:${port} is not listening (start the demo container)`)
     }
 
     const inline = await client.callTool('test_connection', {
@@ -138,7 +138,7 @@ try {
   }
 } catch (error) {
   fail += 1
-  console.log(`  FAIL server start 鈥?${error?.stack || error}`)
+  console.log(`  FAIL server start —${error?.stack || error}`)
 } finally {
   await client.stop()
 }

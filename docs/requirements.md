@@ -917,3 +917,23 @@ PostgreSQL/MySQL/Oracle 只做 TCP 端口探测，无法证明口令与服务的
 - `dev/i18n.test.mjs` 12/12（新旧键替换后无死键、中英一致）。
 - 其余不变：selftest 36/36、parse 24/24、p5 15/15、mcp 19/19、shims ok。
 - 线上：`POST /reload` → generation 10、`0.6.2`。
+
+## 25. 0.6.3：去掉第二排按钮、用户自建分组与拖拽
+
+### 25.1 页面只保留一排导航
+- 删除标签行下方的工具栏（新建数据源 / 从 DBeaver 导入 / 刷新 / 重启 MCP）：新建与导入本来就有独立标签页，重复按钮只会让人多点一次。
+- **刷新** 与 **重启 MCP** 移到「数据源列表」卡片头部右侧（`Card` 新增 `actions` 插槽），只有在看得见列表时才出现。
+
+### 25.2 分组归用户所有
+- 注册表新增顶层 `groups` 数组（`schemaVersion` 不变，向后兼容）：`readRegistry()` 返回声明组与数据源 `group` 字段的并集，`writeRegistry(list, groups)` 省略 groups 时保留文件里已有的值。
+- 接口：`GET /groups`、`POST /groups/save`（`{name, from?}`，from 存在即重命名并改写成员）、`POST /groups/delete`（成员回到「未分组」）。
+- 页面：`新建分组` 输入框 + 组头 ✎ 重命名 / 删除（两步确认），空分组也会渲染成一个可投放的区块。
+
+### 25.3 拖拽与组内选择
+- 行 `draggable`，`dragstart` 写入 `text/plain` 的源 id（并用 state 兜底，部分壳会拒绝写 dataTransfer）；组区块 `dragover` 显示虚线高亮、`drop` 调 `POST /datasources/bulk {action:'group'}` 完成移动，「未分组」同样可投放。
+- 组头新增全选复选框，行文本可点击切换选中，因此分组内的数据源和散落的源一样能进入批量操作。
+
+### 25.4 验证
+- `dev/selftest.mjs` 42/42（新增 6 项分组断言）、`dev/render.test.mjs` 37/37（新增「没有第二排导航」断言）、i18n 12/12、parse 24/24、p5 15/15、mcp 17 passed + 1 skipped（Docker 未起，Oracle 段按设计跳过）、shims ok。
+- 线上：`POST /reload` 到 0.6.3，`GET /health` 返回 `groups: ["docker"]`、四个源中三个归入 docker；`/groups/save` 建组、改名、`/groups/delete` 删除均实测通过。
+

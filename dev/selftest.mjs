@@ -190,6 +190,33 @@ try {
       !bulkDelete.body.datasources.some((entry) => entry.id === 'team-db' || entry.id === 'pg1'),
     JSON.stringify(bulkDelete.body.datasources?.map((entry) => entry.id)),
   )
+
+  // Groups are user-created, renameable and deletable, and survive as empty ones.
+  const groupsAfterBulk = await call('GET', '/groups')
+  check('groups list keeps the created group', groupsAfterBulk.body.groups?.includes('ops'), JSON.stringify(groupsAfterBulk.body.groups))
+  const emptyGroup = await call('POST', '/groups/save', { name: 'staging' })
+  check('an empty group can be created', emptyGroup.status === 200 && emptyGroup.body.groups.includes('staging'), emptyGroup.body.error)
+  const duplicateGroup = await call('POST', '/groups/save', { name: 'staging' })
+  check('duplicate group names are rejected', duplicateGroup.status === 400, duplicateGroup.body.error)
+  const renameGroup = await call('POST', '/groups/save', { name: 'operations', from: 'ops' })
+  check(
+    'renaming a group rewrites its members',
+    renameGroup.status === 200 &&
+      renameGroup.body.groups.includes('operations') &&
+      !renameGroup.body.groups.includes('ops') &&
+      renameGroup.body.datasources.every((entry) => entry.group !== 'ops'),
+    JSON.stringify(renameGroup.body.groups),
+  )
+  const dropGroup = await call('POST', '/groups/delete', { name: 'operations' })
+  check(
+    'deleting a group ungroups its sources',
+    dropGroup.status === 200 &&
+      !dropGroup.body.groups.includes('operations') &&
+      dropGroup.body.datasources.every((entry) => !entry.group),
+    JSON.stringify(dropGroup.body.groups),
+  )
+  const unknownGroup = await call('POST', '/groups/delete', { name: 'nope' })
+  check('deleting an unknown group is a 404', unknownGroup.status === 404, unknownGroup.body.error)
 } finally {
   server.close()
   const failed = results.filter((entry) => !entry.ok)

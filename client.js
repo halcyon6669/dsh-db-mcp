@@ -176,6 +176,17 @@ window.__ModuleLoader__.load({
         'form.groupHint': 'Sources sharing a group are listed together',
         'group.unassigned': 'Ungrouped',
         'group.count': '{n}',
+        'group.new': 'New group',
+        'group.newPlaceholder': 'Group name',
+        'group.add': 'Add group',
+        'group.rename': 'Rename',
+        'group.save': 'Save',
+        'group.cancel': 'Cancel',
+        'group.delete': 'Delete',
+        'group.deleteConfirm': 'Delete group?',
+        'group.selectAll': 'Select every source in this group',
+        'group.dragHint': 'Drag onto a group to move it',
+        'group.empty': 'Drop a source here',
         'bulk.selected': '{n} selected',
         'bulk.test': 'Test selected',
         'bulk.readonly': 'Make read-only',
@@ -188,6 +199,9 @@ window.__ModuleLoader__.load({
         'bulk.clear': 'Clear',
         'notice.bulkDone': 'Updated {n} data source(s).',
         'notice.bulkGrouped': 'Moved {n} data source(s) into “{group}”.',
+        'notice.groupSaved': 'Group “{name}” saved.',
+        'notice.groupDeleted': 'Group “{name}” deleted.',
+        'notice.moved': 'Moved into “{group}”.',
         'schema.title': 'Structure of {name}',
         'schema.tables': 'Tables ({n})',
         'schema.pick': 'Pick a table on the left to see its columns.',
@@ -331,6 +345,17 @@ window.__ModuleLoader__.load({
         'form.groupHint': '同一分组的数据源会列在一起',
         'group.unassigned': '未分组',
         'group.count': '{n} 个',
+        'group.new': '新建分组',
+        'group.newPlaceholder': '分组名称',
+        'group.add': '新建',
+        'group.rename': '重命名',
+        'group.save': '保存',
+        'group.cancel': '取消',
+        'group.delete': '删除',
+        'group.deleteConfirm': '确认删除分组？',
+        'group.selectAll': '全选该分组的数据源',
+        'group.dragHint': '拖到分组上即可移动',
+        'group.empty': '把数据源拖到这里',
         'bulk.selected': '已选 {n} 个',
         'bulk.test': '批量测试',
         'bulk.readonly': '设为只读',
@@ -343,6 +368,9 @@ window.__ModuleLoader__.load({
         'bulk.clear': '清空',
         'notice.bulkDone': '已更新 {n} 个数据源。',
         'notice.bulkGrouped': '已把 {n} 个数据源移动到「{group}」。',
+        'notice.groupSaved': '已保存分组「{name}」。',
+        'notice.groupDeleted': '已删除分组「{name}」。',
+        'notice.moved': '已移动到「{group}」。',
         'schema.title': '{name} 的结构',
         'schema.tables': '表（{n}）',
         'schema.pick': '在左侧选一张表查看它的列。',
@@ -830,6 +858,56 @@ window.__ModuleLoader__.load({
         color: var(--dsw-alias-label-primary);
         letter-spacing: 0.02em;
       }
+      .dbmcp-card-head > .dbmcp-pill {
+        margin-left: auto;
+      }
+      .dbmcp-card-actions {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-left: 4px;
+      }
+      .dbmcp-group-actions {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        margin-left: auto;
+      }
+      .dbmcp-group-edit {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex: 0 1 320px;
+      }
+      .dbmcp-group.is-over {
+        outline: 1px dashed var(--dsw-alias-brand-primary);
+        outline-offset: 3px;
+        border-radius: 6px;
+      }
+      .dbmcp-item.is-dragging {
+        opacity: 0.55;
+      }
+      .dbmcp-item {
+        cursor: grab;
+      }
+      .dbmcp-item.is-selected {
+        cursor: grab;
+      }
+      .dbmcp-group-create {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-bottom: 12px;
+      }
+      .dbmcp-group-create .dbmcp-input {
+        max-width: 220px;
+      }
+      .dbmcp-group-pick {
+        width: 14px;
+        height: 14px;
+        accent-color: var(--dsw-alias-brand-primary);
+        cursor: pointer;
+      }
       .dbmcp-bulk {
         display: flex;
         align-items: center;
@@ -1103,6 +1181,7 @@ window.__ModuleLoader__.load({
           { className: 'dbmcp-card-head' },
           props.title == null ? null : h('h2', { className: 'dbmcp-card-title' }, props.title),
           props.aside == null ? null : h('span', { className: 'dbmcp-pill' }, props.aside),
+          props.actions == null ? null : h('div', { className: 'dbmcp-card-actions' }, props.actions),
         ),
         props.children,
       )
@@ -2028,6 +2107,11 @@ window.__ModuleLoader__.load({
       const [selected, setSelected] = React.useState([])
       const [bulkGroup, setBulkGroup] = React.useState('')
       const [pendingBulkDelete, setPendingBulkDelete] = React.useState(false)
+      const [groupDraft, setGroupDraft] = React.useState('')
+      const [editingGroup, setEditingGroup] = React.useState(null)
+      const [pendingGroupDelete, setPendingGroupDelete] = React.useState(null)
+      const [draggingId, setDraggingId] = React.useState(null)
+      const [dragOverGroup, setDragOverGroup] = React.useState(null)
 
       /** Switching a tab only swaps the card below; the chrome never moves. */
       const selectTab = (id) => {
@@ -2193,12 +2277,106 @@ window.__ModuleLoader__.load({
         }
       }
 
+      /** Declared groups plus any group that a source already carries. */
+      const groupNames = (() => {
+        const seen = new Set()
+        const declared = data && Array.isArray(data.groups) ? data.groups : []
+        for (const name of declared) {
+          const key = String(name || '').trim()
+          if (key) seen.add(key)
+        }
+        for (const source of sources) {
+          const key = String(source.group || '').trim()
+          if (key) seen.add(key)
+        }
+        return [...seen].sort((a, b) => a.localeCompare(b))
+      })()
+
+      const reportError = (error) => {
+        setNotice({ message: String((error && error.message) || error), isError: true })
+      }
+
+      const createGroup = async () => {
+        const name = groupDraft.trim()
+        if (!name) return
+        try {
+          await apiPost('/groups/save', { name })
+          setGroupDraft('')
+          setNotice({ message: t('notice.groupSaved').replace('{name}', name), isError: false })
+          load()
+        } catch (error) {
+          reportError(error)
+        }
+      }
+
+      const renameGroup = async () => {
+        if (!editingGroup) return
+        const name = String(editingGroup.name || '').trim()
+        if (!name) return
+        try {
+          await apiPost('/groups/save', { name, from: editingGroup.from })
+          setEditingGroup(null)
+          setNotice({ message: t('notice.groupSaved').replace('{name}', name), isError: false })
+          load()
+        } catch (error) {
+          reportError(error)
+        }
+      }
+
+      const removeGroup = async (name) => {
+        if (pendingGroupDelete !== name) {
+          setPendingGroupDelete(name)
+          return
+        }
+        setPendingGroupDelete(null)
+        try {
+          await apiPost('/groups/delete', { name })
+          setNotice({ message: t('notice.groupDeleted').replace('{name}', name), isError: false })
+          load()
+        } catch (error) {
+          reportError(error)
+        }
+      }
+
+      const moveToGroup = async (id, name) => {
+        try {
+          await apiPost('/datasources/bulk', { action: 'group', ids: [id], group: name })
+          const label = name || t('group.unassigned')
+          setNotice({ message: t('notice.moved').replace('{group}', label), isError: false })
+          load()
+        } catch (error) {
+          reportError(error)
+        }
+      }
+
+      const toggleGroup = (items) => {
+        const ids = items.map((item) => item.id)
+        const allChecked = ids.length > 0 && ids.every((id) => selected.includes(id))
+        setPendingBulkDelete(false)
+        setSelected((prev) => (allChecked ? prev.filter((id) => !ids.includes(id)) : [...new Set([...prev, ...ids])]))
+      }
+
       const renderItem = (source) => {
         const probeInfo = source.lastProbe
         const checked = selected.includes(source.id)
         return h(
           'li',
-          { className: 'dbmcp-item' + (checked ? ' is-selected' : ''), key: source.id },
+          {
+            className: 'dbmcp-item' + (checked ? ' is-selected' : '') + (draggingId === source.id ? ' is-dragging' : ''),
+            key: source.id,
+            draggable: true,
+            title: t('group.dragHint'),
+            onDragStart: (event) => {
+              setDraggingId(source.id)
+              try {
+                event.dataTransfer.setData('text/plain', source.id)
+                event.dataTransfer.effectAllowed = 'move'
+              } catch (error) {
+                /* some shells hand out a read-only dataTransfer; draggingId still carries the id */
+              }
+            },
+            onDragEnd: () => setDraggingId(null),
+          },
           h(
             'label',
             { className: 'dbmcp-item-pick', title: source.name || source.id },
@@ -2211,7 +2389,7 @@ window.__ModuleLoader__.load({
           ),
           h(
             'div',
-            { className: 'dbmcp-item-main' },
+            { className: 'dbmcp-item-main', onClick: () => toggleSelected(source.id) },
             h(
               'div',
               { className: 'dbmcp-item-name' },
@@ -2231,7 +2409,7 @@ window.__ModuleLoader__.load({
           ),
           h(
             'div',
-            { className: 'dbmcp-item-actions' },
+            { className: 'dbmcp-item-actions', onClick: (event) => event.stopPropagation() },
             h(
               'button',
               { type: 'button', className: 'dbmcp-btn is-small', disabled: probing === source.id, onClick: () => probe(source) },
@@ -2256,8 +2434,114 @@ window.__ModuleLoader__.load({
         )
       }
 
+      /** One group: a head with a select-all box and rename/delete, plus a drop zone. */
+      const renderGroup = (name, items) => {
+        const allChecked = items.length > 0 && items.every((item) => selected.includes(item.id))
+        const renaming = editingGroup !== null && editingGroup.from === name
+        const dropTarget = name
+        return h(
+          'section',
+          {
+            className: 'dbmcp-group' + (dragOverGroup === dropTarget ? ' is-over' : ''),
+            key: name || '__none',
+            onDragOver: (event) => {
+              event.preventDefault()
+              if (dragOverGroup !== dropTarget) setDragOverGroup(dropTarget)
+            },
+            onDragLeave: () => setDragOverGroup((prev) => (prev === dropTarget ? null : prev)),
+            onDrop: (event) => {
+              event.preventDefault()
+              setDragOverGroup(null)
+              let id = draggingId
+              try {
+                id = event.dataTransfer.getData('text/plain') || id
+              } catch (error) {
+                /* fall back to the id remembered on dragstart */
+              }
+              setDraggingId(null)
+              if (id) void moveToGroup(id, name)
+            },
+          },
+          h(
+            'header',
+            { className: 'dbmcp-group-head' },
+            h('input', {
+              type: 'checkbox',
+              className: 'dbmcp-group-pick',
+              checked: allChecked,
+              onChange: () => toggleGroup(items),
+              title: t('group.selectAll'),
+              'aria-label': t('group.selectAll'),
+            }),
+            renaming
+              ? h(
+                  'form',
+                  {
+                    className: 'dbmcp-group-edit',
+                    onSubmit: (event) => {
+                      event.preventDefault()
+                      void renameGroup()
+                    },
+                  },
+                  h(TextInput, {
+                    value: editingGroup.name,
+                    onChange: (value) => setEditingGroup({ from: name, name: value }),
+                    autoFocus: true,
+                  }),
+                  h('button', { type: 'submit', className: 'dbmcp-btn is-small is-primary' }, t('group.save')),
+                  h('button', { type: 'button', className: 'dbmcp-btn is-small', onClick: () => setEditingGroup(null) }, t('group.cancel')),
+                )
+              : h('span', { className: 'dbmcp-group-name' }, name || t('group.unassigned')),
+            h('span', { className: 'dbmcp-hint' }, t('group.count').replace('{n}', String(items.length))),
+            name === '' || renaming
+              ? null
+              : h(
+                  'span',
+                  { className: 'dbmcp-group-actions' },
+                  h(
+                    'button',
+                    { type: 'button', className: 'dbmcp-btn is-small', onClick: () => setEditingGroup({ from: name, name }) },
+                    t('group.rename'),
+                  ),
+                  h(
+                    'button',
+                    {
+                      type: 'button',
+                      className: 'dbmcp-btn is-small is-danger',
+                      onClick: () => void removeGroup(name),
+                      onBlur: () => setPendingGroupDelete((prev) => (prev === name ? null : prev)),
+                    },
+                    pendingGroupDelete === name ? t('group.deleteConfirm') : t('group.delete'),
+                  ),
+                ),
+          ),
+          items.length === 0
+            ? h('div', { className: 'dbmcp-hint dbmcp-group-empty' }, t('group.empty'))
+            : h('ul', { className: 'dbmcp-list' }, items.map(renderItem)),
+        )
+      }
+
+      const renderGroupCreate = () =>
+        h(
+          'form',
+          {
+            className: 'dbmcp-group-create',
+            onSubmit: (event) => {
+              event.preventDefault()
+              void createGroup()
+            },
+          },
+          h(TextInput, {
+            value: groupDraft,
+            onChange: setGroupDraft,
+            placeholder: t('group.newPlaceholder'),
+            title: t('group.new'),
+          }),
+          h('button', { type: 'submit', className: 'dbmcp-btn is-small', disabled: !groupDraft.trim() }, t('group.add')),
+        )
+
       const renderList = () => {
-        if (sources.length === 0) {
+        if (sources.length === 0 && groupNames.length === 0) {
           return h(
             'div',
             { className: 'dbmcp-empty' },
@@ -2266,38 +2550,24 @@ window.__ModuleLoader__.load({
           )
         }
         const buckets = new Map()
+        for (const name of groupNames) buckets.set(name, [])
         for (const source of sources) {
           const key = String(source.group || '').trim()
           if (!buckets.has(key)) buckets.set(key, [])
           buckets.get(key).push(source)
         }
-        const names = [...buckets.keys()].sort((a, b) => {
-          if (a === b) return 0
-          if (!a) return 1
-          if (!b) return -1
-          return a.localeCompare(b)
-        })
-        if (names.length === 1 && !names[0]) {
+        const order = groupNames.slice()
+        if (buckets.has('')) order.push('')
+        if (order.length === 1 && !order[0]) {
           return h('ul', { className: 'dbmcp-list' }, buckets.get('').map(renderItem))
         }
         return h(
           'div',
           { className: 'dbmcp-groups' },
-          names.map((name) =>
-            h(
-              'section',
-              { className: 'dbmcp-group', key: name || '__none' },
-              h(
-                'header',
-                { className: 'dbmcp-group-head' },
-                h('span', { className: 'dbmcp-group-name' }, name || t('group.unassigned')),
-                h('span', { className: 'dbmcp-hint' }, t('group.count').replace('{n}', String(buckets.get(name).length))),
-              ),
-              h('ul', { className: 'dbmcp-list' }, buckets.get(name).map(renderItem)),
-            ),
-          ),
+          order.map((name) => renderGroup(name, buckets.get(name) || [])),
         )
       }
+
 
       const renderBulk = () => {
         if (selected.length === 0) return null
@@ -2414,7 +2684,42 @@ window.__ModuleLoader__.load({
           tab === 'list'
             ? h(
                 Card,
-                { title: t('tab.list'), aside: t('sources.count').replace('{n}', String(sources.length)) },
+                {
+                  title: t('tab.list'),
+                  aside: t('sources.count').replace('{n}', String(sources.length)),
+                  actions: [
+                    h('button', { key: 'refresh', type: 'button', className: 'dbmcp-btn is-small', disabled: busy, onClick: load }, t('action.refresh')),
+                    h(
+                      'button',
+                      {
+                        key: 'restart',
+                        type: 'button',
+                        className: 'dbmcp-btn is-small',
+                        disabled: busy,
+                        title: t('action.restartMcpHint'),
+                        onClick: async () => {
+                          setBusy(true)
+                          try {
+                            const result = await apiPost('/mcp/restart', {})
+                            setNotice({
+                              message: result.ok
+                                ? t('notice.mcpReady').replace('{count}', String((result.tools || []).length))
+                                : `${t('diag.mcpFailed')} ${result.error || ''}`,
+                              isError: !result.ok,
+                            })
+                            await load()
+                          } catch (error) {
+                            setNotice({ message: String((error && error.message) || error), isError: true })
+                          } finally {
+                            setBusy(false)
+                          }
+                        },
+                      },
+                      t('action.restartMcp'),
+                    ),
+                  ],
+                },
+                renderGroupCreate(),
                 renderBulk(),
                 renderList(),
               )
@@ -2571,40 +2876,6 @@ window.__ModuleLoader__.load({
               tabLabel(t, entry.id),
             ),
           ),
-        ),
-        h(
-          'div',
-          { className: 'dbmcp-toolbar' },
-          h('button', { type: 'button', className: 'dbmcp-btn is-primary', onClick: () => setView({ mode: 'create' }) }, t('action.new')),
-          h('button', { type: 'button', className: 'dbmcp-btn', onClick: () => setView({ mode: 'import' }) }, t('action.import')),
-          h('button', { type: 'button', className: 'dbmcp-btn', disabled: busy, onClick: load }, t('action.refresh')),
-          h(
-                'button',
-                {
-                  type: 'button',
-                  className: 'dbmcp-btn',
-                  disabled: busy,
-                  title: t('action.restartMcpHint'),
-                  onClick: async () => {
-                    setBusy(true)
-                    try {
-                      const result = await apiPost('/mcp/restart', {})
-                      setNotice({
-                        message: result.ok
-                          ? t('notice.mcpReady').replace('{count}', String((result.tools || []).length))
-                          : `${t('diag.mcpFailed')} ${result.error || ''}`,
-                        isError: !result.ok,
-                      })
-                      await load()
-                    } catch (error) {
-                      setNotice({ message: String((error && error.message) || error), isError: true })
-                    } finally {
-                      setBusy(false)
-                    }
-                  },
-                },
-                t('action.restartMcp'),
-              ),
         ),
         notice
           ? h(
