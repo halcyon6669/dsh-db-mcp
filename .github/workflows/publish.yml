@@ -1,0 +1,82 @@
+# Publish to npmjs.org with OIDC trusted publishing.
+#
+# No NPM_TOKEN secret is involved: npm 11.5.1+ (Node 22.14+/24) trades the
+# workflow's `id-token` for a short-lived publish credential, and npmjs.org
+# checks it against the trusted publisher configured for this package:
+#
+#   Provider:   GitHub Actions
+#   Owner:      halcyon6669
+#   Repository: dsh-db-mcp
+#   Workflow:   publish.yml        (basename only, not the full path)
+#   Environment: (leave blank)
+#
+# Release flow: bump the version, commit, push a `v<version>` tag.
+
+name: publish
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  npm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Check the tag matches package.json
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./package.json').version")"
+          expected="${GITHUB_REF_NAME#v}"
+          if [ "$version" != "$expected" ]; then
+            echo "tag ${GITHUB_REF_NAME} does not match package.json ${version}"
+            exit 1
+          fi
+          echo "publishing ${version}"
+
+      - name: Run the portable test suites
+        run: npm run test:ci
+
+      - name: Show what will be published
+        run: npm pack --dry-run
+
+      - name: Publish
+        # The provenance flag attaches an attestation tying the tarball to this
+        # workflow run and commit; `npm view dsh-db-mcp@<version> --json` then
+        # exposes it under dist.attestations.
+        run: npm publish --provenance --access public
+
+      - name: Verify the release landed
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./package.json').version")"
+          for attempt in 1 2 3 4 5; do
+            live="$(npm view "dsh-db-mcp@${version}" version --prefer-online 2>/dev/null || true)"
+            if [ "$live" = "$version" ]; then
+              echo "dsh-db-mcp@${version} is live"
+              exit 0
+            fi
+            echo "attempt ${attempt}: registry says '${live:-<missing>}', retrying in 10s"
+            sleep 10
+          done
+          echo "the registry never reported ${version}"
+          exit 1

@@ -235,6 +235,23 @@ into a group, or delete them (two-step confirmation). Bulk moves go through
 `POST /datasources/bulk` with `{ action: 'test' | 'readOnly' | 'group' | 'delete', ids: [...], … }`,
 while group CRUD uses `GET /groups`, `POST /groups/save` and `POST /groups/delete`.
 
+## Releasing
+
+The package is published from GitHub Actions with [npm trusted publishing](https://docs.npmjs.com/trusted-publishers):
+`.github/workflows/publish.yml` trades the workflow's OIDC token for a short-lived
+publish credential, so no `NPM_TOKEN` secret exists anywhere.
+
+```bash
+node dev/bump.mjs 0.6.5      # package.json + src/host.js
+git commit -am "chore: release 0.6.5"
+git tag v0.6.5 && git push origin main --tags
+```
+
+The workflow refuses to publish when the tag and `package.json` disagree, runs the
+portable suites (`npm run test:ci`), publishes with `--provenance`, then waits for the
+version to appear in the registry. Local `npm publish` still works for the very first
+release, before a trusted publisher exists for the package.
+
 ## Development
 
 ```
