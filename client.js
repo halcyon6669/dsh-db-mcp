@@ -18,6 +18,15 @@ window.__ModuleLoader__.load({
     const h = React.createElement
 
     const NS = 'db-mcp'
+    /** Top-level tabs of the panel. `sources` also hosts the create/edit/import/structure views. */
+    const TABS = [{ id: 'sources' }, { id: 'runtime' }, { id: 'audit' }]
+
+    /** Tab labels stay literal so the i18n check can see every key. */
+    function tabLabel(t, id) {
+      if (id === 'runtime') return t('tab.runtime')
+      if (id === 'audit') return t('tab.audit')
+      return t('tab.sources')
+    }
     const API = '/plugins/db-mcp/api'
     const KINDS = ['sqlite', 'postgres', 'mysql', 'oracle']
     const DEFAULT_PORTS = { postgres: '5432', mysql: '3306', oracle: '1521' }
@@ -25,6 +34,7 @@ window.__ModuleLoader__.load({
     /** Set by apply(); bind() reads the active locale at call time, so only the
      *  re-render subscription has to live on the component side. */
     let localeService = null
+    let layoutService = null
 
     const DICT = {
       en: {
@@ -148,6 +158,10 @@ window.__ModuleLoader__.load({
         'audit.rows': '{n} row(s)',
         'action.schema': 'Structure',
         'action.backToSources': 'Data sources',
+        'tab.sources': 'Data sources',
+        'tab.runtime': 'Runtime',
+        'tab.audit': 'Audit log',
+        'header.backToChat': 'Back to chat',
         'form.group': 'Group',
         'form.groupHint': 'Sources sharing a group are listed together',
         'group.unassigned': 'Ungrouped',
@@ -300,6 +314,10 @@ window.__ModuleLoader__.load({
         'audit.rows': '{n} 行',
         'action.schema': '结构',
         'action.backToSources': '数据源',
+        'tab.sources': '数据源',
+        'tab.runtime': '运行时诊断',
+        'tab.audit': '审计日志',
+        'header.backToChat': '返回会话',
         'form.group': '分组',
         'form.groupHint': '同一分组的数据源会列在一起',
         'group.unassigned': '未分组',
@@ -351,6 +369,73 @@ window.__ModuleLoader__.load({
         line-height: 1.4;
         letter-spacing: 0.01em;
       }
+      .dbmcp-masthead {
+        display: flex;
+        align-items: baseline;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin: 0 0 4px;
+      }
+      .dbmcp-masthead h1 {
+        margin: 0;
+        font-size: 19px;
+        font-weight: 600;
+        letter-spacing: 0.01em;
+        color: var(--dsw-alias-label-primary);
+      }
+      .dbmcp-masthead-spacer {
+        flex: 1 1 auto;
+      }
+      .dbmcp-back {
+        appearance: none;
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        border: 0;
+        background: none;
+        padding: 2px 6px 2px 0;
+        font: inherit;
+        font-size: 13px;
+        color: var(--dsw-alias-label-secondary);
+        cursor: pointer;
+        border-radius: 6px;
+      }
+      .dbmcp-back:hover {
+        color: var(--dsw-alias-label-primary);
+      }
+      .dbmcp-back-caret {
+        font-size: 15px;
+        line-height: 1;
+      }
+      .dbmcp-tabs {
+        display: flex;
+        align-items: stretch;
+        gap: 22px;
+        margin: 14px 0 0;
+        border-bottom: 1px solid var(--dsw-alias-border-l1);
+      }
+      .dbmcp-tab {
+        appearance: none;
+        border: 0;
+        background: none;
+        padding: 0 0 9px;
+        margin-bottom: -1px;
+        font: inherit;
+        font-size: 13px;
+        line-height: 1.4;
+        color: var(--dsw-alias-label-secondary);
+        cursor: pointer;
+        border-bottom: 2px solid transparent;
+        white-space: nowrap;
+      }
+      .dbmcp-tab:hover {
+        color: var(--dsw-alias-label-primary);
+      }
+      .dbmcp-tab.is-active {
+        color: var(--dsw-alias-label-primary);
+        font-weight: 500;
+        border-bottom-color: var(--dsw-alias-brand-primary);
+      }
       .dbmcp-sub {
         margin: 6px 0 0;
         font-size: 13px;
@@ -362,7 +447,7 @@ window.__ModuleLoader__.load({
         align-items: center;
         flex-wrap: wrap;
         gap: 10px;
-        margin: 18px 0;
+        margin: 16px 0 18px;
       }
       .dbmcp-crumbs {
         display: flex;
@@ -458,6 +543,9 @@ window.__ModuleLoader__.load({
         grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
         gap: 16px;
         align-items: start;
+      }
+      .dbmcp-grid.is-single {
+        grid-template-columns: minmax(0, 1fr);
       }
       .dbmcp-card {
         border: 1px solid var(--dsw-alias-border-l1);
@@ -1924,12 +2012,28 @@ window.__ModuleLoader__.load({
       const [state, setState] = React.useState({ status: 'loading', data: null, error: null })
       const [busy, setBusy] = React.useState(false)
       const [view, setView] = React.useState({ mode: 'list' })
+      const [tab, setTab] = React.useState('sources')
       const [notice, setNotice] = React.useState(null)
       const [probing, setProbing] = React.useState(null)
       const [pendingDelete, setPendingDelete] = React.useState(null)
       const [selected, setSelected] = React.useState([])
       const [bulkGroup, setBulkGroup] = React.useState('')
       const [pendingBulkDelete, setPendingBulkDelete] = React.useState(false)
+
+      const selectTab = (id) => {
+        setTab(id)
+        if (id === 'sources') setView({ mode: 'list' })
+      }
+
+      const backToChat = () => {
+        const layout = layoutService
+        if (!layout || typeof layout.selectPanel !== 'function') return
+        try {
+          layout.selectPanel(null)
+        } catch (error) {
+          /* older shells may not expose selectPanel; staying on the panel is fine */
+        }
+      }
       const [settings, setSettings] = React.useState(null)
       const [audit, setAudit] = React.useState({ entries: [], file: null })
       const [env, setEnv] = React.useState(null)
@@ -2286,14 +2390,18 @@ window.__ModuleLoader__.load({
       } else {
         body = h(
           'div',
-          { className: 'dbmcp-grid' },
-          h(
-            Card,
-            { title: t('sources.title'), aside: t('sources.count').replace('{n}', String(sources.length)) },
-            renderBulk(),
-            renderList(),
-          ),
-          h(
+          { className: 'dbmcp-grid' + (tab === 'sources' ? '' : ' is-single') },
+          tab === 'sources'
+            ? h(
+                Card,
+                { title: t('sources.title'), aside: t('sources.count').replace('{n}', String(sources.length)) },
+                renderBulk(),
+                renderList(),
+              )
+            : null,
+          tab !== 'runtime'
+            ? null
+            : h(
             Card,
             { title: t('diag.title') },
             h(
@@ -2365,7 +2473,9 @@ window.__ModuleLoader__.load({
               h(Row, { label: t('diag.uptime') }, formatUptime(data.host && data.host.uptimeMs)),
             ),
           ),
-          h(
+          tab !== 'audit'
+            ? null
+            : h(
             Card,
             { title: t('audit.title'), aside: audit.entries.length ? String(audit.entries.length) : null },
             h(
@@ -2406,55 +2516,70 @@ window.__ModuleLoader__.load({
         h('style', null, CSS),
         h(
           'header',
-          { className: 'dbmcp-head' },
+          { className: 'dbmcp-masthead' },
           h(
-            'h1',
-            null,
-            view.mode === 'list'
-              ? t('panel.title')
-              : h(
-                  'button',
-                  {
-                    type: 'button',
-                    className: 'dbmcp-title-switch',
-                    title: t('panel.title'),
-                    onClick: () => setView({ mode: 'list' }),
-                  },
-                  t('panel.title'),
-                ),
+            'button',
+            { type: 'button', className: 'dbmcp-back', onClick: backToChat },
+            h('span', { className: 'dbmcp-back-caret', 'aria-hidden': 'true' }, '‹'),
+            t('header.backToChat'),
           ),
-          h('p', { className: 'dbmcp-sub' }, t('panel.subtitle')),
+          h('h1', null, t('panel.title')),
+          h('span', { className: 'dbmcp-sub' }, t('panel.subtitle')),
+          h('span', { className: 'dbmcp-masthead-spacer' }),
+          h(
+            'span',
+            { className: 'dbmcp-pill' },
+            h('span', { className: 'dbmcp-dot ' + (apiOk ? 'is-ok' : state.status === 'error' ? 'is-error' : '') }),
+            apiOk ? t('state.connected') : state.status === 'loading' ? t('state.loading') : t('state.failed'),
+          ),
+          data && data.plugin ? h('span', { className: 'dbmcp-pill' }, `${data.plugin.name} ${data.plugin.version}`) : null,
         ),
-        view.mode === 'list'
-          ? h(Breadcrumbs, { t, trail: [{ label: t('panel.title') }, { label: t('sources.title') }] })
-          : h(Breadcrumbs, {
-              t,
-              trail: [
-                { label: t('panel.title'), onSelect: () => setView({ mode: 'list' }) },
-                { label: crumbLabel(t, view) },
-              ],
-            }),
+        h(
+          'nav',
+          { className: 'dbmcp-tabs', role: 'tablist' },
+          TABS.map((entry) =>
+            h(
+              'button',
+              {
+                key: entry.id,
+                type: 'button',
+                role: 'tab',
+                'aria-selected': tab === entry.id,
+                className: 'dbmcp-tab' + (tab === entry.id ? ' is-active' : ''),
+                onClick: () => selectTab(entry.id),
+              },
+              tabLabel(t, entry.id),
+            ),
+          ),
+        ),
         h(
           'div',
           { className: 'dbmcp-toolbar' },
-          view.mode === 'list'
+          tab !== 'sources'
             ? null
-            : h(
-                'button',
-                { type: 'button', className: 'dbmcp-btn', onClick: () => setView({ mode: 'list' }) },
-                `← ${t('action.backToSources')}`,
-              ),
-          view.mode === 'list'
-            ? h('button', { type: 'button', className: 'dbmcp-btn is-primary', onClick: () => setView({ mode: 'create' }) }, t('action.new'))
-            : null,
-          view.mode === 'list'
-            ? h('button', { type: 'button', className: 'dbmcp-btn', onClick: () => setView({ mode: 'import' }) }, t('action.import'))
-            : null,
-          view.mode === 'list'
-            ? h('button', { type: 'button', className: 'dbmcp-btn', disabled: busy, onClick: load }, t('action.refresh'))
-            : null,
-          view.mode === 'list'
-            ? h(
+            : view.mode === 'list'
+              ? null
+              : h(
+                  'button',
+                  { type: 'button', className: 'dbmcp-btn', onClick: () => setView({ mode: 'list' }) },
+                  `← ${t('action.backToSources')}`,
+                ),
+          tab !== 'sources'
+            ? null
+            : view.mode === 'list'
+              ? h('button', { type: 'button', className: 'dbmcp-btn is-primary', onClick: () => setView({ mode: 'create' }) }, t('action.new'))
+              : null,
+          tab !== 'sources'
+            ? null
+            : view.mode === 'list'
+              ? h('button', { type: 'button', className: 'dbmcp-btn', onClick: () => setView({ mode: 'import' }) }, t('action.import'))
+              : null,
+          tab !== 'sources'
+            ? null
+            : view.mode === 'list'
+              ? h('button', { type: 'button', className: 'dbmcp-btn', disabled: busy, onClick: load }, t('action.refresh'))
+              : null,
+          h(
                 'button',
                 {
                   type: 'button',
@@ -2480,15 +2605,7 @@ window.__ModuleLoader__.load({
                   },
                 },
                 t('action.restartMcp'),
-              )
-            : null,
-          h(
-            'span',
-            { className: 'dbmcp-pill' },
-            h('span', { className: 'dbmcp-dot ' + (apiOk ? 'is-ok' : state.status === 'error' ? 'is-error' : '') }),
-            apiOk ? t('state.connected') : state.status === 'loading' ? t('state.loading') : t('state.failed'),
-          ),
-          data && data.plugin ? h('span', { className: 'dbmcp-pill' }, `${data.plugin.name} ${data.plugin.version}`) : null,
+              ),
         ),
         notice
           ? h(
@@ -2503,11 +2620,12 @@ window.__ModuleLoader__.load({
     }
 
     return {
-      inject: ['slots', 'locale'],
+      inject: ['slots', 'locale', 'layout'],
       /** Parser and components exposed for the offline tests in dev/. */
       __test: { parseConnectionText, uniqueId, slugId, canonicalUrl, emptyDraft, draftFromSource, SourceForm, SchemaView, Breadcrumbs, MainPanel },
       apply(ctx) {
         localeService = ctx.locale
+        layoutService = ctx.layout || null
         ctx.effect(() => ctx.locale.register(NS, 'en', DICT.en))
         ctx.effect(() => ctx.locale.register(NS, 'zh', DICT.zh))
 

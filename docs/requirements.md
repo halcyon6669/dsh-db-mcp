@@ -866,6 +866,29 @@ PostgreSQL/MySQL/Oracle 只做 TCP 端口探测，无法证明口令与服务的
 ### 23.5 验证
 
 - `dev/selftest.mjs` 36/36（新增分组保存、组名超长、批量分组/只读/删除、空 ids、未知 action 七项）。
-- `dev/render.test.mjs` 32/32、`dev/i18n.test.mjs` 12/12、`dev/parse.test.mjs` 24/24、`dev/p5.test.mjs` 15/15、`dev/shims.test.mjs` ok（8 工具）。
+- `dev/render.test.mjs` 36/36、`dev/i18n.test.mjs` 12/12、`dev/parse.test.mjs` 24/24、`dev/p5.test.mjs` 15/15、`dev/shims.test.mjs` ok（8 工具）。
 - `dev/mcp.test.mjs` 19/19（工具数断言改为 8 并包含 `get_ddl`）。
-- 线上：`POST /reload` → `0.6.0`、8 工具；`POST /mcp/call {"tool":"get_ddl","datasource":"oracle-demo","arguments":{"table":"EMPLOYEES"}}` 返回 `create table "DEMO"."EMPLOYEES" (…)`；`POST /datasources/bulk {action:"group", ids:[…], group:"docker"}` 把三个演示源归组成功。
+- 线上：`POST /reload` → `0.6.1`、8 工具；`POST /mcp/call {"tool":"get_ddl","datasource":"oracle-demo","arguments":{"table":"EMPLOYEES"}}` 返回 `create table "DEMO"."EMPLOYEES" (…)`；`POST /datasources/bulk {action:"group", ids:[…], group:"docker"}` 把三个演示源归组成功。
+
+## 24. 0.6.1：面板头部改为「返回会话 + 标签页」风格
+
+### 24.1 结构
+
+- 页头（masthead）：左侧 `‹ 返回会话` 按钮（`ctx.layout.selectPanel(null)`，与 dsh-mnemon 的返回行为一致），中间 `数据库` 标题与副标题，右侧保留连接状态与版本药丸。
+- 标签栏（`nav.dbmcp-tabs`，`role="tablist"`）：**数据源 / 运行时诊断 / 审计日志**，当前项用 2px 品牌色下边框 + 500 字重，与 dsh-mnemon 顶部导航同一观感。
+- 操作栏只属于「数据源」标签：新建、从 DBeaver 导入、刷新、重启 MCP；其它标签不显示。
+- 新建 / 编辑 / 导入 / 结构 是「数据源」标签下的子视图：标签保持选中，`← 数据源` 与标签点击都能回到列表。
+
+### 24.2 实现要点
+
+- `MainPanel` 新增 `tab` 状态与 `selectTab(id)`；子视图切换时若切到别的标签，列表状态复位到 `mode: 'list'`。
+- 三张卡片（数据源 / 运行时诊断 / 审计日志）改为按标签条件渲染，容器加 `is-single` 类把网格收成一列。
+- 客户端 `inject` 增加 `layout`，模块级 `layoutService` 保存 `ctx.layout`，取不到 `selectPanel` 时静默跳过（老壳兼容）。
+- 标签文案由 `tabLabel(t, id)` 返回，保持 `t('tab.…')` 字面量，让 i18n 死键检查能识别。
+
+### 24.3 验证
+
+- `dev/render.test.mjs` 36/36（新增：三个 tab、首个 tab 选中态、`dbmcp-back` 按钮存在、面包屑已从页头移除）。
+- `dev/i18n.test.mjs` 12/12（新增 `tab.sources` / `tab.runtime` / `tab.audit` / `header.backToChat` 四条，中英齐全，无死键）。
+- 其余套件不变：selftest 36/36、parse 24/24、p5 15/15、mcp 19/19、shims ok。
+- 线上：`POST /reload` → generation 9、`0.6.1`、8 工具。
