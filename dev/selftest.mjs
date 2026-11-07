@@ -113,11 +113,55 @@ try {
 
   const importable = all.find((entry) => entry.importable && entry.kind === 'sqlite')
   if (importable) {
+    // `chinook` already points at the same file and account, so the scan must
+    // mark it and the import must refuse to create a second copy.
+    const preScan = await call('GET', '/dbeaver/scan')
+    const preAll = preScan.body.sources.flatMap((source) => source.connections)
+    const flagged = preAll.find((entry) => entry.id === importable.id)
+    check(
+      'dbeaver scan flags the already configured connection',
+      flagged?.alreadyImported === true && flagged?.duplicateId === 'chinook',
+      JSON.stringify(flagged),
+    )
+    const blocked = await call('POST', '/dbeaver/import', { ids: [importable.id] })
+    check(
+      'importing a configured endpoint is skipped',
+      blocked.body.imported?.length === 0 && blocked.body.skipped?.[0]?.existingId === 'chinook',
+      JSON.stringify(blocked.body.skipped || blocked.body.imported),
+    )
+
+    // Once the duplicate is gone the same entry imports again.
+    await call('POST', '/datasources/delete', { id: 'chinook' })
     const imported = await call('POST', '/dbeaver/import', { ids: [importable.id] })
     check('dbeaver import creates a source', imported.body.imported?.length === 1, JSON.stringify(imported.body.failed || []))
     const importedId = imported.body.imported?.[0]?.id
     const importedProbe = await call('POST', '/datasources/test', { id: importedId })
     check('imported source probes green', importedProbe.body.probe?.ok === true, importedProbe.body.probe?.message)
+
+    const again = await call('POST', '/dbeaver/import', { ids: [importable.id] })
+    check(
+      'importing the same endpoint twice is skipped',
+      again.body.imported?.length === 0 && again.body.skipped?.[0]?.existingId === importedId,
+      JSON.stringify(again.body.skipped || again.body.imported),
+    )
+
+    const identity = host.__test.sourceIdentity('postgres', { host: 'DB.Example.com', port: 5432, database: 'app', user: 'Alice' })
+    const sameIdentity = host.__test.sourceIdentity('postgres', { host: 'db.example.com', port: '5432', database: 'APP', user: 'alice' })
+    const otherUser = host.__test.sourceIdentity('postgres', { host: 'db.example.com', port: 5432, database: 'app', user: 'bob' })
+    check(
+      'identity ignores host/database/user case and port type',
+      identity === sameIdentity && identity !== otherUser,
+      `${identity} vs ${otherUser}`,
+    )
+
+    await call('POST', '/datasources/delete', { id: importedId })
+    await call('POST', '/datasources/save', {
+      id: 'chinook',
+      name: 'Chinook renamed',
+      kind: 'sqlite',
+      config: { file: importable.config.file },
+      password: 'p@ss',
+    })
   }
 
   const registryText = await readFile(join(dir, 'datasources.json'), 'utf8')

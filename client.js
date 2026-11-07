@@ -77,6 +77,7 @@ window.__ModuleLoader__.load({
         'notice.deleted': 'Removed {name}.',
         'notice.default': '{name} is now the default source.',
         'notice.imported': 'Imported {n} data source(s).',
+        'notice.importedSkipped': 'Imported {n} data source(s); skipped {m} already configured.',
         'notice.probeOk': '{name}: connection OK ({ms} ms).',
         'notice.probeFail': '{name}: {message}',
         'notice.mcpReady': 'MCP server is up with {count} tool(s).',
@@ -128,6 +129,8 @@ window.__ModuleLoader__.load({
         'import.empty': 'No DBeaver connection found on this machine.',
         'import.file': 'File',
         'import.credentialsFound': 'found and decrypted',
+        'import.already': 'already added',
+        'import.alreadyAs': 'already added as {name}',
         'import.credentialsMissing': 'not present — the password has to be typed in manually later',
         'diag.title': 'Runtime diagnostics',
         'diag.hostApi': 'Host API',
@@ -247,6 +250,7 @@ window.__ModuleLoader__.load({
         'notice.deleted': '已删除 {name}。',
         'notice.default': '{name} 已设为默认数据源。',
         'notice.imported': '已导入 {n} 个数据源。',
+        'notice.importedSkipped': '已导入 {n} 个数据源，跳过 {m} 个已存在的。',
         'notice.probeOk': '{name}：连接正常（{ms} ms）。',
         'notice.probeFail': '{name}：{message}',
         'notice.mcpReady': 'MCP 服务已就绪，共 {count} 个工具。',
@@ -297,6 +301,8 @@ window.__ModuleLoader__.load({
         'import.empty': '这台机器上没有找到 DBeaver 连接。',
         'import.file': '文件',
         'import.credentialsFound': '已找到并解密',
+        'import.already': '已添加',
+        'import.alreadyAs': '已作为 {name} 添加',
         'import.credentialsMissing': '不存在——口令需要稍后手动填写',
         'diag.title': '运行时诊断',
         'diag.hostApi': 'Host 接口',
@@ -886,6 +892,9 @@ window.__ModuleLoader__.load({
       }
       .dbmcp-item.is-dragging {
         opacity: 0.55;
+      }
+      .dbmcp-item.is-taken {
+        opacity: 0.6;
       }
       .dbmcp-item {
         cursor: grab;
@@ -1854,10 +1863,11 @@ window.__ModuleLoader__.load({
                     'ul',
                     { className: 'dbmcp-list', style: { marginTop: '10px' } },
                     source.connections.map((item) => {
-                      const taken = existing.includes(item.id) || existing.includes(item.id)
+                      const duplicate = item.alreadyImported === true
+                      const taken = duplicate || existing.includes(item.id)
                       return h(
                         'li',
-                        { className: 'dbmcp-item', key: item.id },
+                        { className: 'dbmcp-item' + (duplicate ? ' is-taken' : ''), key: item.id },
                         h(
                           'div',
                           { className: 'dbmcp-item-main' },
@@ -1869,22 +1879,28 @@ window.__ModuleLoader__.load({
                                   type: 'checkbox',
                                   checked: selected.includes(item.id),
                                   disabled: taken,
+                                  title: duplicate ? t('import.already') : undefined,
                                   onChange: () => toggle(item.id),
                                 })
                               : null,
                             h('span', null, item.name || item.id),
                             item.kind ? h('span', { className: 'dbmcp-pill' }, item.kind) : null,
+                            duplicate ? h('span', { className: 'dbmcp-pill' }, t('import.already')) : null,
                           ),
                           h(
                             'div',
                             { className: 'dbmcp-item-target' },
-                            [item.importable ? item.target : item.reason, item.user].filter(Boolean).join(' · '),
+                            duplicate
+                              ? t('import.alreadyAs').replace('{name}', item.duplicateName || item.duplicateId || '')
+                              : [item.importable ? item.target : item.reason, item.user].filter(Boolean).join(' · '),
                           ),
-                          h(
-                            'div',
-                            { className: 'dbmcp-item-target' },
-                            item.importable ? (item.hasPassword ? t('sources.hasPassword') : t('sources.noPassword')) : '',
-                          ),
+                          duplicate
+                            ? null
+                            : h(
+                                'div',
+                                { className: 'dbmcp-item-target' },
+                                item.importable ? (item.hasPassword ? t('sources.hasPassword') : t('sources.noPassword')) : '',
+                              ),
                         ),
                       )
                     }),
@@ -2674,7 +2690,15 @@ window.__ModuleLoader__.load({
         body = h(Card, { title: null }, h(ImportView, {
           t,
           existingIds: sources.map((item) => item.id),
-          onImported: (payload) => finish(fmt(t('notice.imported'), { n: (payload.imported || []).length }), false),
+          onImported: (payload) => {
+            const count = (payload.imported || []).length
+            const skippedCount = (payload.skipped || []).length
+            const message =
+              skippedCount > 0
+                ? t('notice.importedSkipped').replace('{n}', String(count)).replace('{m}', String(skippedCount))
+                : fmt(t('notice.imported'), { n: count })
+            finish(message, false)
+          },
           onCancel: () => setView({ mode: 'list' }),
         }))
       } else {

@@ -937,3 +937,24 @@ PostgreSQL/MySQL/Oracle 只做 TCP 端口探测，无法证明口令与服务的
 - `dev/selftest.mjs` 42/42（新增 6 项分组断言）、`dev/render.test.mjs` 37/37（新增「没有第二排导航」断言）、i18n 12/12、parse 24/24、p5 15/15、mcp 17 passed + 1 skipped（Docker 未起，Oracle 段按设计跳过）、shims ok。
 - 线上：`POST /reload` 到 0.6.3，`GET /health` 返回 `groups: ["docker"]`、四个源中三个归入 docker；`/groups/save` 建组、改名、`/groups/delete` 删除均实测通过。
 
+## 26. 0.6.4：重复连接不再重复导入（2026-11-07）
+
+需求（m03798）：用户名与 URL 都相同的连接，不允许再导入一次。
+
+### 26.1 身份定义
+- 新增 `sourceIdentity(kind, config, user)`：SQLite 用文件路径（Windows 上小写）；其余用 `kind|host|port|database(或 serviceName/SID)|user`，host、库名、用户名统一小写，端口缺省用各引擎默认值。
+- 同一身份即视为同一个数据源，与显示名、id 无关。
+
+### 26.2 扫描与导入
+- `scanDBeaver({ existing })` 接收调用方传入的注册表快照，命中既有源时返回 `alreadyImported` + `duplicateId` + `duplicateName`；同一批里重复的 DBeaver 条目也会被标记。
+- `importDatasources` 对命中的 id 记入 `skipped: [{id, existingId}]`，不再建新源，也不重复写 secrets；返回值新增 `skipped`。
+- 扫描接口仍不返回口令（`withSecrets` 只在导入路径使用）。
+
+### 26.3 界面
+- 导入页对重复项：复选框禁用并带 tooltip、名称后显示「已添加」药丸、目标行改成「已作为 X 添加」、不再显示口令行、整行 `is-taken` 半透明。
+- 导入成功后提示区分「导入 n 个 / 跳过 m 个」。
+
+### 26.4 验证
+- `dev/selftest.mjs` 新增 5 项断言，共 **46/46**：扫描标记重复、重复导入被跳过、删掉重复项后可再次导入、第二次导入被跳过、`sourceIdentity` 对大小写与端口字符串不敏感。
+- 其余：render 37/37、parse 24/24、i18n 12/12、p5 15/15、mcp 19/19、shims ok。
+- 线上：`GET /dbeaver/scan` 两条连接均为 `alreadyImported: true`（sqlite → `dbeaver-sample-database-sqlite-1`，mysql → `mysql`）。

@@ -33,7 +33,7 @@ const { createBridge } = await import(new URL(`./tools.js?v=${GENERATION}`, impo
 
 const API_PREFIX = '/plugins/db-mcp/api'
 const PLUGIN_NAME = 'dsh-db-mcp'
-const PLUGIN_VERSION = '0.6.3'
+const PLUGIN_VERSION = '0.6.4'
 const SCHEMA_VERSION = 1
 const REGISTRY_FILE = 'datasources.json'
 const SECRETS_FILE = 'secrets.json'
@@ -110,9 +110,26 @@ function describeTarget(kind, config) {
   return [host + port, database].filter(Boolean).join(' / ')
 }
 
-/** Connection settings minus anything credential-shaped. */
-function configToPublic(kind, config) {
+/**
+ * What makes two entries "the same connection": the engine, the endpoint, the
+ * database (or file) and the account. Names do not count, so a DBeaver entry
+ * that was already imported under another name is still a duplicate.
+ */
+function sourceIdentity(kind, config, user) {
   const cfg = cleanRecord(config)
+  if (kind === 'sqlite') {
+    const file = trimmed(cfg.file)
+    return `sqlite|${process.platform === 'win32' ? file.toLowerCase() : file}`
+  }
+  const host = trimmed(cfg.host).toLowerCase()
+  const port = String(cfg.port || DEFAULT_PORTS[kind] || '').trim()
+  const database = (trimmed(cfg.database) || trimmed(cfg.serviceName) || trimmed(cfg.sid)).toLowerCase()
+  const account = (user === undefined ? trimmed(cfg.user) : trimmed(user)).toLowerCase()
+  return `${kind || ''}|${host}|${port}|${database}|${account}`
+}
+
+/** Connection settings minus anything credential-shaped. */
+function configToPublic(kind, config) {  const cfg = cleanRecord(config)
   if (kind === 'sqlite') return { file: trimmed(cfg.file), busyTimeoutMs: cfg.busyTimeoutMs ?? null }
   return {
     host: trimmed(cfg.host),
@@ -548,6 +565,15 @@ async function scanDBeaver(options = {}) {
   // The scanning endpoint must never hand a password to the page, but the
   // import path needs it to seed secrets.json, so it is opt-in here.
   const withSecrets = options.withSecrets === true
+  const existing = Array.isArray(options.existing) ? options.existing : []
+  // Anything already configured — or already seen earlier in this scan — is a duplicate.
+  const taken = new Map()
+  for (const profile of existing) {
+    taken.set(sourceIdentity(profile.kind, profile.config, profile.config && profile.config.user), {
+      id: profile.id,
+      name: profile.name || profile.id,
+    })
+  }
   const roots = dbeaverRoots()
   const files = []
   for (const root of roots) {
@@ -603,9 +629,13 @@ async function scanDBeaver(options = {}) {
       const config = { ...mapped.config }
       const credentialUser = (credential && credential.user) || ''
       if (!config.user && credentialUser) config.user = credentialUser
+      const identity = sourceIdentity(mapped.kind, config, config.user)
+      const duplicate = taken.get(identity) || null
+      const displayName = (connection && connection.name) || id
+      if (!duplicate) taken.set(identity, { id, name: displayName })
       items.push({
         id,
-        name: (connection && connection.name) || id,
+        name: displayName,
         provider: (connection && connection.provider) || null,
         driver: (connection && connection.driver) || null,
         kind: mapped.kind,
@@ -614,6 +644,8 @@ async function scanDBeaver(options = {}) {
         target: describeTarget(mapped.kind, config),
         hasPassword: Boolean(credential && credential.password),
         importable: true,
+        alreadyImported: Boolean(duplicate),
+        ...(duplicate ? { duplicateId: duplicate.id, duplicateName: duplicate.name } : {}),
         ...(withSecrets && credential && credential.password ? { password: credential.password } : {}),
       })
     }
@@ -1248,22 +1280,35 @@ export function createHost(options = {}) {
   async function importDatasources(payload) {
     const ids = Array.isArray(payload.ids) ? payload.ids.map((id) => trimmed(id)).filter(Boolean) : []
     if (ids.length === 0) return { status: 400, body: { ok: false, error: 'ids is required' } }
-    const scan = await scanDBeaver({ withSecrets: true })
+    const registry = await readRegistry()
+    if (registry.error) return { status: 500, body: { ok: false, error: registry.error } }
+    const scan = await scanDBeaver({ withSecrets: true, existing: registry.datasources })
     const available = scan.sources.flatMap((source) =>
       source.connections.filter((item) => item.importable).map((item) => ({ ...item })),
     )
-    const registry = await readRegistry()
-    if (registry.error) return { status: 500, body: { ok: false, error: registry.error } }
     const list = [...registry.datasources]
     const { secrets } = await readSecrets()
     const imported = []
+    const skipped = []
     const failed = []
     const warnings = []
+
+    // Same endpoint + database + account means the source is already here.
+    const identities = new Map()
+    for (const profile of list) {
+      identities.set(sourceIdentity(profile.kind, profile.config, profile.config && profile.config.user), profile.id)
+    }
 
     for (const id of ids) {
       const found = available.find((item) => item.id === id)
       if (!found) {
         failed.push({ id, error: 'not found in DBeaver' })
+        continue
+      }
+      const identity = sourceIdentity(found.kind, found.config, found.config && found.config.user)
+      const clash = identities.get(identity)
+      if (clash) {
+        skipped.push({ id, existingId: clash })
         continue
       }
       const slug = (trimmed(found.name) || id)
@@ -1290,6 +1335,7 @@ export function createHost(options = {}) {
         lastProbe: null,
       }
       list.push(profile)
+      identities.set(identity, candidate)
       if (found.password) secrets[candidate] = { password: found.password }
       if (profile.kind !== 'sqlite' && !trimmed(profile.config && profile.config.user)) {
         warnings.push({
@@ -1315,6 +1361,7 @@ export function createHost(options = {}) {
       body: {
         ok: failed.length === 0,
         imported,
+        skipped,
         failed,
         warnings,
         datasources: list.map((item) => publicProfile(item, secrets)),
@@ -1347,7 +1394,10 @@ export function createHost(options = {}) {
           const result = await listGroups()
           return sendJson(response, result.status, result.body)
         }
-        if (route === '/dbeaver/scan') return sendJson(response, 200, { ok: true, ...(await scanDBeaver()) })
+        if (route === '/dbeaver/scan') {
+          const registry = await readRegistry()
+          return sendJson(response, 200, { ok: true, ...(await scanDBeaver({ existing: registry.datasources })) })
+        }
         if (route === '/schema') {
           const search = new URL(request.url, 'http://localhost').searchParams
           return sendJson(response, ...(await inspectSchema(search)))
@@ -1449,7 +1499,7 @@ export function createHost(options = {}) {
   return {
     version: PLUGIN_VERSION,
     handle,
-    __test: { parseJdbcUrl, mapDBeaverConnection },
+    __test: { parseJdbcUrl, mapDBeaverConnection, sourceIdentity },
     dispose: async () => {
       await bridge.dispose()
     },

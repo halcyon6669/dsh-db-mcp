@@ -142,6 +142,13 @@ there. The imported source is named after the DBeaver connection name (slugged
 into an id), keeps `readOnly: true`, and gets the saved password copied into
 `secrets.json`. Anything still missing is reported in `warnings`.
 
+A connection that is already configured is not offered twice: every source
+is identified by kind + host + port + database/service/SID + user (SQLite by
+file path), and a DBeaver entry that matches one of them comes back with
+`alreadyImported: true`, `duplicateId` and `duplicateName`. The panel disables
+its checkbox and says *already added as …*; `POST /dbeaver/import` reports such
+ids under `skipped` instead of creating a second copy.
+
 The panel navigates with a tab bar (`数据源列表 / 新建数据源 / 从 DBeaver 导入`): the trailing step
 is plain text, every earlier step is a link back, and no page needs a separate
 "back to list" button.
