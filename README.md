@@ -58,6 +58,7 @@ Requirements and staged plan: [`docs/requirements.md`](docs/requirements.md).
 | `mcp__db__sample_rows` | a few rows of one table |
 | `mcp__db__run_query` | one statement; read-only sources refuse writes |
 | `mcp__db__explain_query` | query plan |
+| `mcp__db__get_ddl` | `CREATE TABLE` statement (SQLite: as created; others: rebuilt from the catalog) |
 | `mcp__db__test_connection` | log in for real, run `select 1`, report server/user/schema |
 
 `datasource` is optional everywhere: omitted, the default source is used.
@@ -200,10 +201,23 @@ served by `GET /schema`, which only forwards `list_tables` / `describe_table` to
 the MCP server, so the page itself can never run SQL. Nothing is cached: each
 open reads the live catalog.
 
+## Groups and bulk actions
+
+Every source carries an optional **group** label (`group` in the registry,
+editable under *More settings*). The list renders one section per group, sorted by
+name with the ungrouped sources last; a source with no group keeps the flat list
+look until at least one group exists.
+
+Tick the checkbox on a row to open the bulk bar: test all selected sources, flip
+them to read-only or writable, move them into a group, or delete them (two-step
+confirmation). Bulk work goes through `POST /datasources/bulk` with
+`{ action: 'test' | 'readOnly' | 'group' | 'delete', ids: [...], … }`, so one
+request does the whole batch and the response carries the refreshed list.
+
 ## Development
 
 ```
-node dev/selftest.mjs     # mounts src/host.js on a throwaway port, 29 checks
+node dev/selftest.mjs     # mounts src/host.js on a throwaway port, 36 checks
 node dev/shims.test.mjs   # mounts index.js, checks routes, /reload, tool publication
 node dev/parse.test.mjs   # 24 checks: connection-string parser (DSN/JDBC/TNS/paths)
 node dev/render.test.mjs  # 32 checks: components render with a stub React
@@ -213,7 +227,7 @@ node dev/mcp.test.mjs     # 19 checks: real Python server over stdio, real SQLit
 ```
 
 `npm test` runs everything except `mcp.test.mjs`, which needs the venv and the
-Oracle container. `node dev/bump.mjs 0.5.0` updates both version strings.
+Oracle container. `node dev/bump.mjs 0.6.0` updates both version strings.
 
 ## Safety switches
 

@@ -146,6 +146,50 @@ try {
 
   const unknown = await call('GET', '/nope')
   check('unknown route 404', unknown.status === 404)
+
+  const grouped = await call('POST', '/datasources/save', {
+    id: 'team-db',
+    name: 'Team db',
+    group: 'analytics',
+    kind: 'sqlite',
+    config: { file: 'C:/tmp/team.db' },
+  })
+  check('save keeps a group label', grouped.body.datasource?.group === 'analytics', grouped.body.datasource?.group)
+  const tooLongGroup = await call('POST', '/datasources/save', {
+    id: 'team-db-2',
+    name: 'Team db 2',
+    group: 'x'.repeat(49),
+    kind: 'sqlite',
+    config: { file: 'C:/tmp/team2.db' },
+  })
+  check('group length is validated', tooLongGroup.status === 400, tooLongGroup.body.error)
+
+  const bulkGroup = await call('POST', '/datasources/bulk', { action: 'group', ids: ['team-db', 'pg1'], group: 'ops' })
+  const groupedIds = ['team-db', 'pg1']
+  const groupedOk =
+    bulkGroup.status === 200 &&
+    bulkGroup.body.affected === 2 &&
+    bulkGroup.body.datasources.filter((entry) => groupedIds.includes(entry.id)).every((entry) => entry.group === 'ops')
+  check(
+    'bulk group moves both sources',
+    groupedOk,
+    JSON.stringify(bulkGroup.body.datasources?.map((entry) => `${entry.id}=${entry.group}`)),
+  )
+  const bulkReadOnly = await call('POST', '/datasources/bulk', { action: 'readOnly', ids: ['team-db'], readOnly: false })
+  const flipped = bulkReadOnly.body.datasources?.find((entry) => entry.id === 'team-db')
+  check('bulk readOnly flips the flag', bulkReadOnly.status === 200 && flipped?.readOnly === false, String(flipped?.readOnly))
+  const bulkEmpty = await call('POST', '/datasources/bulk', { action: 'group', ids: [] })
+  check('bulk needs at least one id', bulkEmpty.status === 400, bulkEmpty.body.error)
+  const bulkUnknownAction = await call('POST', '/datasources/bulk', { action: 'explode', ids: ['team-db'] })
+  check('bulk rejects unknown actions', bulkUnknownAction.status === 400, bulkUnknownAction.body.error)
+  const bulkDelete = await call('POST', '/datasources/bulk', { action: 'delete', ids: ['team-db', 'pg1'] })
+  check(
+    'bulk delete removes both sources',
+    bulkDelete.status === 200 &&
+      bulkDelete.body.affected === 2 &&
+      !bulkDelete.body.datasources.some((entry) => entry.id === 'team-db' || entry.id === 'pg1'),
+    JSON.stringify(bulkDelete.body.datasources?.map((entry) => entry.id)),
+  )
 } finally {
   server.close()
   const failed = results.filter((entry) => !entry.ok)

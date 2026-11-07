@@ -64,7 +64,7 @@ function check(name, condition, extra) {
     passed += 1
     return
   }
-  failures.push(`${name}${extra ? ` — ${extra}` : ''}`)
+  failures.push(`${name}${extra ? ` 鈥?${extra}` : ''}`)
 }
 
 function render(name, factory, options) {
@@ -102,7 +102,7 @@ const sqliteTree = render(
   'create form (sqlite)',
   () => SourceForm({ t, draft: emptyDraft(), editing: null, takenIds: [], onSaved: noop, onCancel: noop }),
   {
-    inputs: 8,
+    inputs: 9,
     selects: 1,
     details: true,
     labels: ['form.paste', 'form.user', 'form.password', 'form.file'],
@@ -119,7 +119,7 @@ pgDraft.config = { ...pgDraft.config, host: 'localhost', port: '5432', database:
 render(
   'create form (postgres)',
   () => SourceForm({ t, draft: pgDraft, editing: null, takenIds: ['app'], onSaved: noop, onCancel: noop }),
-  { inputs: 11, selects: 2, details: true, labels: ['form.host', 'form.port', 'form.database'] },
+  { inputs: 12, selects: 2, details: true, labels: ['form.host', 'form.port', 'form.database'] },
 )
 
 const oracleDraft = emptyDraft()

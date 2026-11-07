@@ -33,7 +33,7 @@ const { createBridge } = await import(new URL(`./tools.js?v=${GENERATION}`, impo
 
 const API_PREFIX = '/plugins/db-mcp/api'
 const PLUGIN_NAME = 'dsh-db-mcp'
-const PLUGIN_VERSION = '0.5.2'
+const PLUGIN_VERSION = '0.6.0'
 const SCHEMA_VERSION = 1
 const REGISTRY_FILE = 'datasources.json'
 const SECRETS_FILE = 'secrets.json'
@@ -138,6 +138,7 @@ function publicProfile(profile, secrets) {
     readOnly: profile.readOnly !== false,
     isDefault: profile.isDefault === true,
     tags: Array.isArray(profile.tags) ? profile.tags.filter((tag) => typeof tag === 'string') : [],
+    group: typeof profile.group === 'string' ? profile.group : '',
     config: configToPublic(profile.kind, config),
     target: describeTarget(profile.kind, config),
     hasSecret: Boolean(secret && trimmed(secret.password)),
@@ -198,6 +199,10 @@ function normalizeInput(input, existing) {
   const tags = Array.isArray(raw.tags)
     ? raw.tags.map((tag) => trimmed(tag)).filter(Boolean).slice(0, 8)
     : existing && Array.isArray(existing.tags) ? existing.tags : []
+  const group = raw.group === undefined || raw.group === null
+    ? (existing && typeof existing.group === 'string' ? existing.group : '')
+    : trimmed(raw.group)
+  if (group.length > 48) return { error: 'group must be at most 48 characters' }
 
   const profile = {
     id,
@@ -207,6 +212,7 @@ function normalizeInput(input, existing) {
     readOnly,
     isDefault: raw.isDefault === true || (existing ? existing.isDefault === true : false),
     tags,
+    group,
     createdAt: (existing && existing.createdAt) || isoNow(),
     updatedAt: isoNow(),
     lastProbe: existing ? existing.lastProbe ?? null : null,
@@ -929,6 +935,93 @@ export function createHost(options = {}) {
     return { status: 200, body: { ok: true, datasource: publicProfile(profile, secrets), secret: secretChange } }
   }
 
+  /**
+   * One endpoint for the list checkboxes: delete, move to a group, flip the
+   * read-only flag, or probe several sources in one call.
+   */
+  async function bulkDatasources(payload) {
+    const action = trimmed(payload.action)
+    const ids = Array.isArray(payload.ids) ? [...new Set(payload.ids.map((id) => trimmed(id)).filter(Boolean))] : []
+    if (!['delete', 'group', 'readOnly', 'test'].includes(action)) {
+      return { status: 400, body: { ok: false, error: `unsupported bulk action: ${action || '(empty)'}` } }
+    }
+    if (ids.length === 0) return { status: 400, body: { ok: false, error: 'ids must be a non-empty array' } }
+
+    const registry = await readRegistry()
+    if (registry.error) return { status: 500, body: { ok: false, error: registry.error } }
+    const known = new Set(registry.datasources.map((item) => item.id))
+    const missing = ids.filter((id) => !known.has(id))
+    if (missing.length === ids.length) {
+      return { status: 404, body: { ok: false, error: `unknown datasources: ${ids.join(', ')}` } }
+    }
+    const target = ids.filter((id) => known.has(id))
+
+    if (action === 'delete') {
+      const list = registry.datasources.filter((item) => !target.includes(item.id))
+      if (list.length > 0 && !list.some((item) => item.isDefault)) list[0].isDefault = true
+      await writeRegistry(list)
+      const { secrets } = await readSecrets()
+      let changed = false
+      for (const id of target) {
+        if (secrets[id]) {
+          delete secrets[id]
+          changed = true
+        }
+      }
+      if (changed) await writeSecrets(secrets)
+      return {
+        status: 200,
+        body: { ok: true, action, affected: target.length, datasources: list.map((item) => publicProfile(item, secrets)) },
+      }
+    }
+
+    if (action === 'test') {
+      const results = []
+      for (const id of target) {
+        const stored = registry.datasources.find((item) => item.id === id)
+        const { secrets } = await readSecrets()
+        const result = await testProfile(stored, secrets[id] || null, {
+          probeTimeoutMs: Number(config.probeTimeoutMs) || 10_000,
+          remote: remoteProbe,
+        })
+        const probe = { ok: result.ok, message: result.message, latencyMs: result.latencyMs, at: isoNow(), detail: result.detail || null }
+        results.push({ id, probe })
+      }
+      const merged = registry.datasources.map((item) => {
+        const hit = results.find((entry) => entry.id === item.id)
+        return hit ? { ...item, lastProbe: hit.probe } : item
+      })
+      try {
+        await writeRegistry(merged)
+      } catch {
+        /* the probe result still matters even if the note cannot be stored */
+      }
+      const { secrets } = await readSecrets()
+      return {
+        status: 200,
+        body: {
+          ok: true,
+          action,
+          affected: target.length,
+          results,
+          datasources: merged.map((item) => publicProfile(item, secrets)),
+        },
+      }
+    }
+
+    const next = registry.datasources.map((item) => {
+      if (!target.includes(item.id)) return item
+      if (action === 'group') return { ...item, group: trimmed(payload.group).slice(0, 48), updatedAt: isoNow() }
+      return { ...item, readOnly: payload.readOnly !== false, updatedAt: isoNow() }
+    })
+    await writeRegistry(next)
+    const { secrets } = await readSecrets()
+    return {
+      status: 200,
+      body: { ok: true, action, affected: target.length, datasources: next.map((item) => publicProfile(item, secrets)) },
+    }
+  }
+
   async function deleteDatasource(payload) {
     const id = trimmed(payload.id)
     if (!id) return { status: 400, body: { ok: false, error: 'id is required' } }
@@ -1194,6 +1287,10 @@ export function createHost(options = {}) {
       }
       if (route === '/datasources/test') {
         const result = await testDatasource(payload)
+        return sendJson(response, result.status, result.body)
+      }
+      if (route === '/datasources/bulk') {
+        const result = await bulkDatasources(payload)
         return sendJson(response, result.status, result.body)
       }
       if (route === '/dbeaver/import') {

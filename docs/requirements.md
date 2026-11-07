@@ -834,3 +834,38 @@ PostgreSQL/MySQL/Oracle 只做 TCP 端口探测，无法证明口令与服务的
 - `dev/render.test.mjs` 32/32、`dev/selftest.mjs` 29/29、`parse` 24/24、`p5` 15/15、`shims` ok。
 - `dev/mcp.test.mjs` 19/19：Oracle 段的真实登录改为先探测 `target` 里的 host:port，容器未启动时记为 skip 而不是失败，避免本机环境让整套测试变红。
 - `POST /plugins/db-mcp/api/reload` → `0.5.2`、phase P7。
+
+## 23. 0.6.0：DDL 工具、分组与批量操作
+
+### 23.1 DDL 工具
+
+- `server/engines.py` 新增 `table_ddl(profile, connection, table, schema=None)`：
+  - SQLite 读 `sqlite_master.sql`，原样返回建表语句（保留约束、外键、默认值），`source: "sqlite_master"`；
+  - PostgreSQL / MySQL / Oracle 用 `describe_table` 的列元数据重建 `create table … (…)`，`source: "columns"`，因此会丢失索引、检查约束等目录外信息——这是有意的取舍：不依赖各库专有的 DDL 导出函数，也不执行任何 SQL。
+- 新工具 `mcp__db__get_ddl`（必填 `table`，可选 `datasource` / `schema`），工具总数由 7 变 8。
+- `src/tools.js` 的 `renderResult` 遇到 `ddl` 字段时直接返回纯文本，模型看到的是可读的建表语句而不是 JSON 包装。
+- 实测：SQLite `Album`、Oracle `DEMO.EMPLOYEES`、MySQL `products` 三库均返回正确 DDL。
+
+### 23.2 分组
+
+- 数据源新增可选字段 `group`（≤48 字符，`publicProfile` 暴露，`normalizeInput` 校验并保留原值），面板的「更多设置」里有输入框。
+- 列表按组渲染：组名排序、未分组排最后；只有一个空组时保持原来的平铺样式，避免单源数据出现空壳分组。
+- 组内显示数量，组头与列表之间用一条细分割线区分。
+
+### 23.3 批量操作
+
+- 每行加复选框，选中后出现批量工具条：批量测试、设为只读、允许写、移动到分组（输入框 + 应用）、删除所选（两步确认）、清空选择。
+- 服务端 `POST /datasources/bulk`：`{action: 'test' | 'readOnly' | 'group' | 'delete', ids: [...], readOnly?, group?}`，返回 `{ok, action, affected, datasources, results?}`；批量测试复用真实登录探针并把结果写回 `lastProbe`；删除同时清理 `secrets.json`。
+- 一次请求完成整批，避免前端串行 N 次调用；校验失败返回 400，未知数据源返回 404。
+
+### 23.4 导航
+
+- 列表视图也常驻面包屑（`数据库 / 数据源`），子视图里显示 `数据库 / <当前>`，第一段可点击回列表。
+- 子视图的工具栏左侧固定一个「← 数据源」按钮，与标题点击、面包屑三者等价，满足「随时回面板」的直觉。
+
+### 23.5 验证
+
+- `dev/selftest.mjs` 36/36（新增分组保存、组名超长、批量分组/只读/删除、空 ids、未知 action 七项）。
+- `dev/render.test.mjs` 32/32、`dev/i18n.test.mjs` 12/12、`dev/parse.test.mjs` 24/24、`dev/p5.test.mjs` 15/15、`dev/shims.test.mjs` ok（8 工具）。
+- `dev/mcp.test.mjs` 19/19（工具数断言改为 8 并包含 `get_ddl`）。
+- 线上：`POST /reload` → `0.6.0`、8 工具；`POST /mcp/call {"tool":"get_ddl","datasource":"oracle-demo","arguments":{"table":"EMPLOYEES"}}` 返回 `create table "DEMO"."EMPLOYEES" (…)`；`POST /datasources/bulk {action:"group", ids:[…], group:"docker"}` 把三个演示源归组成功。

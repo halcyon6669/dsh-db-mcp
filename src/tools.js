@@ -62,6 +62,9 @@ export function renderResult(value) {
         .join('\n') || 'no datasources configured'
     );
   }
+  if (typeof value.ddl === 'string' && value.ddl.trim()) {
+    return value.ddl.trim();
+  }
   if (Array.isArray(value.columns) && value.table) {
     return value.columns.map((column) => `${column.name}  ${column.type}${column.primaryKey ? '  PK' : ''}${column.nullable ? '' : '  NOT NULL'}`).join('\n');
   }

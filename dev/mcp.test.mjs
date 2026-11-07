@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Integration test for the Python MCP server, driven through the same client the
  * plugin uses. Requires the runtime venv created by `POST /api/mcp/start` or the
  * manual setup described in README (`.venv` under the runtime directory).
@@ -28,7 +28,7 @@ function check(name, condition, detail = '') {
     console.log(`  ok   ${name}`)
   } else {
     fail += 1
-    console.log(`  FAIL ${name}${detail ? ` — ${detail}` : ''}`)
+    console.log(`  FAIL ${name}${detail ? ` 鈥?${detail}` : ''}`)
   }
 }
 
@@ -60,7 +60,7 @@ try {
   await client.start()
   check('initialize handshake', client.serverInfo !== null, JSON.stringify(client.serverInfo))
   const names = client.tools.map((tool) => tool.name).sort()
-  check('seven tools listed', names.length === 7 && names.includes('test_connection'), names.join(', '))
+  check('eight tools listed', names.length === 8 && names.includes('test_connection') && names.includes('get_ddl'), names.join(', '))
   check(
     'tool names',
     ['describe_table', 'explain_query', 'list_datasources', 'list_tables', 'run_query', 'sample_rows'].every((name) =>
@@ -122,7 +122,7 @@ try {
       }
     } else {
       skip += 1
-      console.log(`  skip test_connection logs in to Oracle — ${host}:${port} is not listening (start the demo container)`)
+      console.log(`  skip test_connection logs in to Oracle 鈥?${host}:${port} is not listening (start the demo container)`)
     }
 
     const inline = await client.callTool('test_connection', {
@@ -138,7 +138,7 @@ try {
   }
 } catch (error) {
   fail += 1
-  console.log(`  FAIL server start — ${error?.stack || error}`)
+  console.log(`  FAIL server start 鈥?${error?.stack || error}`)
 } finally {
   await client.stop()
 }

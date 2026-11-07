@@ -234,6 +234,24 @@ def explain_query(sql: str, datasource: Optional[str] = None) -> dict:
         return _error(error)
 
 
+@mcp.tool()
+def get_ddl(table: str, datasource: Optional[str] = None, schema: Optional[str] = None) -> dict:
+    """Show the CREATE TABLE statement of one table.
+
+    SQLite returns the statement recorded at creation time; PostgreSQL, MySQL
+    and Oracle have theirs rebuilt from the column metadata.
+    """
+    try:
+        profile, (connection, close) = _open(datasource)
+        try:
+            result = engines.table_ddl(profile, connection, table, schema)
+        finally:
+            close()
+        return {"ok": True, "datasource": _source(profile), **result}
+    except Exception as error:  # noqa: BLE001
+        return _error(error)
+
+
 def main() -> None:
     mcp.run(transport="stdio")
 

@@ -484,6 +484,68 @@ def describe_table(profile: dict, connection, table: str, schema: str | None) ->
 
 
 # --------------------------------------------------------------------------- #
+# DDL
+
+
+def table_ddl(profile: dict, connection, table: str, schema: str | None = None) -> dict:
+    """Return a CREATE TABLE statement for one table.
+
+    SQLite keeps the original text in `sqlite_master`, so that is returned
+    verbatim. Every other engine is rebuilt from the column metadata that
+    `describe_table` already reads, which works without extra privileges and
+    keeps the four engines consistent.
+    """
+    kind = profile.get("kind")
+    if kind == "sqlite":
+        cursor = connection.cursor()
+        try:
+            cursor.execute(
+                "select sql from sqlite_master where type in ('table', 'view') and name = ?",
+                (table,),
+            )
+            row = cursor.fetchone()
+        finally:
+            cursor.close()
+        if not row or not row[0]:
+            raise DbError(
+                "user_error",
+                f"no DDL recorded for {table}",
+                "virtual tables and internal objects do not keep their statement",
+            )
+        return {
+            "table": table,
+            "schema": None,
+            "ddl": row[0].strip().rstrip(";") + ";",
+            "source": "sqlite_master",
+        }
+
+    info = describe_table(profile, connection, table, schema)
+    effective = info.get("schema") or None
+    if effective and kind in ("postgres", "oracle", "mysql"):
+        target = f"{_quote(kind, effective)}.{_quote(kind, table)}"
+    else:
+        target = _quote(kind, table)
+
+    lines: list[str] = []
+    for column in info["columns"]:
+        piece = f"  {_quote(kind, column['name'])} {column['type'] or 'text'}"
+        if not column["nullable"] and not column["primaryKey"]:
+            piece += " not null"
+        if column.get("default") not in (None, ""):
+            piece += f" default {column['default']}"
+        lines.append(piece)
+    if info["primaryKey"]:
+        keys = ", ".join(_quote(kind, name) for name in info["primaryKey"])
+        lines.append(f"  primary key ({keys})")
+    return {
+        "table": table,
+        "schema": effective,
+        "ddl": f"create table {target} (\n" + ",\n".join(lines) + "\n);",
+        "source": "columns",
+    }
+
+
+# --------------------------------------------------------------------------- #
 # queries
 
 

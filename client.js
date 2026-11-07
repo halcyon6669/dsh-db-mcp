@@ -147,6 +147,23 @@ window.__ModuleLoader__.load({
         'audit.hint': 'One line per MCP tool call: tool, source, duration and outcome. Query results are never logged.',
         'audit.rows': '{n} row(s)',
         'action.schema': 'Structure',
+        'action.backToSources': 'Data sources',
+        'form.group': 'Group',
+        'form.groupHint': 'Sources sharing a group are listed together',
+        'group.unassigned': 'Ungrouped',
+        'group.count': '{n}',
+        'bulk.selected': '{n} selected',
+        'bulk.test': 'Test selected',
+        'bulk.readonly': 'Make read-only',
+        'bulk.readwrite': 'Allow writes',
+        'bulk.group': 'Move to group',
+        'bulk.groupPlaceholder': 'group name (empty clears it)',
+        'bulk.apply': 'Apply',
+        'bulk.delete': 'Delete selected',
+        'bulk.deleteConfirm': 'Confirm delete {n}',
+        'bulk.clear': 'Clear',
+        'notice.bulkDone': 'Updated {n} data source(s).',
+        'notice.bulkGrouped': 'Moved {n} data source(s) into “{group}”.',
         'schema.title': 'Structure of {name}',
         'schema.tables': 'Tables ({n})',
         'schema.pick': 'Pick a table on the left to see its columns.',
@@ -282,6 +299,23 @@ window.__ModuleLoader__.load({
         'audit.hint': '每次 MCP 工具调用记一行：工具、数据源、耗时与结果。查询结果不会被记录。',
         'audit.rows': '{n} 行',
         'action.schema': '结构',
+        'action.backToSources': '数据源',
+        'form.group': '分组',
+        'form.groupHint': '同一分组的数据源会列在一起',
+        'group.unassigned': '未分组',
+        'group.count': '{n} 个',
+        'bulk.selected': '已选 {n} 个',
+        'bulk.test': '批量测试',
+        'bulk.readonly': '设为只读',
+        'bulk.readwrite': '允许写',
+        'bulk.group': '移动到分组',
+        'bulk.groupPlaceholder': '分组名（留空表示清除）',
+        'bulk.apply': '应用',
+        'bulk.delete': '删除所选',
+        'bulk.deleteConfirm': '确认删除 {n} 个',
+        'bulk.clear': '清空',
+        'notice.bulkDone': '已更新 {n} 个数据源。',
+        'notice.bulkGrouped': '已把 {n} 个数据源移动到「{group}」。',
         'schema.title': '{name} 的结构',
         'schema.tables': '表（{n}）',
         'schema.pick': '在左侧选一张表查看它的列。',
@@ -659,6 +693,72 @@ window.__ModuleLoader__.load({
         padding: 10px 12px;
         font-size: 13px;
       }
+      .dbmcp-item.is-selected {
+        border-color: var(--dsw-alias-brand-primary);
+        background: var(--dsw-alias-bg-layer-1);
+      }
+      .dbmcp-item-pick {
+        display: flex;
+        align-items: center;
+        padding-top: 2px;
+        cursor: pointer;
+      }
+      .dbmcp-item-pick input {
+        width: 14px;
+        height: 14px;
+        accent-color: var(--dsw-alias-brand-primary);
+        cursor: pointer;
+      }
+      .dbmcp-groups {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+      }
+      .dbmcp-group {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .dbmcp-group-head {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+        padding: 0 2px;
+        border-bottom: 1px solid var(--dsw-alias-border-l1);
+        padding-bottom: 6px;
+      }
+      .dbmcp-group-name {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--dsw-alias-label-primary);
+        letter-spacing: 0.02em;
+      }
+      .dbmcp-bulk {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 12px;
+        padding: 8px 10px;
+        border: 1px solid var(--dsw-alias-brand-primary);
+        border-radius: 10px;
+        background: var(--dsw-alias-bg-layer-1);
+      }
+      .dbmcp-bulk-count {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--dsw-alias-brand-primary);
+      }
+      .dbmcp-bulk-group {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex: 1 1 220px;
+        min-width: 180px;
+      }
+      .dbmcp-bulk-group .dbmcp-input {
+        min-width: 120px;
+      }
       .dbmcp-item-main {
         min-width: 0;
         flex: 1 1 auto;
@@ -939,6 +1039,7 @@ window.__ModuleLoader__.load({
         autoFocus: props.autoFocus === true,
         spellCheck: false,
         disabled: props.disabled === true,
+        title: props.title || undefined,
         onChange: (event) => props.onChange(event.target.value),
       })
     }
@@ -1141,6 +1242,7 @@ window.__ModuleLoader__.load({
       return {
         id: '',
         name: '',
+        group: '',
         kind: 'sqlite',
         readOnly: true,
         config: baseConfig('sqlite'),
@@ -1157,6 +1259,7 @@ window.__ModuleLoader__.load({
       const fallback = baseConfig(source.kind || 'sqlite')
       draft.id = source.id
       draft.name = source.name || ''
+      draft.group = (source && source.group) || ''
       draft.kind = source.kind || 'sqlite'
       draft.readOnly = source.readOnly !== false
       draft.hasSecret = source.hasSecret === true
@@ -1251,6 +1354,7 @@ window.__ModuleLoader__.load({
           const body = {
             id: draft.id.trim(),
             name: draft.name.trim() || draft.id || t('form.untitled'),
+            group: (draft.group || '').trim(),
             kind: draft.kind,
             readOnly: draft.readOnly,
             config: { ...draft.config, port: draft.config.port ? Number(draft.config.port) : undefined },
@@ -1440,6 +1544,15 @@ window.__ModuleLoader__.load({
                   value: draft.name,
                   placeholder: draft.id || '',
                   onChange: (value) => patch({ name: value, nameTouched: true }),
+                }),
+              ),
+              h(
+                Field,
+                { key: 'group', label: t('form.group'), hint: t('form.groupHint') },
+                h(TextInput, {
+                  value: draft.group || '',
+                  placeholder: t('group.unassigned'),
+                  onChange: (value) => patch({ group: value }),
                 }),
               ),
               h(
@@ -1814,6 +1927,9 @@ window.__ModuleLoader__.load({
       const [notice, setNotice] = React.useState(null)
       const [probing, setProbing] = React.useState(null)
       const [pendingDelete, setPendingDelete] = React.useState(null)
+      const [selected, setSelected] = React.useState([])
+      const [bulkGroup, setBulkGroup] = React.useState('')
+      const [pendingBulkDelete, setPendingBulkDelete] = React.useState(false)
       const [settings, setSettings] = React.useState(null)
       const [audit, setAudit] = React.useState({ entries: [], file: null })
       const [env, setEnv] = React.useState(null)
@@ -1866,6 +1982,42 @@ window.__ModuleLoader__.load({
         } catch (error) {
           setNotice({ message: String((error && error.message) || error), isError: true })
         }
+      }
+
+      const toggleSelected = (id) => {
+        setPendingBulkDelete(false)
+        setSelected((prev) => (prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]))
+      }
+
+      const runBulk = async (action, extra = {}) => {
+        if (selected.length === 0) return
+        setBusy(true)
+        try {
+          const payload = await apiPost('/datasources/bulk', { action, ids: selected, ...extra })
+          const affected = Number(payload && payload.affected) || selected.length
+          setSelected([])
+          setPendingBulkDelete(false)
+          setBulkGroup('')
+          if (action === 'group') {
+            const name = String(extra.group || '').trim() || t('group.unassigned')
+            finish(t('notice.bulkGrouped').replace('{n}', String(affected)).replace('{group}', name), false)
+          } else {
+            finish(t('notice.bulkDone').replace('{n}', String(affected)), false)
+          }
+        } catch (error) {
+          setNotice({ message: String((error && error.message) || error), isError: true })
+        } finally {
+          setBusy(false)
+        }
+      }
+
+      const bulkDelete = async () => {
+        if (selected.length === 0) return
+        if (!pendingBulkDelete) {
+          setPendingBulkDelete(true)
+          return
+        }
+        await runBulk('delete')
       }
 
       const makeDefault = async (source) => {
@@ -1928,6 +2080,69 @@ window.__ModuleLoader__.load({
         }
       }
 
+      const renderItem = (source) => {
+        const probeInfo = source.lastProbe
+        const checked = selected.includes(source.id)
+        return h(
+          'li',
+          { className: 'dbmcp-item' + (checked ? ' is-selected' : ''), key: source.id },
+          h(
+            'label',
+            { className: 'dbmcp-item-pick', title: source.name || source.id },
+            h('input', {
+              type: 'checkbox',
+              checked,
+              onChange: () => toggleSelected(source.id),
+              'aria-label': source.name || source.id,
+            }),
+          ),
+          h(
+            'div',
+            { className: 'dbmcp-item-main' },
+            h(
+              'div',
+              { className: 'dbmcp-item-name' },
+              h('span', null, source.name || source.id),
+              h('span', { className: 'dbmcp-pill' }, source.kind),
+              source.isDefault ? h('span', { className: 'dbmcp-pill' }, t('sources.default')) : null,
+              h('span', { className: 'dbmcp-pill' }, source.readOnly ? t('sources.readonly') : t('sources.readwrite')),
+            ),
+            h('div', { className: 'dbmcp-item-target' }, [source.target, source.id].filter(Boolean).join(' · ')),
+            h(
+              'div',
+              { className: 'dbmcp-probe ' + (probeInfo ? (probeInfo.ok ? 'is-ok' : 'is-error') : '') },
+              probeInfo
+                ? `${probeInfo.ok ? '●' : '○'} ${probeInfo.message}`
+                : t('sources.neverProbed'),
+            ),
+          ),
+          h(
+            'div',
+            { className: 'dbmcp-item-actions' },
+            h(
+              'button',
+              { type: 'button', className: 'dbmcp-btn is-small', disabled: probing === source.id, onClick: () => probe(source) },
+              probing === source.id ? t('action.testing') : t('action.test'),
+            ),
+            h('button', { type: 'button', className: 'dbmcp-btn is-small', onClick: () => setView({ mode: 'schema', source }) }, t('action.schema')),
+            h('button', { type: 'button', className: 'dbmcp-btn is-small', onClick: () => setView({ mode: 'edit', source }) }, t('action.edit')),
+            source.isDefault
+              ? null
+              : h('button', { type: 'button', className: 'dbmcp-btn is-small', onClick: () => makeDefault(source) }, t('action.makeDefault')),
+            h(
+              'button',
+              {
+                type: 'button',
+                className: 'dbmcp-btn is-small is-danger',
+                onClick: () => remove(source),
+                onBlur: () => setPendingDelete((prev) => (prev === source.id ? null : prev)),
+              },
+              pendingDelete === source.id ? t('action.deleteConfirm') : t('action.delete'),
+            ),
+          ),
+        )
+      }
+
       const renderList = () => {
         if (sources.length === 0) {
           return h(
@@ -1937,60 +2152,89 @@ window.__ModuleLoader__.load({
             h('p', null, t('sources.empty.body')),
           )
         }
+        const buckets = new Map()
+        for (const source of sources) {
+          const key = String(source.group || '').trim()
+          if (!buckets.has(key)) buckets.set(key, [])
+          buckets.get(key).push(source)
+        }
+        const names = [...buckets.keys()].sort((a, b) => {
+          if (a === b) return 0
+          if (!a) return 1
+          if (!b) return -1
+          return a.localeCompare(b)
+        })
+        if (names.length === 1 && !names[0]) {
+          return h('ul', { className: 'dbmcp-list' }, buckets.get('').map(renderItem))
+        }
         return h(
-          'ul',
-          { className: 'dbmcp-list' },
-          sources.map((source) => {
-            const probeInfo = source.lastProbe
-            return h(
-              'li',
-              { className: 'dbmcp-item', key: source.id },
+          'div',
+          { className: 'dbmcp-groups' },
+          names.map((name) =>
+            h(
+              'section',
+              { className: 'dbmcp-group', key: name || '__none' },
               h(
-                'div',
-                { className: 'dbmcp-item-main' },
-                h(
-                  'div',
-                  { className: 'dbmcp-item-name' },
-                  h('span', null, source.name || source.id),
-                  h('span', { className: 'dbmcp-pill' }, source.kind),
-                  source.isDefault ? h('span', { className: 'dbmcp-pill' }, t('sources.default')) : null,
-                  h('span', { className: 'dbmcp-pill' }, source.readOnly ? t('sources.readonly') : t('sources.readwrite')),
-                ),
-                h('div', { className: 'dbmcp-item-target' }, [source.target, source.id].filter(Boolean).join(' · ')),
-                h(
-                  'div',
-                  { className: 'dbmcp-probe ' + (probeInfo ? (probeInfo.ok ? 'is-ok' : 'is-error') : '') },
-                  probeInfo
-                    ? `${probeInfo.ok ? '●' : '○'} ${probeInfo.message}`
-                    : t('sources.neverProbed'),
-                ),
+                'header',
+                { className: 'dbmcp-group-head' },
+                h('span', { className: 'dbmcp-group-name' }, name || t('group.unassigned')),
+                h('span', { className: 'dbmcp-hint' }, t('group.count').replace('{n}', String(buckets.get(name).length))),
               ),
-              h(
-                'div',
-                { className: 'dbmcp-item-actions' },
-                h(
-                  'button',
-                  { type: 'button', className: 'dbmcp-btn is-small', disabled: probing === source.id, onClick: () => probe(source) },
-                  probing === source.id ? t('action.testing') : t('action.test'),
-                ),
-                h('button', { type: 'button', className: 'dbmcp-btn is-small', onClick: () => setView({ mode: 'schema', source }) }, t('action.schema')),
-                h('button', { type: 'button', className: 'dbmcp-btn is-small', onClick: () => setView({ mode: 'edit', source }) }, t('action.edit')),
-                source.isDefault
-                  ? null
-                  : h('button', { type: 'button', className: 'dbmcp-btn is-small', onClick: () => makeDefault(source) }, t('action.makeDefault')),
-                h(
-                  'button',
-                  {
-                    type: 'button',
-                    className: 'dbmcp-btn is-small is-danger',
-                    onClick: () => remove(source),
-                    onBlur: () => setPendingDelete((prev) => (prev === source.id ? null : prev)),
-                  },
-                  pendingDelete === source.id ? t('action.deleteConfirm') : t('action.delete'),
-                ),
-              ),
-            )
-          }),
+              h('ul', { className: 'dbmcp-list' }, buckets.get(name).map(renderItem)),
+            ),
+          ),
+        )
+      }
+
+      const renderBulk = () => {
+        if (selected.length === 0) return null
+        const count = selected.length
+        return h(
+          'div',
+          { className: 'dbmcp-bulk' },
+          h('span', { className: 'dbmcp-bulk-count' }, t('bulk.selected').replace('{n}', String(count))),
+          h('button', { type: 'button', className: 'dbmcp-btn is-small', disabled: busy, onClick: () => runBulk('test') }, t('bulk.test')),
+          h(
+            'button',
+            { type: 'button', className: 'dbmcp-btn is-small', disabled: busy, onClick: () => runBulk('readOnly', { readOnly: true }) },
+            t('bulk.readonly'),
+          ),
+          h(
+            'button',
+            { type: 'button', className: 'dbmcp-btn is-small', disabled: busy, onClick: () => runBulk('readOnly', { readOnly: false }) },
+            t('bulk.readwrite'),
+          ),
+          h(
+            'div',
+            { className: 'dbmcp-bulk-group' },
+            h(TextInput, {
+              value: bulkGroup,
+              onChange: setBulkGroup,
+              placeholder: t('bulk.groupPlaceholder'),
+              title: t('bulk.group'),
+            }),
+            h(
+              'button',
+              { type: 'button', className: 'dbmcp-btn is-small', disabled: busy, onClick: () => runBulk('group', { group: bulkGroup }) },
+              t('bulk.apply'),
+            ),
+          ),
+          h(
+            'button',
+            {
+              type: 'button',
+              className: 'dbmcp-btn is-small is-danger',
+              disabled: busy,
+              onClick: () => bulkDelete(),
+              onBlur: () => setPendingBulkDelete(false),
+            },
+            pendingBulkDelete ? t('bulk.deleteConfirm').replace('{n}', String(count)) : t('bulk.delete'),
+          ),
+          h(
+            'button',
+            { type: 'button', className: 'dbmcp-btn is-small', onClick: () => setSelected([]) },
+            t('bulk.clear'),
+          ),
         )
       }
 
@@ -2046,6 +2290,7 @@ window.__ModuleLoader__.load({
           h(
             Card,
             { title: t('sources.title'), aside: t('sources.count').replace('{n}', String(sources.length)) },
+            renderBulk(),
             renderList(),
           ),
           h(
@@ -2181,7 +2426,7 @@ window.__ModuleLoader__.load({
           h('p', { className: 'dbmcp-sub' }, t('panel.subtitle')),
         ),
         view.mode === 'list'
-          ? null
+          ? h(Breadcrumbs, { t, trail: [{ label: t('panel.title') }, { label: t('sources.title') }] })
           : h(Breadcrumbs, {
               t,
               trail: [
@@ -2192,6 +2437,13 @@ window.__ModuleLoader__.load({
         h(
           'div',
           { className: 'dbmcp-toolbar' },
+          view.mode === 'list'
+            ? null
+            : h(
+                'button',
+                { type: 'button', className: 'dbmcp-btn', onClick: () => setView({ mode: 'list' }) },
+                `← ${t('action.backToSources')}`,
+              ),
           view.mode === 'list'
             ? h('button', { type: 'button', className: 'dbmcp-btn is-primary', onClick: () => setView({ mode: 'create' }) }, t('action.new'))
             : null,
