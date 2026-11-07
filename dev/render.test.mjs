@@ -64,7 +64,7 @@ function check(name, condition, extra) {
     passed += 1
     return
   }
-  failures.push(`${name}${extra ? ` 鈥?${extra}` : ''}`)
+  failures.push(`${name}${extra ? ` — ${extra}` : ''}`)
 }
 
 function render(name, factory, options) {
@@ -160,10 +160,10 @@ if (panel) {
   const header = collect(panel, (node) => node.type === 'h1')
   check('main panel: title rendered', header.length === 1)
   const tabs = collect(panel, (node) => node.type === 'button' && node.props.role === 'tab')
-  check('main panel: three tabs', tabs.length === 3, String(tabs.length))
+  check('main panel: five tabs', tabs.length === 5, String(tabs.length))
   check(
     'main panel: first tab is active',
-    tabs.length === 3 && tabs[0].props['aria-selected'] === true && tabs[1].props['aria-selected'] === false,
+    tabs.length === 5 && tabs[0].props['aria-selected'] === true && tabs[1].props['aria-selected'] === false,
   )
   const back = collect(panel, (node) => node.type === 'button' && node.props.className === 'dbmcp-back')
   check('main panel: back-to-chat button', back.length === 1, String(back.length))

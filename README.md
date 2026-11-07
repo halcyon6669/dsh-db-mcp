@@ -23,7 +23,7 @@ Requirements and staged plan: [`docs/requirements.md`](docs/requirements.md).
   | ----- | ------- |
   | `GET /health` | plugin version, Host facts, Python discovery, runtime paths, registry state, MCP status, settings |
   | `GET /datasources` | registry, credentials projected away |
-  | `GET /schema?datasource=鈥&table=鈥[&schema=鈥` | read-only structure: tables, or the columns of one table |
+  | `GET /schema?datasource=…&table=…[&schema=…]` | read-only structure: tables, or the columns of one table |
   | `GET /dbeaver/scan` | connections already configured in DBeaver |
   | `GET /mcp/status` | Python server phase, tool list, last error, stderr tail |
   | `GET /settings` 路 `POST /settings` | global write switch and audit switch |
@@ -46,7 +46,7 @@ Requirements and staged plan: [`docs/requirements.md`](docs/requirements.md).
 - **Python server** (`server/`): `main.py` (FastMCP, seven tools), `engines.py`
   (per-engine connect/introspect/query), `store.py` (reads the registry).
   The plugin spawns it over stdio and publishes its tools as `mcp__db__*` on the
-  host `tools` service 鈥?it does not go through a `dsh-mcp-client` Loader row.
+  host `tools` service — it does not go through a `dsh-mcp-client` Loader row.
 
 ### Tools the agent gets
 
@@ -87,7 +87,7 @@ MySQL 8.0.46 路 demo@%@demo 路 select version() ok
 ```
 
 A wrong password or an unreachable listener now surfaces the driver's own
-message (`ORA-01017`, `DPY-6005`, `password authentication failed` 鈥? instead of
+message (`ORA-01017`, `DPY-6005`, `password authentication failed` — instead of
 "port reachable". Testing an unsaved form works too: `test_connection` accepts
 `kind` + `config` + `password` without writing the registry first. When the
 Python server cannot start, the probe degrades to a TCP check and says so.
@@ -129,20 +129,20 @@ never returned to the page (`hasSecret` is the only signal).
 `GET /dbeaver/scan` looks for `data-sources.json` under
 `%APPDATA%\DBeaverData\workspace*\General\.dbeaver\` (plus the `General` and
 Linux/macOS layouts). When the sibling `credentials-config.json` exists it is
-decrypted with DBeaver's built-in key (AES-128-CBC, zero IV, 16-byte prefix 鈥?see `Tatsh/dbeaver-creds`). A workspace that never saved passwords simply
+decrypted with DBeaver's built-in key (AES-128-CBC, zero IV, 16-byte prefix — see `Tatsh/dbeaver-creds`). A workspace that never saved passwords simply
 imports the connection with an empty password, which the UI shows as
 `no password`.
 
 Connections created through the DBeaver driver dialog carry only a JDBC URL
-(`configurationType: URL`) 鈥?no `database` field at all and no `user`. The
+(`configurationType: URL`) — no `database` field at all and no `user`. The
 importer therefore parses `jdbc:mysql://host:port/db`,
-`jdbc:postgresql://鈥 and `jdbc:oracle:thin:@鈥 for whatever the form fields
+`jdbc:postgresql://…` and `jdbc:oracle:thin:@…` for whatever the form fields
 omit, and takes the user from the decrypted credentials when it is stored
 there. The imported source is named after the DBeaver connection name (slugged
 into an id), keeps `readOnly: true`, and gets the saved password copied into
 `secrets.json`. Anything still missing is reported in `warnings`.
 
-The panel navigates with breadcrumbs (`鏁版嵁搴?/ 鏂板缓鏁版嵁婧恅): the trailing step
+The panel navigates with a tab bar (`数据源列表 / 新建数据源 / 从 DBeaver 导入`): the trailing step
 is plain text, every earlier step is a link back, and no page needs a separate
 "back to list" button.
 
@@ -152,7 +152,7 @@ Nothing has to be installed on the host; every engine below is a throwaway
 container with a demo account (`demo` / `dbmcp-demo`).
 
 ```
-# PostgreSQL 鈥?smallest and fastest to start, the recommended first target
+# PostgreSQL — smallest and fastest to start, the recommended first target
 docker run -d --name dbmcp-pg -p 5432:5432 \
   -e POSTGRES_USER=demo -e POSTGRES_PASSWORD=dbmcp-demo -e POSTGRES_DB=demo \
   postgres:15-alpine
@@ -162,7 +162,7 @@ docker run -d --name dbmcp-mysql -p 3306:3306 \
   -e MYSQL_USER=demo -e MYSQL_PASSWORD=dbmcp-demo -e MYSQL_DATABASE=demo \
   -e MYSQL_ROOT_PASSWORD=dbmcp-root mysql:8.0-debian
 
-# Oracle Free 鈥?several GB, a minute or two to become healthy
+# Oracle Free — several GB, a minute or two to become healthy
 docker run -d --name dbmcp-oracle -p 1521:1521 -e ORACLE_PASSWORD=dbmcp-demo \
   gvenzl/oracle-free:23-slim
 ```
@@ -193,20 +193,20 @@ restart) after changing `src/host.js`.
 
 The page follows the same chrome as the other first-party panels:
 
-- a masthead with **鈥?杩斿洖浼氳瘽** (closes the panel through `ctx.layout.selectPanel(null)`),
-  the `鏁版嵁搴揱 title, and the connection/version pills;
-- a tab row 鈥?**鏁版嵁婧?/ 杩愯鏃惰瘖鏂?/ 瀹¤鏃ュ織** 鈥?with the active tab underlined;
-- the action bar under the tabs (new, import, refresh, restart MCP), which belongs
-  to the first tab only.
+- a masthead with **‹ 返回会话** (closes the panel through `ctx.layout.selectPanel(null)`),
+  the `数据库` title, and the connection/version pills;
+- a tab row — **数据源列表 / 新建数据源 / 从 DBeaver 导入 / 运行时诊断 / 审计日志** — with
+  the active tab underlined;
+- the action bar under the tabs (new, import, refresh, restart MCP), always visible;
 
-Create, edit, import and structure are sub-views of the **鏁版嵁婧?* tab: the tab
-stays active while the form is open, and both the tab and the `鈫?鏁版嵁婧恅 button
-return to the list.
+Picking **新建数据源** or **从 DBeaver 导入** swaps only the card below the tabs — the
+masthead, the tabs and the action bar stay put. Editing reuses the **新建数据源** tab;
+the structure browser is a sub-view of **数据源列表** with its own `← 数据源` link.
 
 ## Schema overview
 The **Structure** button on a source row opens a read-only browser: the tables
 (or views) of that source on the left, and the columns of the selected table on
-the right 鈥?name, type, nullability, default value and primary-key marker. It is
+the right — name, type, nullability, default value and primary-key marker. It is
 served by `GET /schema`, which only forwards `list_tables` / `describe_table` to
 the MCP server, so the page itself can never run SQL. Nothing is cached: each
 open reads the live catalog.
@@ -221,7 +221,7 @@ look until at least one group exists.
 Tick the checkbox on a row to open the bulk bar: test all selected sources, flip
 them to read-only or writable, move them into a group, or delete them (two-step
 confirmation). Bulk work goes through `POST /datasources/bulk` with
-`{ action: 'test' | 'readOnly' | 'group' | 'delete', ids: [...], 鈥?}`, so one
+`{ action: 'test' | 'readOnly' | 'group' | 'delete', ids: [...], … }`, so one
 request does the whole batch and the response carries the refreshed list.
 
 ## Development
@@ -237,16 +237,16 @@ node dev/mcp.test.mjs     # 19 checks: real Python server over stdio, real SQLit
 ```
 
 `npm test` runs everything except `mcp.test.mjs`, which needs the venv and the
-Oracle container. `node dev/bump.mjs 0.6.1` updates both version strings.
+Oracle container. `node dev/bump.mjs 0.6.2` updates both version strings.
 
 ## Safety switches
 
 Two independent gates decide whether a statement may write:
 
-1. **Global switch** 鈥?`allowWrite` in `<runtime>/settings.json`, toggled from the
+1. **Global switch** — `allowWrite` in `<runtime>/settings.json`, toggled from the
    diagnostics card. Off by default; while off every write statement is refused
    with `user_error` and a hint pointing at the switch.
-2. **Per-source flag** 鈥?`readOnly` on the data source, on by default. A source
+2. **Per-source flag** — `readOnly` on the data source, on by default. A source
    stays read-only even when the global switch is on until you clear its flag.
 
 The Python server reads the global flag from `DB_MCP_ALLOW_WRITE` at start-up; the
@@ -266,7 +266,7 @@ the error when it failed. Result rows are never logged. The file rotates to
 `dev/shims.test.mjs` also asserts that `package.json` has no UTF-8 BOM: the host
 parses it with `JSON.parse`, which rejects a BOM, and the plugin then shows up as
 `availability: missing` instead of loading. Editors that "add BOM" will break the
-bundle silently 鈥?if the sidebar entry disappears after a restart, check this
+bundle silently — if the sidebar entry disappears after a restart, check this
 first.
 
 ## Stage map
@@ -283,7 +283,7 @@ first.
 
 ## License
 
-Apache License 2.0 鈥?see [LICENSE](LICENSE).
+Apache License 2.0 — see [LICENSE](LICENSE).
 
 ## Runtime layout
 

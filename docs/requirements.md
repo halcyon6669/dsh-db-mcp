@@ -892,3 +892,28 @@ PostgreSQL/MySQL/Oracle 只做 TCP 端口探测，无法证明口令与服务的
 - `dev/i18n.test.mjs` 12/12（新增 `tab.sources` / `tab.runtime` / `tab.audit` / `header.backToChat` 四条，中英齐全，无死键）。
 - 其余套件不变：selftest 36/36、parse 24/24、p5 15/15、mcp 19/19、shims ok。
 - 线上：`POST /reload` → generation 9、`0.6.1`、8 工具。
+
+
+## 25. 0.6.2：数据源列表独立成标签，新建/导入只切换内容区
+
+### 25.1 交互
+
+- 标签栏固定为五项：**数据源列表 / 新建数据源 / 从 DBeaver 导入 / 运行时诊断 / 审计日志**。
+- 点击「新建数据源」「从 DBeaver 导入」只替换下方卡片内容，页头、标签栏、操作栏都不移动，也不再需要「← 数据源」返回按钮。
+- 数据源卡片标题按用户要求改名为「数据源列表」；新建与导入卡片不再重复标题（标签已经表明当前位置）。
+- 编辑与结构视图仍归属「数据源列表」之外的既有语义：编辑落在「新建数据源」标签（表单复用），结构落在「数据源列表」标签内的子视图，卡片内提供 `← 数据源` 返回。
+- 操作栏（新建 / 导入 / 刷新 / 重启 MCP）在所有标签常显，不再随视图隐藏。
+
+### 25.2 实现要点
+
+- 去掉独立的 `tab` state，改为由 `view.mode` 推导：`tabOfMode(mode)` 把 create/edit → create、import → import、runtime/audit 各自映射，其余归 list。
+- `selectTab(id)` 直接 `setView({ mode: id })`，因此点击当前标签也能从子视图回到该标签的根视图。
+- `Card` 支持 `title: null`（不渲染 `h2`），用于新建/导入两张卡。
+- 词典同步：新增 `tab.list` / `tab.create` / `tab.import`，删除 `tab.sources`、`sources.title`、`form.new`、`import.title`。
+
+### 25.3 验证
+
+- `dev/render.test.mjs` 36/36（标签数断言 3 → 5，首个标签选中态、返回会话按钮、面包屑已移除）。
+- `dev/i18n.test.mjs` 12/12（新旧键替换后无死键、中英一致）。
+- 其余不变：selftest 36/36、parse 24/24、p5 15/15、mcp 19/19、shims ok。
+- 线上：`POST /reload` → generation 10、`0.6.2`。

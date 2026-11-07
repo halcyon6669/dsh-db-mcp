@@ -19,13 +19,24 @@ window.__ModuleLoader__.load({
 
     const NS = 'db-mcp'
     /** Top-level tabs of the panel. `sources` also hosts the create/edit/import/structure views. */
-    const TABS = [{ id: 'sources' }, { id: 'runtime' }, { id: 'audit' }]
+    const TABS = [{ id: 'list' }, { id: 'create' }, { id: 'import' }, { id: 'runtime' }, { id: 'audit' }]
 
     /** Tab labels stay literal so the i18n check can see every key. */
     function tabLabel(t, id) {
+      if (id === 'create') return t('tab.create')
+      if (id === 'import') return t('tab.import')
       if (id === 'runtime') return t('tab.runtime')
       if (id === 'audit') return t('tab.audit')
-      return t('tab.sources')
+      return t('tab.list')
+    }
+
+    /** The tab that owns a view; the form and the schema browser live under a tab. */
+    function tabOfMode(mode) {
+      if (mode === 'create' || mode === 'edit') return 'create'
+      if (mode === 'import') return 'import'
+      if (mode === 'runtime') return 'runtime'
+      if (mode === 'audit') return 'audit'
+      return 'list'
     }
     const API = '/plugins/db-mcp/api'
     const KINDS = ['sqlite', 'postgres', 'mysql', 'oracle']
@@ -69,7 +80,6 @@ window.__ModuleLoader__.load({
         'notice.probeOk': '{name}: connection OK ({ms} ms).',
         'notice.probeFail': '{name}: {message}',
         'notice.mcpReady': 'MCP server is up with {count} tool(s).',
-        'sources.title': 'Data sources',
         'sources.count': '{n} configured',
         'sources.empty.title': 'No data source yet',
         'sources.empty.body': 'Add one here, or import the connections DBeaver already keeps on this machine. The agent queries real data through MCP tools, never through this page.',
@@ -79,7 +89,6 @@ window.__ModuleLoader__.load({
         'sources.hasPassword': 'password saved',
         'sources.noPassword': 'no password',
         'sources.neverProbed': 'never tested',
-        'form.new': 'New data source',
         'form.edit': 'Edit {name}',
         'form.name': 'Display name',
         'form.id': 'Identifier',
@@ -115,7 +124,6 @@ window.__ModuleLoader__.load({
         'form.readOnly': 'Read-only (recommended)',
         'form.readOnlyHint': 'blocks writes for this source unless the global write switch is on',
         'form.invalid': 'Fill the required fields first.',
-        'import.title': 'Import from DBeaver',
         'import.body': 'Reads data-sources.json from the DBeaver workspace and decrypts credentials-config.json when it exists.',
         'import.empty': 'No DBeaver connection found on this machine.',
         'import.file': 'File',
@@ -158,7 +166,9 @@ window.__ModuleLoader__.load({
         'audit.rows': '{n} row(s)',
         'action.schema': 'Structure',
         'action.backToSources': 'Data sources',
-        'tab.sources': 'Data sources',
+        'tab.list': 'Data source list',
+        'tab.create': 'New data source',
+        'tab.import': 'Import from DBeaver',
         'tab.runtime': 'Runtime',
         'tab.audit': 'Audit log',
         'header.backToChat': 'Back to chat',
@@ -226,7 +236,6 @@ window.__ModuleLoader__.load({
         'notice.probeOk': '{name}：连接正常（{ms} ms）。',
         'notice.probeFail': '{name}：{message}',
         'notice.mcpReady': 'MCP 服务已就绪，共 {count} 个工具。',
-        'sources.title': '数据源',
         'sources.count': '已配置 {n} 个',
         'sources.empty.title': '还没有数据源',
         'sources.empty.body': '可以在这里新增，也可以直接导入这台机器上 DBeaver 已有的连接。AI 通过 MCP 工具查询真实数据，不会在这个页面里执行 SQL。',
@@ -236,7 +245,6 @@ window.__ModuleLoader__.load({
         'sources.hasPassword': '已存密码',
         'sources.noPassword': '无密码',
         'sources.neverProbed': '尚未测试',
-        'form.new': '新建数据源',
         'form.edit': '编辑 {name}',
         'form.name': '显示名称',
         'form.id': '标识符',
@@ -271,7 +279,6 @@ window.__ModuleLoader__.load({
         'form.readOnly': '只读（推荐）',
         'form.readOnlyHint': '未打开全局写开关时，此数据源拒绝写操作',
         'form.invalid': '请先填写必填字段。',
-        'import.title': '从 DBeaver 导入',
         'import.body': '读取 DBeaver 工作区里的 data-sources.json；存在 credentials-config.json 时一并解密口令。',
         'import.empty': '这台机器上没有找到 DBeaver 连接。',
         'import.file': '文件',
@@ -314,7 +321,9 @@ window.__ModuleLoader__.load({
         'audit.rows': '{n} 行',
         'action.schema': '结构',
         'action.backToSources': '数据源',
-        'tab.sources': '数据源',
+        'tab.list': '数据源列表',
+        'tab.create': '新建数据源',
+        'tab.import': '从 DBeaver 导入',
         'tab.runtime': '运行时诊断',
         'tab.audit': '审计日志',
         'header.backToChat': '返回会话',
@@ -1092,7 +1101,7 @@ window.__ModuleLoader__.load({
         h(
           'header',
           { className: 'dbmcp-card-head' },
-          h('h2', { className: 'dbmcp-card-title' }, props.title),
+          props.title == null ? null : h('h2', { className: 'dbmcp-card-title' }, props.title),
           props.aside == null ? null : h('span', { className: 'dbmcp-pill' }, props.aside),
         ),
         props.children,
@@ -2012,7 +2021,7 @@ window.__ModuleLoader__.load({
       const [state, setState] = React.useState({ status: 'loading', data: null, error: null })
       const [busy, setBusy] = React.useState(false)
       const [view, setView] = React.useState({ mode: 'list' })
-      const [tab, setTab] = React.useState('sources')
+      const tab = tabOfMode(view.mode)
       const [notice, setNotice] = React.useState(null)
       const [probing, setProbing] = React.useState(null)
       const [pendingDelete, setPendingDelete] = React.useState(null)
@@ -2020,9 +2029,9 @@ window.__ModuleLoader__.load({
       const [bulkGroup, setBulkGroup] = React.useState('')
       const [pendingBulkDelete, setPendingBulkDelete] = React.useState(false)
 
+      /** Switching a tab only swaps the card below; the chrome never moves. */
       const selectTab = (id) => {
-        setTab(id)
-        if (id === 'sources') setView({ mode: 'list' })
+        setView({ mode: id })
       }
 
       const backToChat = () => {
@@ -2354,7 +2363,7 @@ window.__ModuleLoader__.load({
           h('button', { type: 'button', className: 'dbmcp-btn', onClick: load }, t('error.retry')),
         )
       } else if (view.mode === 'create') {
-        body = h(Card, { title: t('form.new') }, h(SourceForm, {
+        body = h(Card, { title: null }, h(SourceForm, {
           t,
           draft: emptyDraft(),
           editing: null,
@@ -2375,13 +2384,24 @@ window.__ModuleLoader__.load({
           }),
         })
       } else if (view.mode === 'schema') {
-        body = h(Card, { title: fmt(t('schema.title'), { name: view.source.name || view.source.id }) }, h(SchemaView, {
-          t,
-          source: view.source,
-          onBack: () => setView({ mode: 'list' }),
-        }))
+        body = h(Card, { title: fmt(t('schema.title'), { name: view.source.name || view.source.id }) },
+          h(
+            'div',
+            { className: 'dbmcp-schema-head' },
+            h(
+              'button',
+              { type: 'button', className: 'dbmcp-btn is-small', onClick: () => setView({ mode: 'list' }) },
+              `← ${t('action.backToSources')}`,
+            ),
+          ),
+          h(SchemaView, {
+            t,
+            source: view.source,
+            onBack: () => setView({ mode: 'list' }),
+          }),
+        )
       } else if (view.mode === 'import') {
-        body = h(Card, { title: t('import.title') }, h(ImportView, {
+        body = h(Card, { title: null }, h(ImportView, {
           t,
           existingIds: sources.map((item) => item.id),
           onImported: (payload) => finish(fmt(t('notice.imported'), { n: (payload.imported || []).length }), false),
@@ -2390,11 +2410,11 @@ window.__ModuleLoader__.load({
       } else {
         body = h(
           'div',
-          { className: 'dbmcp-grid' + (tab === 'sources' ? '' : ' is-single') },
-          tab === 'sources'
+          { className: 'dbmcp-grid is-single' },
+          tab === 'list'
             ? h(
                 Card,
-                { title: t('sources.title'), aside: t('sources.count').replace('{n}', String(sources.length)) },
+                { title: t('tab.list'), aside: t('sources.count').replace('{n}', String(sources.length)) },
                 renderBulk(),
                 renderList(),
               )
@@ -2555,30 +2575,9 @@ window.__ModuleLoader__.load({
         h(
           'div',
           { className: 'dbmcp-toolbar' },
-          tab !== 'sources'
-            ? null
-            : view.mode === 'list'
-              ? null
-              : h(
-                  'button',
-                  { type: 'button', className: 'dbmcp-btn', onClick: () => setView({ mode: 'list' }) },
-                  `← ${t('action.backToSources')}`,
-                ),
-          tab !== 'sources'
-            ? null
-            : view.mode === 'list'
-              ? h('button', { type: 'button', className: 'dbmcp-btn is-primary', onClick: () => setView({ mode: 'create' }) }, t('action.new'))
-              : null,
-          tab !== 'sources'
-            ? null
-            : view.mode === 'list'
-              ? h('button', { type: 'button', className: 'dbmcp-btn', onClick: () => setView({ mode: 'import' }) }, t('action.import'))
-              : null,
-          tab !== 'sources'
-            ? null
-            : view.mode === 'list'
-              ? h('button', { type: 'button', className: 'dbmcp-btn', disabled: busy, onClick: load }, t('action.refresh'))
-              : null,
+          h('button', { type: 'button', className: 'dbmcp-btn is-primary', onClick: () => setView({ mode: 'create' }) }, t('action.new')),
+          h('button', { type: 'button', className: 'dbmcp-btn', onClick: () => setView({ mode: 'import' }) }, t('action.import')),
+          h('button', { type: 'button', className: 'dbmcp-btn', disabled: busy, onClick: load }, t('action.refresh')),
           h(
                 'button',
                 {

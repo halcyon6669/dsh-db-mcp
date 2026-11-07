@@ -1,5 +1,5 @@
 /**
- * dsh-db-mcp 鈥?Host implementation (loaded by ../index.js, re-importable).
+ * dsh-db-mcp — Host implementation (loaded by ../index.js, re-importable).
  *
  * Owns the data-source registry and the JSON API behind the management panel:
  *   GET  /health              runtime facts for the diagnostics card
@@ -33,7 +33,7 @@ const { createBridge } = await import(new URL(`./tools.js?v=${GENERATION}`, impo
 
 const API_PREFIX = '/plugins/db-mcp/api'
 const PLUGIN_NAME = 'dsh-db-mcp'
-const PLUGIN_VERSION = '0.6.1'
+const PLUGIN_VERSION = '0.6.2'
 const SCHEMA_VERSION = 1
 const REGISTRY_FILE = 'datasources.json'
 const SECRETS_FILE = 'secrets.json'
