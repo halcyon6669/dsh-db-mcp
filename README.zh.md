@@ -18,8 +18,8 @@
 ## 运行
 
 ```sh
-dsh plugin --profile desktop add dsh-db-mcp@latest   # 桌面端
-dsh plugin --profile web add dsh-db-mcp@latest       # Web 端
+dsh plugin --profile desktop add dsh-db-mcp   # 桌面端
+dsh plugin --profile web add dsh-db-mcp       # Web 端
 ```
 
 `--profile` 指定装进哪个 profile（随 DSH 提供的是 `desktop` 与 `web`，其它名字首次使用时自动创建）。卸载用
@@ -43,7 +43,7 @@ dsh plugin --profile web add dsh-db-mcp@latest       # Web 端
 | `mcp__db__list_tables` | 某个源里的表与视图 |
 | `mcp__db__describe_table` | 列、类型、可空、主键 |
 | `mcp__db__sample_rows` | 取几行样本 |
-| `mcp__db__run_query` | 执行一条语句 |
+| `mcp__db__execute_sql` | 执行一条语句——查询，或在允许写入时执行写入 |
 | `mcp__db__explain_query` | 执行计划 |
 | `mcp__db__get_ddl` | `CREATE TABLE` 语句 |
 | `mcp__db__test_connection` | 真实登录 + `select 1`，回报服务器/用户/schema |

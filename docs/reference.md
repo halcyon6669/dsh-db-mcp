@@ -56,7 +56,7 @@ Row limits come from the server: `DB_MCP_MAX_ROWS` (default 200) per call, cappe
 | `list_tables` | `datasource?`, `schema?` | `{ datasource, tables: [{ schema, name, type }] }` |
 | `describe_table` | `table`, `datasource?`, `schema?` | `{ columns: [{ name, type, nullable, default, primaryKey }] }` |
 | `sample_rows` | `table`, `datasource?`, `limit=20`, `schema?` | `{ columns, rows, rowCount, truncated }` |
-| `run_query` | `sql`, `datasource?`, `max_rows?` | `{ columns, rows, rowCount, truncated, elapsedMs }` |
+| `execute_sql` | `sql`, `datasource?`, `max_rows?` | `{ columns, rows, rowCount, truncated, elapsedMs }`, or `{ affectedRows }` for a write |
 | `explain_query` | `sql`, `datasource?` | `{ plan }` (engine-specific text) |
 | `get_ddl` | `table`, `datasource?`, `schema?` | `{ ddl, source: 'sqlite_master' \| 'columns' }` |
 | `test_connection` | `datasource?` or `kind`+`config`+`password?`, `read_only?` | `{ ok, latencyMs, message, detail: { stage, server, database, user, schema } }` |
@@ -109,7 +109,7 @@ and is read only by the Host, never sent to the page.
 512 KiB:
 
 ```json
-{"at":"2026-11-08T06:20:28.000Z","tool":"mcp__db__run_query","datasource":"pg-demo","ok":true,"ms":41,"rows":3,"sql":"select id, name from customers order by id"}
+{"at":"2026-11-08T06:20:28.000Z","tool":"mcp__db__execute_sql","datasource":"pg-demo","ok":true,"ms":41,"rows":3,"sql":"select id, name from customers order by id"}
 ```
 
 ### Data source fields

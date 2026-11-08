@@ -28,8 +28,8 @@ twice: import the connections DBeaver already knows, then just ask.
 ## Run
 
 ```sh
-dsh plugin --profile desktop add dsh-db-mcp@latest   # desktop app
-dsh plugin --profile web add dsh-db-mcp@latest       # web UI
+dsh plugin --profile desktop add dsh-db-mcp   # desktop app
+dsh plugin --profile web add dsh-db-mcp       # web UI
 ```
 
 `--profile` picks the profile to install into (`desktop` and `web` ship with DSH;
@@ -57,7 +57,7 @@ Prefer to start from scratch? **New data source** takes one connection string
 | `mcp__db__list_tables` | tables and views of a source |
 | `mcp__db__describe_table` | columns, types, nullability, primary key |
 | `mcp__db__sample_rows` | a few rows of a table |
-| `mcp__db__run_query` | run one statement |
+| `mcp__db__execute_sql` | execute one statement — a query, or a write when that is allowed |
 | `mcp__db__explain_query` | query plan |
 | `mcp__db__get_ddl` | `CREATE TABLE` statement |
 | `mcp__db__test_connection` | real login, `select 1`, server/user/schema |

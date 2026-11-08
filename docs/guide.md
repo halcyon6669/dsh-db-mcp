@@ -10,8 +10,8 @@ file formats see [reference.md](reference.md); for build and release see
 needs `--profile` before the pnpm verb:
 
 ```sh
-dsh plugin --profile desktop add dsh-db-mcp@latest     # fresh install, desktop app
-dsh plugin --profile web add dsh-db-mcp@latest         # the web UI's profile
+dsh plugin --profile desktop add dsh-db-mcp     # fresh install, desktop app
+dsh plugin --profile web add dsh-db-mcp         # the web UI's profile
 dsh plugin --profile desktop add dsh-db-mcp@0.6.10     # pin a version
 dsh plugin --profile desktop remove dsh-db-mcp         # uninstall
 dsh plugin --profile desktop why dsh-db-mcp            # which version is installed
@@ -30,8 +30,8 @@ dsh plugin --profile desktop add C:\path\to\dsh-db-mcp
 
 Three things to know about upgrades:
 
-- pnpm caches a package's metadata. A version published minutes ago may still be
-  invisible to `@latest`; naming the version sidesteps it.
+- pnpm caches a package's metadata. A version published minutes ago may be
+  invisible to the dist-tag; naming the version sidesteps it.
 - pnpm holds new releases behind a cooldown (`minimumReleaseAge`, 1440 minutes by
   default) so a freshly published — possibly compromised — version is not resolved
   automatically. Asking for an exact version makes pnpm record that version in

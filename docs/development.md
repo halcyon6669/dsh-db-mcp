@@ -52,7 +52,7 @@ npm run test:engines  # server/engines.py against a stub DB-API connection
 
 | Suite | Covers |
 | ----- | ------ |
-| `dev/engines.test.mjs` + `engines.test.py` | commit/rollback and `affectedRows` contract of `run_query`, no database needed |
+| `dev/engines.test.mjs` + `engines.test.py` | commit/rollback and `affectedRows` contract of `execute_sql`, no database needed |
 | `dev/selftest.mjs` | mounts `src/host.js` on a throwaway port: registry, validation, groups, bulk, schema route, DBeaver scan, probes |
 | `dev/shims.test.mjs` | mounts `index.js`, checks both routes, `/reload`, tool publication, and that `package.json` has no BOM |
 | `dev/parse.test.mjs` | the connection-string parser (DSN, JDBC, TNS, SID, paths) |
