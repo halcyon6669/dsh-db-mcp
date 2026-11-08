@@ -1,3 +1,8 @@
+> **Design log.** The working record of the design and the P1 → P7 build, written in
+> Chinese as the project ran. It is kept for the decisions and the edge cases behind
+> them, not as user documentation: start at [../README.md](../README.md), or
+> [guide.md](guide.md) for usage and [reference.md](reference.md) for the wire format.
+
 # DSH 数据库插件（暂名 `dsh-db-mcp`）需求细化 v0.2
 
 > 状态：需求已按你的选择定稿，代码尚未开始

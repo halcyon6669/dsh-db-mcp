@@ -1,0 +1,223 @@
+# Guide
+
+Everything the panel can do, in the order you meet it. For the wire protocol and
+file formats see [reference.md](reference.md); for build and release see
+[development.md](development.md).
+
+## Install and upgrade
+
+```sh
+dsh plugin add dsh-db-mcp@latest     # fresh install
+dsh plugin add dsh-db-mcp@0.6.10     # pin a version (skips dist-tag and cache games)
+```
+
+From a source checkout, install the directory instead — the profile then links it,
+so edits are live:
+
+```sh
+dsh plugin add C:\path\to\dsh-db-mcp
+```
+
+Two things to know about upgrades:
+
+- pnpm caches a package's metadata. A version published minutes ago may still be
+  invisible to `@latest`; naming the version sidesteps it.
+- DSH applies a supply-chain cooldown to freshly published releases. Pinning is
+  also the way around that.
+
+If the sidebar entry disappears after a restart, see [Troubleshooting](#troubleshooting).
+
+## The panel
+
+Sidebar → **Database**. The masthead carries **‹ Back to chat**, the title, and the
+connection and version pills. Below it, five tabs:
+
+| Tab | What it does |
+| ---- | ------------ |
+| Data source list | the registry: rows grouped by label, bulk actions, refresh, restart MCP |
+| New data source | one connection string, user, password; also used for editing |
+| Import from DBeaver | scan, tick, import |
+| Runtime | Host facts, tool count, global write switch, venv and driver versions |
+| Audit log | the last dozen tool calls, converted to your time zone |
+
+**New data source** and **Import from DBeaver** swap only the card under the tabs —
+the masthead and tabs stay put, and every earlier step is still a tab away.
+
+## Adding a source
+
+The form is as small as DBeaver's connection dialog: **connection string**, **user**,
+**password** (with a *save password* box). Pasting fills type, host, port,
+database/service, name and identifier; the derived values only appear under
+**More settings**, together with schema, SID, SSL mode, charset and the read-only
+switch.
+
+Accepted shapes — a DSN, a JDBC URL, an Oracle TNS descriptor, a JDBC thin
+descriptor, or a bare database file:
+
+```
+postgresql://alice:secret@db.example.com:6543/orders?sslmode=require
+jdbc:postgresql://localhost:5432/appdb
+mysql://root:pw@127.0.0.1:3306/shop?charset=utf8mb4
+jdbc:mariadb://10.0.0.5:3307/legacy
+oracle://system:oracle@localhost:1521/XEPDB1
+jdbc:oracle:thin:@//ora:1521/ORCLPDB1        # service name
+jdbc:oracle:thin:@ora:1521:ORCL              # SID
+(DESCRIPTION=(ADDRESS=(HOST=tns-host)(PORT=1522))(CONNECT_DATA=(SERVICE_NAME=svc1)))
+jdbc:sqlite:C:\data\app.db
+sqlite:///C:/data/chinook.db
+C:\data\app.db          /  /var/lib/app.sqlite3
+```
+
+A password found inside the URL is sent once and then only stored; it is never
+echoed back. `id` is immutable once created — rename the *display name* instead
+(double-click the name on a row).
+
+## Importing from DBeaver
+
+The importer looks for `data-sources.json` under
+`%APPDATA%\DBeaverData\workspace*\General\.dbeaver\`, plus the `General` and
+Linux/macOS layouts. When the sibling `credentials-config.json` exists it is
+decrypted with DBeaver's built-in key (AES-128-CBC, zero IV, 16-byte prefix — see
+[Tatsh/dbeaver-creds](https://github.com/Tatsh/dbeaver-creds)). Ticked entries are
+copied into the registry, their passwords into `secrets.json`.
+
+Two details make real DBeaver workspaces work:
+
+- Connections created through the driver dialog often carry only a JDBC URL
+  (`configurationType: URL`) with no `database` field and no `user`. The importer
+  parses the URL for whatever the form fields omit and takes the user from the
+  decrypted credentials.
+- A connection already configured is not offered twice. Sources are identified by
+  kind + host + port + database/service/SID + user (SQLite by file path); a match
+  comes back as `alreadyImported`, the checkbox is disabled and the row says
+  *already added as …*.
+
+A workspace that never saved passwords is fine: the connection is imported with an
+empty password and the row shows **no password**. Fill it in once and it stays.
+
+## Testing a connection
+
+**Test** performs a real login: SQLite is opened read-only through `node:sqlite`,
+the other engines go through the Python drivers, which authenticate and run
+`select 1` (Oracle: `select 1 from dual`). The row then shows the banner, the user
+and database, and how long the login took:
+
+```
+Oracle AI Database 26ai Free Release 23.26.3.0.0 · DEMO@FREEPDB1 · select 1 from dual ok
+PostgreSQL 15.19 · demo@demo · select version() ok
+MySQL 8.0.46 · demo@%@demo · select version() ok
+```
+
+Wrong passwords now surface the driver's own message (`ORA-01017`, `DPY-6005`,
+`password authentication failed`) instead of "port reachable". An unsaved form can
+be tested too. When the Python server cannot start, the probe degrades to a TCP
+check and says so.
+
+## Groups and bulk actions
+
+Every source carries an optional **group** label, editable under *More settings*.
+
+- **Create** — type a name in **New group**.
+- **Rename** — double-click the group name; **delete** drops the label from its
+  members.
+- **Move** — drag a source row onto a group, or onto **Ungrouped** to clear it.
+- **Rename a source** — double-click its name; the id never changes.
+- **Select** — each group header has a select-all box, so grouped sources join bulk
+  work exactly like loose ones.
+
+With a selection made, the bulk bar can test, flip read-only, move into a group, or
+delete (two-step confirmation).
+
+## Structure browser
+
+**Structure** on a source row opens a read-only view: tables and views on the left,
+columns of the selected table on the right (name, type, nullability, default,
+primary-key marker). It is served by `GET /schema`, which only forwards
+`list_tables` / `describe_table` to the MCP server — the page cannot run SQL, and
+nothing is cached.
+
+## Safety switches
+
+Two independent gates decide whether a statement may write:
+
+1. **Global switch** — `allowWrite` in `<runtime>/settings.json`, toggled on the
+   *Runtime* tab. Off by default; while off every write is refused with
+   `user_error` and a hint pointing at the switch.
+2. **Per-source flag** — `readOnly` on the source, on by default. Click the
+   *read-only* / *writable* pill on a row to flip it in one click; the pill turns
+   amber while that source accepts writes.
+
+The Python server reads the global flag at start-up and the host restarts it
+whenever the switch flips. Read-only is enforced again at the driver where the
+engine allows it (`mode=ro` for SQLite, `default_transaction_read_only` for
+PostgreSQL, `SET SESSION TRANSACTION READ ONLY` for MySQL).
+
+## Audit log
+
+Every MCP tool call appends one JSON line to `<runtime>/logs/audit.jsonl` (0600):
+time, tool, source, duration, row count, the SQL truncated to 2000 characters, and
+the error when it failed. Result rows are never logged. The file rotates to
+`audit.1.jsonl` at 512 KiB and logging can be switched off with `auditLog: false`.
+
+The panel shows the last dozen entries **on your own clock**; the file keeps UTC so
+it stays comparable across machines. Each stamp carries the full local timestamp in
+its tooltip.
+
+## Runtime layout
+
+```
+$DSH_HOME/db-mcp/
+  datasources.json   # sources and groups, never passwords, 0600
+  secrets.json       # per-source password, 0600, Host-only
+  settings.json      # global write switch + audit switch, 0600
+  logs/mcp.log       # masked log
+  logs/audit.jsonl   # one line per MCP tool call, rotates at 512 KiB
+  .venv/             # plugin-local venv: mcp, psycopg, PyMySQL, oracledb
+```
+
+## Test databases in Docker
+
+Nothing has to be installed on the host; each engine below is a throwaway
+container with a demo account (`demo` / `dbmcp-demo`).
+
+```sh
+# PostgreSQL — smallest and fastest, the recommended first target
+docker run -d --name dbmcp-pg -p 5432:5432 \
+  -e POSTGRES_USER=demo -e POSTGRES_PASSWORD=dbmcp-demo -e POSTGRES_DB=demo \
+  postgres:15-alpine
+
+# MySQL
+docker run -d --name dbmcp-mysql -p 3306:3306 \
+  -e MYSQL_USER=demo -e MYSQL_PASSWORD=dbmcp-demo -e MYSQL_DATABASE=demo \
+  -e MYSQL_ROOT_PASSWORD=dbmcp-root mysql:8.0-debian
+
+# Oracle Free — several GB, a minute or two to become healthy
+docker run -d --name dbmcp-oracle -p 1521:1521 -e ORACLE_PASSWORD=dbmcp-demo \
+  gvenzl/oracle-free:23-slim
+```
+
+On Windows, 1521 often falls inside a Hyper-V reserved port block and `docker run`
+fails with *"An attempt was made to access a socket in a way forbidden by its access
+permissions"*. Check `netsh interface ipv4 show excludedportrange protocol=tcp` and
+publish another host port, e.g. `-p 11521:1521`; point the datasource at 11521.
+
+Then import or create a source with the matching string:
+
+```
+postgresql://demo:dbmcp-demo@127.0.0.1:5432/demo
+mysql://demo:dbmcp-demo@127.0.0.1:3306/demo
+oracle://system:dbmcp-demo@127.0.0.1:1521/FREEPDB1
+```
+
+## Troubleshooting
+
+| Symptom | Cause | Fix |
+| ------- | ----- | --- |
+| Sidebar entry gone, plugin card says *not installed* | `package.json` carries a UTF-8 BOM, so the host's `JSON.parse` fails and the bundle is skipped silently | rewrite the file without a BOM; re-apply with `plugin_manager set_bundle` |
+| Panel says *Host interface disconnected* | the Host half is not mounted (plugin disabled, or bundle failed to load) | check the plugin card, then reload the page |
+| Edited `src/host.js` but nothing changed | the Cordis entry is imported once per process | `POST /plugins/db-mcp/api/reload`, or restart DSH after changing `index.js` |
+| Tools missing from the agent | the Python server never started | *Runtime* → tools count and error; then **Restart MCP** |
+| `unknown tool "mcp__db__…"` right after a restart | tool registration was disposed with the old process | restart DSH once, then drive restarts from **Restart MCP** |
+| Oracle login fails with `DPY-6005` | listener unreachable, or host/port wrong | `docker ps`, then *Test* again |
+| `ORA-01950` on first write | Oracle user has no tablespace quota | `alter user <user> quota unlimited on users` |
+| Import row red: *incomplete host/database* | the DBeaver entry has neither fields nor a parsable URL | open the connection in DBeaver once, or create the source by hand |

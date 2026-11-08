@@ -1,7 +1,7 @@
 {
   "name": "dsh-db-mcp",
-  "version": "0.6.9",
-  "description": "DSH database plugin: a data-source management panel plus a Python MCP server that exposes those sources to the agent.",
+  "version": "0.6.10",
+  "description": "DSH plugin: import the connections DBeaver already knows, then let the agent query SQLite, PostgreSQL, MySQL and Oracle through eight MCP tools. No DSH files to edit, no data source to retype.",
   "keywords": [
     "dsh",
     "dsh-plugin",

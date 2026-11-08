@@ -1,0 +1,99 @@
+# Development
+
+How the repository is put together, how to iterate on it without restarting DSH
+every time, and how a release happens.
+
+## Layout
+
+```
+index.js            Cordis entry: routes only, plus the cache-busting import of src/host.js
+src/host.js         Host half: registry, DBeaver import, probes, settings, audit, MCP bridge wiring
+src/mcp.js          minimal MCP client over stdio (newline-delimited JSON-RPC)
+src/tools.js        spawns the Python server, publishes its tools on the host tools service
+client.js           browser half: sidebar entry + panel (React, theme tokens only)
+locale/{en,zh}.json package metadata (title/description) shown by the plugin card
+server/main.py      FastMCP server: eight tools
+server/engines.py   per-engine connect / introspect / query / DDL
+server/store.py     reads the registry written by the Host
+cordis.patch.yml    one Loader row with id "db-mcp"
+dev/                test suites and the version bump script
+docs/               this documentation
+```
+
+The package ships `index.js`, `src/*.js`, `client.js`, `locale/*.json`, `icon.svg`,
+`cordis.patch.yml`, `server/*.py`, `server/requirements.txt`, `docs/*.md`, both
+READMEs and the license.
+
+## Hot reload
+
+The Cordis Loader imports a plugin entry **once per process**, so editing
+`index.js` needs a DSH restart. Everything else is deliberately reloadable:
+
+- `index.js` only registers two routes and imports `./src/host.js?v=<n>`, so
+  `POST /plugins/db-mcp/api/reload` re-imports the whole Host half.
+- `src/host.js` and `src/tools.js` propagate the same generation string to their own
+  imports (`new URL(import.meta.url).searchParams.get('v')`), otherwise Node's module
+  cache would keep returning the old copies of the inner files.
+- The Python server is a child process: `POST /mcp/restart` (or the **Restart MCP**
+  button) replaces it. Tool registrations stay in place — disposing and re-registering
+  them makes the agent's tool catalog go stale and report `unknown tool`.
+
+A profile that links this directory (`dsh plugin add <path>`) reflects edits
+immediately; one installed from npm needs a release.
+
+## Tests
+
+```sh
+npm test              # everything below except mcp.test.mjs
+npm run test:ci       # the portable subset the publish workflow runs
+npm run test:mcp      # real Python server, real SQLite; Oracle when its container is up
+npm run test:engines  # server/engines.py against a stub DB-API connection
+```
+
+| Suite | Covers |
+| ----- | ------ |
+| `dev/engines.test.mjs` + `engines.test.py` | commit/rollback and `affectedRows` contract of `run_query`, no database needed |
+| `dev/selftest.mjs` | mounts `src/host.js` on a throwaway port: registry, validation, groups, bulk, schema route, DBeaver scan, probes |
+| `dev/shims.test.mjs` | mounts `index.js`, checks both routes, `/reload`, tool publication, and that `package.json` has no BOM |
+| `dev/parse.test.mjs` | the connection-string parser (DSN, JDBC, TNS, SID, paths) |
+| `dev/render.test.mjs` | components rendered with a stub React: tab bar, form fields, list, bulk bar, breadcrumbs |
+| `dev/i18n.test.mjs` | en/zh key parity, no dead keys, no stray copy outside the dictionaries |
+| `dev/p5.test.mjs` | settings, audit rotation, Python environment discovery |
+| `dev/mcp.test.mjs` | real stdio handshake, all eight tools, read-only refusal, login failures |
+
+Suites that need external services skip rather than fail: `mcp.test.mjs` probes the
+Oracle port and prints `skip … is not listening` when the container is down.
+
+## Releasing
+
+The package publishes from GitHub Actions with
+[npm trusted publishing](https://docs.npmjs.com/trusted-publishers):
+`.github/workflows/publish.yml` trades the workflow's OIDC token for a short-lived
+publish credential, so no `NPM_TOKEN` secret exists.
+
+```sh
+node dev/bump.mjs 0.6.10     # package.json + src/host.js, both
+git commit -am "chore: release 0.6.10"
+git push origin main
+git tag v0.6.10 && git push origin v0.6.10
+```
+
+The workflow refuses to publish when the tag and `package.json` disagree, runs
+`npm run test:ci`, publishes with `--provenance`, then polls the registry until the
+version appears. Local `npm publish` still works for the very first release, before
+a trusted publisher exists.
+
+Keep `src/host.js`'s `PLUGIN_VERSION` in step with `package.json` — the panel and
+`/health` read it, and a mismatch ships a package that reports the previous version.
+
+## Adding an engine
+
+1. `server/engines.py`: extend `connect()` and the dialect tables (`_quote`,
+   `_limit_clause`, `list_tables`, `describe_table`, `table_ddl`).
+2. `src/host.js`: add the kind to `KINDS`, give it a default port, a validation
+   branch in `normalizeInput`, and a `describeTarget` label.
+3. `client.js`: add the string to `KINDS` and, if the form needs extra fields, to
+   `SourceForm`; extend `parseConnectionText` with the scheme and JDBC prefix.
+4. `server/requirements.txt`: the driver, and `docs/reference.md`: the field table.
+5. Tests: `dev/parse.test.mjs` for the string, `dev/selftest.mjs` for validation and
+   the probe, and a demo container in `docs/guide.md`.
