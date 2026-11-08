@@ -2,6 +2,8 @@
 
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
+English | [中文](README.zh.md)
+
 DSH plugin that adds a **Database** entry to the sidebar with a data-source
 management panel, backed by a Python MCP server that lets the agent query those
 databases through tools (not through the page).
@@ -11,39 +13,44 @@ databases through tools (not through the page).
   and never come back to the page.
 - Import the connections DBeaver already has, including its encrypted passwords.
 - Read-only by default, with two independent write gates and an audit log.
-- The agent gets seven MCP tools, not a SQL editor in the UI.
+- The agent gets eight MCP tools, not a SQL editor in the UI.
 
 Requirements and staged plan: [`docs/requirements.md`](docs/requirements.md).
 
 ## What exists today (P7)
 
-- **Host half** (`index.js` 鈫?`src/host.js`): a Cordis plugin serving
+- **Host half** (`index.js` → `src/host.js`): a Cordis plugin serving
   `/plugins/db-mcp/api` from the DSH web server.
+
   | Route | Purpose |
   | ----- | ------- |
   | `GET /health` | plugin version, Host facts, Python discovery, runtime paths, registry state, MCP status, settings |
   | `GET /datasources` | registry, credentials projected away |
   | `GET /schema?datasource=…&table=…[&schema=…]` | read-only structure: tables, or the columns of one table |
+  | `GET /groups` | declared groups plus every group label in use |
   | `GET /dbeaver/scan` | connections already configured in DBeaver |
   | `GET /mcp/status` | Python server phase, tool list, last error, stderr tail |
-  | `GET /settings` 路 `POST /settings` | global write switch and audit switch |
+  | `GET /settings` · `POST /settings` | global write switch and audit switch |
   | `GET /audit?limit=N` | the tail of the tool-call audit log |
   | `GET /python/env` | interpreter, venv path, installed driver versions |
   | `POST /python/setup` | create the venv and `pip install -r server/requirements.txt` |
   | `POST /datasources/save` | create or update a source (`id` is immutable) |
   | `POST /datasources/delete` | remove a source and its stored secret |
   | `POST /datasources/test` | real login probe: SQLite over `node:sqlite`, the rest through the Python drivers |
+  | `POST /datasources/bulk` | test / read-only / group / delete a set of sources |
+  | `POST /groups/save` · `POST /groups/delete` | create, rename or delete a group |
   | `POST /dbeaver/import` | copy selected DBeaver connections into the registry |
-  | `POST /mcp/start` 路 `POST /mcp/restart` | start or restart the Python MCP server |
+  | `POST /mcp/start` · `POST /mcp/restart` | start or restart the Python MCP server |
   | `POST /mcp/call` | dev helper: call one MCP tool through the panel |
   | `POST /reload` | dev helper: re-import `src/host.js` without restarting DSH |
+
 - **Client half** (`client.js`): sidebar entry (`db-mcp`, order 25) plus the main
   panel with the source list, the minimal create/edit form (one connection string),
   test/delete/default actions, a read-only *structure* browser, the DBeaver import
   flow, a *Restart MCP* button, the runtime diagnostics card (tool count, global
   write switch, venv and package versions with a one-click install) and an
   *audit log* card. Copy is localized (zh/en) through the client `locale` service.
-- **Python server** (`server/`): `main.py` (FastMCP, seven tools), `engines.py`
+- **Python server** (`server/`): `main.py` (FastMCP, eight tools), `engines.py`
   (per-engine connect/introspect/query), `store.py` (reads the registry).
   The plugin spawns it over stdio and publishes its tools as `mcp__db__*` on the
   host `tools` service — it does not go through a `dsh-mcp-client` Loader row.
@@ -65,7 +72,7 @@ Requirements and staged plan: [`docs/requirements.md`](docs/requirements.md).
 
 ### Python environment
 
-Interpreter discovery order: plugin config `pythonPath` 鈫?`<DSH_HOME>/db-mcp/.venv/Scripts/python.exe` 鈫?that venv on POSIX 鈫?`python` 鈫?`python3`. Dependencies live in the runtime venv, not in the package:
+Interpreter discovery order: plugin config `pythonPath` → `<DSH_HOME>/db-mcp/.venv/Scripts/python.exe` → that venv on POSIX → `python` → `python3`. Dependencies live in the runtime venv, not in the package:
 
     python -m venv C:\Users\<you>\.dsh\db-mcp\.venv
     C:\Users\<you>\.dsh\db-mcp\.venv\Scripts\python.exe -m pip install -r server\requirements.txt
@@ -81,14 +88,14 @@ panel row then shows the server banner, the connected user and database, and how
 long the login took, for example:
 
 ```
-Oracle AI Database 26ai Free Release 23.26.3.0.0 路 DEMO@FREEPDB1 路 select 1 from dual ok
-PostgreSQL 15.19 路 demo@demo 路 select version() ok
-MySQL 8.0.46 路 demo@%@demo 路 select version() ok
+Oracle AI Database 26ai Free Release 23.26.3.0.0 · DEMO@FREEPDB1 · select 1 from dual ok
+PostgreSQL 15.19 · demo@demo · select version() ok
+MySQL 8.0.46 · demo@%@demo · select version() ok
 ```
 
 A wrong password or an unreachable listener now surfaces the driver's own
 message (`ORA-01017`, `DPY-6005`, `password authentication failed` — instead of
-"port reachable". Testing an unsaved form works too: `test_connection` accepts
+"port reachable"). Testing an unsaved form works too: `test_connection` accepts
 `kind` + `config` + `password` without writing the registry first. When the
 Python server cannot start, the probe degrades to a TCP check and says so.
 
@@ -149,9 +156,9 @@ file path), and a DBeaver entry that matches one of them comes back with
 its checkbox and says *already added as …*; `POST /dbeaver/import` reports such
 ids under `skipped` instead of creating a second copy.
 
-The panel navigates with a tab bar (`数据源列表 / 新建数据源 / 从 DBeaver 导入`): the trailing step
-is plain text, every earlier step is a link back, and no page needs a separate
-"back to list" button.
+The panel navigates with a tab bar (*Data source list / New data source /
+Import from DBeaver / Runtime / Audit log*): the active step is plain text, every
+earlier step is a link back, and no page needs a separate "back to list" button.
 
 ## Test databases in Docker
 
@@ -191,8 +198,14 @@ Then create a source in the panel with the matching connection string, e.g.
 plugin_manager install_bundle  target=<absolute path to this directory>
 ```
 
+or, from npm:
+
+```
+dsh plugin add dsh-db-mcp@latest
+```
+
 The bundle patch (`cordis.patch.yml`) inserts one Loader row with id `db-mcp`.
-The profile links this directory, so file edits are live; the Host module is
+A profile that links this directory keeps file edits live; the Host module is
 imported once per process, hence `POST /plugins/db-mcp/api/reload` (or an app
 restart) after changing `src/host.js`.
 
@@ -200,18 +213,21 @@ restart) after changing `src/host.js`.
 
 The page follows the same chrome as the other first-party panels:
 
-- a masthead with **‹ 返回会话** (closes the panel through `ctx.layout.selectPanel(null)`),
-  the `数据库` title, and the connection/version pills;
-- a tab row — **数据源列表 / 新建数据源 / 从 DBeaver 导入 / 运行时诊断 / 审计日志** — with
-  the active tab underlined;
+- a masthead with **‹ Back to chat** (closes the panel through
+  `ctx.layout.selectPanel(null)`), the **Database** title, and the
+  connection/version pills;
+- a tab row — **Data source list / New data source / Import from DBeaver /
+  Runtime / Audit log** — with the active tab underlined.
 
-Picking **新建数据源** or **从 DBeaver 导入** swaps only the card below the tabs — the
-masthead and the tabs stay put. Editing reuses the **新建数据源** tab; the structure
-browser is a sub-view of **数据源列表** with its own `← 数据源` link. There is no second
-action bar: **刷新** and **重启 MCP** sit in the source-list card header, and the list
-itself owns the group tools.
+Picking **New data source** or **Import from DBeaver** swaps only the card below
+the tabs — the masthead and the tabs stay put. Editing reuses the **New data
+source** tab; the structure browser is a sub-view of **Data source list** with
+its own `← Sources` link. There is no second action bar: **Refresh** and
+**Restart MCP** sit in the source-list card header, and the list itself owns the
+group tools.
 
 ## Schema overview
+
 The **Structure** button on a source row opens a read-only browser: the tables
 (or views) of that source on the left, and the columns of the selected table on
 the right — name, type, nullability, default value and primary-key marker. It is
@@ -223,19 +239,20 @@ open reads the live catalog.
 
 Every source carries an optional **group** label (`group` in the registry,
 editable under *More settings*). Groups are user-owned: type a name in the
-**新建分组** box to create one, **double-click a group name to rename it** (or the
-trash button to delete the group), and drag a source row onto a group to move it
-there (drag it onto **未分组** to clear the label). Double-clicking a source name
-renames just that source — its id never changes. The list renders one section per
-group, sorted by name with the ungrouped sources last; while no group exists the
-list keeps its flat look.
+**New group** box to create one, **double-click a group name to rename it** (or
+the delete button to drop the group), and drag a source row onto a group to move
+it there (drag it onto **Ungrouped** to clear the label). Double-clicking a
+source name renames just that source — its id never changes. The list renders one
+section per group, sorted by name with the ungrouped sources last; while no group
+exists the list keeps its flat look.
 
-Each group header carries a select-all box, so sources inside a group take part in
-bulk work exactly like loose ones. Tick any row (or click its text) to open the
-bulk bar: test all selected sources, flip them to read-only or writable, move them
-into a group, or delete them (two-step confirmation). Bulk moves go through
-`POST /datasources/bulk` with `{ action: 'test' | 'readOnly' | 'group' | 'delete', ids: [...], … }`,
-while group CRUD uses `GET /groups`, `POST /groups/save` and `POST /groups/delete`.
+Each group header carries a select-all box, so sources inside a group take part
+in bulk work exactly like loose ones. Tick any row to open the bulk bar: test all
+selected sources, flip them to read-only or writable, move them into a group, or
+delete them (two-step confirmation). Bulk moves go through
+`POST /datasources/bulk` with
+`{ action: 'test' | 'readOnly' | 'group' | 'delete', ids: [...], … }`, while group
+CRUD uses `GET /groups`, `POST /groups/save` and `POST /groups/delete`.
 
 ## Releasing
 
@@ -257,7 +274,7 @@ release, before a trusted publisher exists for the package.
 ## Development
 
 ```
-node dev/selftest.mjs     # mounts src/host.js on a throwaway port, 42 checks
+node dev/selftest.mjs     # mounts src/host.js on a throwaway port, 46 checks
 node dev/shims.test.mjs   # mounts index.js, checks routes, /reload, tool publication
 node dev/parse.test.mjs   # 24 checks: connection-string parser (DSN/JDBC/TNS/paths)
 node dev/render.test.mjs  # 37 checks: components render with a stub React
@@ -267,7 +284,7 @@ node dev/mcp.test.mjs     # 19 checks: real Python server over stdio, real SQLit
 ```
 
 `npm test` runs everything except `mcp.test.mjs`, which needs the venv and the
-Oracle container. `node dev/bump.mjs 0.6.2` updates both version strings.
+Oracle container. `node dev/bump.mjs 0.6.6` updates both version strings.
 
 ## Safety switches
 
@@ -309,7 +326,7 @@ first.
 | P4 | PostgreSQL / MySQL / Oracle dialects (done) |
 | P5 | diagnostics, one-click venv, reload, audit log, global write switch (done) |
 | P6 | i18n polish and docs (done) |
-| P7 | read-only schema overview (done) |
+| P7 | read-only schema overview, groups, bulk actions (done) |
 
 ## License
 

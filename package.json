@@ -41,7 +41,8 @@
     "server/requirements.txt",
     "docs/*.md",
     "LICENSE",
-    "README.md"
+    "README.md",
+    "README.zh.md"
   ],
   "scripts": {
     "test": "node dev/selftest.mjs && node dev/shims.test.mjs && node dev/parse.test.mjs && node dev/render.test.mjs && node dev/i18n.test.mjs && node dev/p5.test.mjs",
