@@ -553,7 +553,9 @@ def run_query(profile: dict, connection, sql: str, max_rows: int) -> dict:
     ensure_readable(sql, profile)
     kind = profile.get("kind")
     started = time.perf_counter()
+    is_write = _first_keyword(sql) not in READ_STARTERS
     cursor = connection.cursor()
+    affected = None
     try:
         if kind == "oracle" and profile.get("readOnly"):
             try:
@@ -562,14 +564,24 @@ def run_query(profile: dict, connection, sql: str, max_rows: int) -> dict:
                 pass
         cursor.execute(sql)
         columns, rows, truncated = _rows(cursor, max_rows)
-        if profile.get("readOnly") or not connection_autocommit(kind):
-            try:
-                connection.rollback()
-            except Exception:  # noqa: BLE001 - nothing to roll back
-                pass
+        if is_write:
+            affected = _affected_rows(cursor)
+        if not is_write or profile.get("readOnly"):
+            # Reads (and anything on a read-only source) must not hold the session
+            # open in a transaction; writes need the commit below instead.
+            if not connection_autocommit(kind):
+                try:
+                    connection.rollback()
+                except Exception:  # noqa: BLE001 - nothing to roll back
+                    pass
+        else:
+            # No engine here autocommits by default: `sqlite3.connect` runs in the
+            # legacy implicit-transaction mode, and MySQL/PostgreSQL/Oracle are
+            # explicit-commit. A write not committed here dies with the connection.
+            connection.commit()
     finally:
         cursor.close()
-    return {
+    result = {
         "sql": sql,
         "columns": columns,
         "rows": rows,
@@ -577,6 +589,22 @@ def run_query(profile: dict, connection, sql: str, max_rows: int) -> dict:
         "truncated": truncated,
         "elapsedMs": int((time.perf_counter() - started) * 1000),
     }
+    if affected is not None:
+        result["affectedRows"] = affected
+    return result
+
+
+def _affected_rows(cursor) -> int | None:
+    """Rows touched by a write, when the driver reports it.
+
+    `rowcount` is -1 for statements whose count is unknown (and some drivers raise
+    instead), so anything but a real, non-negative int becomes `None`.
+    """
+    try:
+        value = cursor.rowcount
+    except Exception:  # noqa: BLE001 - drivers without a usable rowcount
+        return None
+    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else None
 
 
 def connection_autocommit(kind: str) -> bool:

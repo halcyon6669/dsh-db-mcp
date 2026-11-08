@@ -41,6 +41,9 @@ export function renderResult(value) {
     return `error [${code}]: ${message}${hint ? `\n${hint}` : ''}`;
   }
   if (Array.isArray(value.columns) && Array.isArray(value.rows)) {
+    if (typeof value.affectedRows === 'number' && value.columns.length === 0) {
+      return `ok: ${value.affectedRows} row(s) affected, ${value.elapsedMs}ms`;
+    }
     const head = value.columns.join(' | ');
     const body = value.rows
       .slice(0, 50)
@@ -173,7 +176,8 @@ export function createBridge({
     if (error) entry.error = String((error && error.message) || error);
     else {
       const parsed = outcome && outcome.parsed;
-      const rows = parsed && (parsed.rowCount ?? (Array.isArray(parsed.rows) ? parsed.rows.length : undefined));
+      // A write reports how many rows it touched; a read reports how many came back.
+      const rows = parsed && (parsed.affectedRows ?? parsed.rowCount ?? (Array.isArray(parsed.rows) ? parsed.rows.length : undefined));
       if (typeof rows === 'number') entry.rows = rows;
       if (parsed && parsed.error && parsed.error.code) entry.code = parsed.error.code;
     }

@@ -206,7 +206,8 @@ def run_query(sql: str, datasource: Optional[str] = None, max_rows: Optional[int
 
     Read-only datasources accept SELECT/WITH/SHOW/EXPLAIN statements only.
     Results are capped by `max_rows` (default 200); `truncated` says whether more
-    rows existed.
+    rows existed. Writes (INSERT/UPDATE/DELETE/DDL) are committed and report
+    `affectedRows` instead of a result set.
     """
     try:
         limit = _clamp_rows(max_rows)

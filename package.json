@@ -1,6 +1,6 @@
 {
   "name": "dsh-db-mcp",
-  "version": "0.6.7",
+  "version": "0.6.8",
   "description": "DSH database plugin: a data-source management panel plus a Python MCP server that exposes those sources to the agent.",
   "keywords": [
     "dsh",
@@ -45,8 +45,9 @@
     "README.zh.md"
   ],
   "scripts": {
-    "test": "node dev/selftest.mjs && node dev/shims.test.mjs && node dev/parse.test.mjs && node dev/render.test.mjs && node dev/i18n.test.mjs && node dev/p5.test.mjs",
+    "test": "node dev/engines.test.mjs && node dev/selftest.mjs && node dev/shims.test.mjs && node dev/parse.test.mjs && node dev/render.test.mjs && node dev/i18n.test.mjs && node dev/p5.test.mjs",
     "test:ci": "node dev/shims.test.mjs && node dev/parse.test.mjs && node dev/render.test.mjs && node dev/i18n.test.mjs && node dev/p5.test.mjs",
+    "test:engines": "node dev/engines.test.mjs",
     "test:mcp": "node dev/mcp.test.mjs"
   },
   "dsh": {

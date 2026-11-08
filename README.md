@@ -274,17 +274,22 @@ release, before a trusted publisher exists for the package.
 ## Development
 
 ```
+node dev/engines.test.mjs # 11 checks: engines.py commit/rollback + affectedRows, stub connection
 node dev/selftest.mjs     # mounts src/host.js on a throwaway port, 46 checks
 node dev/shims.test.mjs   # mounts index.js, checks routes, /reload, tool publication
 node dev/parse.test.mjs   # 24 checks: connection-string parser (DSN/JDBC/TNS/paths)
-node dev/render.test.mjs  # 37 checks: components render with a stub React
+node dev/render.test.mjs  # 40 checks: components and the result renderer, stub React
 node dev/i18n.test.mjs    # 12 checks: en/zh parity, no dead keys, no stray copy
 node dev/p5.test.mjs      # 15 checks: settings, audit log, python environment
 node dev/mcp.test.mjs     # 19 checks: real Python server over stdio, real SQLite + Oracle logins
 ```
 
 `npm test` runs everything except `mcp.test.mjs`, which needs the venv and the
-Oracle container. `node dev/bump.mjs 0.6.6` updates both version strings.
+Oracle container. `dev/engines.test.mjs` needs a Python interpreter (the plugin
+venv, else `python` on PATH) but no database: it drives `server/engines.py`
+against a stub DB-API connection, covering the commit/rollback and
+`affectedRows` contract of `run_query`. `node dev/bump.mjs 0.6.6` updates both
+version strings.
 
 ## Safety switches
 

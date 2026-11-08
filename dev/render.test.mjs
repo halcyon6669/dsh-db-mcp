@@ -197,6 +197,16 @@ if (crumbs) {
   check('breadcrumbs: current step is plain text', current.length === 1)
 }
 
+// src/tools.js renderer: a write has no result set, so its one-line summary must
+// report the affected rows instead of a misleading "0 row(s)".
+const { renderResult } = await import('../src/tools.js')
+const writeText = renderResult({ ok: true, sql: 'update t set a = 1', columns: [], rows: [], rowCount: 0, affectedRows: 2, elapsedMs: 7 })
+check('renderer: write reports affected rows', writeText === 'ok: 2 row(s) affected, 7ms', writeText)
+const readText = renderResult({ ok: true, sql: 'select 1 as n', columns: ['n'], rows: [[1]], rowCount: 1, elapsedMs: 1 })
+check('renderer: select keeps the table shape', readText.startsWith('n\n') && readText.endsWith('(1 row(s), 1ms)'), readText)
+const ddlText = renderResult({ ok: true, sql: 'insert into t values (1)', columns: [], rows: [], rowCount: 0, elapsedMs: 2 })
+check('renderer: a write without a rowcount still renders as a result set', ddlText.includes('(0 row(s), 2ms)'), ddlText)
+
 const total = passed + failures.length
 if (failures.length > 0) {
   console.log(`render.test: ${passed}/${total} passed`)

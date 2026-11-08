@@ -188,16 +188,17 @@ workflow 会拒绝 tag 与 `package.json` 版本不一致的情况，先跑可�
 ## 开发
 
 ```
+node dev/engines.test.mjs # 11 项：engines.py 的 commit/rollback 与 affectedRows，用假连接
 node dev/selftest.mjs     # 在临时端口挂载 src/host.js，46 项断言
 node dev/shims.test.mjs   # 挂载 index.js，检查路由、/reload、工具发布
 node dev/parse.test.mjs   # 24 项：连接串解析（DSN/JDBC/TNS/路径）
-node dev/render.test.mjs  # 37 项：用 stub React 渲染组件
+node dev/render.test.mjs  # 40 项：用 stub React 渲染组件与结果渲染器
 node dev/i18n.test.mjs    # 12 项：中英键集合一致、无死键、无漏译
 node dev/p5.test.mjs      # 15 项：设置、审计日志、Python 环境
 node dev/mcp.test.mjs     # 19 项：真实 Python 服务走 stdio，真实 SQLite 与 Oracle 登录
 ```
 
-`npm test` 跑除 `mcp.test.mjs` 之外的全部（后者需要 venv 与 Oracle 容器）。`node dev/bump.mjs 0.6.6` 会同步两处版本号。
+`npm test` 跑除 `mcp.test.mjs` 之外的全部（后者需要 venv 与 Oracle 容器）。`dev/engines.test.mjs` 只需要一个 Python 解释器（插件 venv，否则 PATH 里的 `python`），不连数据库：它用假 DB-API 连接驱动 `server/engines.py`，守住 `run_query` 的 commit/rollback 与 `affectedRows` 契约。`node dev/bump.mjs 0.6.6` 会同步两处版本号。
 
 ## 安全闸门
 
