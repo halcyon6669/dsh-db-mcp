@@ -12,7 +12,7 @@ needs `--profile` before the pnpm verb:
 ```sh
 dsh plugin --profile desktop add dsh-db-mcp     # fresh install, desktop app
 dsh plugin --profile web add dsh-db-mcp         # the web UI's profile
-dsh plugin --profile desktop add dsh-db-mcp@0.6.10     # pin a version
+dsh plugin --profile desktop add dsh-db-mcp@0.7.0     # pin a version
 dsh plugin --profile desktop remove dsh-db-mcp         # uninstall
 dsh plugin --profile desktop why dsh-db-mcp            # which version is installed
 ```

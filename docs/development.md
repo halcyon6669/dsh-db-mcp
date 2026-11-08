@@ -72,10 +72,10 @@ The package publishes from GitHub Actions with
 publish credential, so no `NPM_TOKEN` secret exists.
 
 ```sh
-node dev/bump.mjs 0.6.10     # package.json + src/host.js, both
-git commit -am "chore: release 0.6.10"
+node dev/bump.mjs 0.7.0     # package.json + src/host.js, both
+git commit -am "chore: release 0.7.0"
 git push origin main
-git tag v0.6.10 && git push origin v0.6.10
+git tag v0.7.0 && git push origin v0.7.0
 ```
 
 The workflow refuses to publish when the tag and `package.json` disagree, runs
@@ -90,7 +90,7 @@ Installing that release into a profile (the profile name is required, the verb i
 pnpm's):
 
 ```sh
-dsh plugin --profile desktop add dsh-db-mcp@0.6.10
+dsh plugin --profile desktop add dsh-db-mcp@0.7.0
 dsh plugin --profile desktop remove dsh-db-mcp
 ```
 
