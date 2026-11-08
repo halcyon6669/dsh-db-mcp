@@ -295,6 +295,9 @@ Two independent gates decide whether a statement may write:
    with `user_error` and a hint pointing at the switch.
 2. **Per-source flag** — `readOnly` on the data source, on by default. A source
    stays read-only even when the global switch is on until you clear its flag.
+   Click the *read-only* / *writable* pill on a source row to flip it in one
+   click; the pill turns amber while that source accepts writes, and the notice
+   reminds you when the global switch is still off.
 
 The Python server reads the global flag from `DB_MCP_ALLOW_WRITE` at start-up; the
 host restarts it whenever the switch flips. Read-only is also enforced by the

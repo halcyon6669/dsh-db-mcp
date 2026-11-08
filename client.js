@@ -168,6 +168,11 @@ window.__ModuleLoader__.load({
         'audit.hint': 'One line per MCP tool call: tool, source, duration and outcome. Query results are never logged.',
         'audit.rows': '{n} row(s)',
         'audit.tz': 'Times follow your computer clock ({zone}); the log file keeps UTC.',
+        'action.lockSource': 'Click to make this source read-only',
+        'action.unlockSource': 'Click to allow writes on this source',
+        'notice.nowReadOnly': '{name} is read-only now.',
+        'notice.nowWritable': '{name} accepts writes now.',
+        'notice.nowWritableLocked': '{name} accepts writes now, but the global write switch is still off — turn it on under Runtime.',
         'action.schema': 'Structure',
         'action.backToSources': 'Data sources',
         'tab.list': 'Data source list',
@@ -341,6 +346,11 @@ window.__ModuleLoader__.load({
         'audit.hint': '每次 MCP 工具调用记一行：工具、数据源、耗时与结果。查询结果不会被记录。',
         'audit.rows': '{n} 行',
         'audit.tz': '时间按本机时区显示（{zone}），日志文件里存的是 UTC。',
+        'action.lockSource': '点击改为只读',
+        'action.unlockSource': '点击允许写',
+        'notice.nowReadOnly': '{name} 已改为只读。',
+        'notice.nowWritable': '{name} 现在允许写。',
+        'notice.nowWritableLocked': '{name} 现在允许写，但全局写开关还关着——到「运行时诊断」里打开它。',
         'action.schema': '结构',
         'action.backToSources': '数据源',
         'tab.list': '数据源列表',
@@ -582,6 +592,20 @@ window.__ModuleLoader__.load({
         padding: 2px 9px;
         font-size: 12px;
         color: var(--dsw-alias-label-secondary);
+      }
+      button.dbmcp-pill {
+        font-family: inherit;
+        background: transparent;
+        cursor: pointer;
+        transition: color 120ms ease, border-color 120ms ease;
+      }
+      button.dbmcp-pill:hover {
+        color: var(--dsw-alias-brand-primary);
+        border-color: var(--dsw-alias-brand-primary);
+      }
+      button.dbmcp-pill.is-open {
+        color: var(--dsw-alias-state-warn-primary);
+        border-color: var(--dsw-alias-state-warn-primary);
       }
       .dbmcp-grid {
         display: grid;
@@ -2282,6 +2306,29 @@ window.__ModuleLoader__.load({
         }
       }
 
+      /** Flip one source between read-only and writable by clicking its pill. */
+      const toggleReadOnly = async (source) => {
+        const wasWritable = source.readOnly === false
+        const nowWritable = !wasWritable
+        const name = source.name || source.id
+        setBusy(true)
+        try {
+          await apiPost('/datasources/bulk', { action: 'readOnly', ids: [source.id], readOnly: !nowWritable })
+          const globalOpen = Boolean(settings && settings.allowWrite)
+          const message = !nowWritable
+            ? t('notice.nowReadOnly').replace('{name}', name)
+            : globalOpen
+              ? t('notice.nowWritable').replace('{name}', name)
+              : t('notice.nowWritableLocked').replace('{name}', name)
+          setNotice({ message, isError: false })
+          load()
+        } catch (error) {
+          setNotice({ message: String((error && error.message) || error), isError: true })
+        } finally {
+          setBusy(false)
+        }
+      }
+
       const bulkDelete = async () => {
         if (selected.length === 0) return
         if (!pendingBulkDelete) {
@@ -2535,7 +2582,20 @@ window.__ModuleLoader__.load({
                   ),
                   h('span', { className: 'dbmcp-pill' }, source.kind),
                   source.isDefault ? h('span', { className: 'dbmcp-pill' }, t('sources.default')) : null,
-                  h('span', { className: 'dbmcp-pill' }, source.readOnly ? t('sources.readonly') : t('sources.readwrite')),
+                  h(
+                    'button',
+                    {
+                      type: 'button',
+                      className: 'dbmcp-pill is-toggle ' + (source.readOnly === false ? 'is-open' : 'is-locked'),
+                      title: source.readOnly === false ? t('action.lockSource') : t('action.unlockSource'),
+                      'aria-pressed': source.readOnly === false,
+                      onClick: (event) => {
+                        event.stopPropagation()
+                        void toggleReadOnly(source)
+                      },
+                    },
+                    source.readOnly === false ? t('sources.readwrite') : t('sources.readonly'),
+                  ),
                 ),
             h('div', { className: 'dbmcp-item-target' }, [source.target, source.id].filter(Boolean).join(' · ')),
             h(

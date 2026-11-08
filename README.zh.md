@@ -204,7 +204,7 @@ node dev/mcp.test.mjs     # 19 项：真实 Python 服务走 stdio，真实 SQLi
 是否允许写入由两道互相独立的闸门决定：
 
 1. **全局开关** —— `<运行时目录>/settings.json` 的 `allowWrite`，在诊断卡上切换。默认关闭；关闭期间所有写语句都以 `user_error` 拒绝，并给出指向该开关的提示。
-2. **单源标记** —— 数据源的 `readOnly`，默认开启。即使全局开关打开，只要不清掉这条标记，该源仍然只读。
+2. **单源标记** —— 数据源的 `readOnly`，默认开启。即使全局开关打开，只要不清掉这条标记，该源仍然只读。点数据源行上的「只读 / 可写」药丸即可一键切换：该源可写时药丸变成琥珀色，若全局开关仍关着，提示条会提醒你去打开它。
 
 Python 服务启动时从环境变量 `DB_MCP_ALLOW_WRITE` 读取全局标记；开关一变，Host 就会重启它。只要引擎支持，只读还会在驱动层再兜一次（SQLite 的 `mode=ro`、PostgreSQL 的 `default_transaction_read_only`、MySQL 的 `SET SESSION TRANSACTION READ ONLY`）。
 
