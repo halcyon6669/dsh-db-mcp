@@ -27,9 +27,11 @@ HARD_MAX_ROWS = int(os.environ.get("DB_MCP_MAX_ROWS_HARD") or 2000)
 mcp = FastMCP(
     "db-mcp",
     instructions=(
-        "Query the databases the user registered in the DSH Database panel. "
+        "Work with the databases the user registered in the DSH Database panel. "
         "Start with list_datasources, then list_tables, describe_table and finally "
-        "run_query. Prefer these tools over guessing table names."
+        "execute_sql. execute_sql runs any single statement: SELECT and EXPLAIN when "
+        "the source is read-only, INSERT/UPDATE/DELETE/DDL only when writes are "
+        "enabled. Prefer these tools over guessing table names."
     ),
 )
 
@@ -201,19 +203,20 @@ def sample_rows(
 
 
 @mcp.tool()
-def run_query(sql: str, datasource: Optional[str] = None, max_rows: Optional[int] = None) -> dict:
-    """Run one SQL statement and return columns plus rows.
+def execute_sql(sql: str, datasource: Optional[str] = None, max_rows: Optional[int] = None) -> dict:
+    """Execute one SQL statement — a query or, when writes are enabled, a change.
 
-    Read-only datasources accept SELECT/WITH/SHOW/EXPLAIN statements only.
-    Results are capped by `max_rows` (default 200); `truncated` says whether more
-    rows existed. Writes (INSERT/UPDATE/DELETE/DDL) are committed and report
-    `affectedRows` instead of a result set.
+    Read-only datasources accept SELECT/WITH/SHOW/EXPLAIN statements only; every
+    other statement is refused before it reaches the database. Results are capped by
+    `max_rows` (default 200) and `truncated` says whether more rows existed. Writes
+    (INSERT/UPDATE/DELETE/DDL) are committed and report `affectedRows` instead of a
+    result set. One statement per call: no scripts, no `;`-separated batches.
     """
     try:
         limit = _clamp_rows(max_rows)
         profile, (connection, close) = _open(datasource)
         try:
-            result = engines.run_query(profile, connection, sql, limit)
+            result = engines.execute_sql(profile, connection, sql, limit)
         finally:
             close()
         return {"ok": True, "datasource": _source(profile), **result}

@@ -63,7 +63,7 @@ try {
   check('eight tools listed', names.length === 8 && names.includes('test_connection') && names.includes('get_ddl'), names.join(', '))
   check(
     'tool names',
-    ['describe_table', 'explain_query', 'list_datasources', 'list_tables', 'run_query', 'sample_rows'].every((name) =>
+    ['describe_table', 'explain_query', 'list_datasources', 'list_tables', 'execute_sql', 'sample_rows'].every((name) =>
       names.includes(name),
     ),
     names.join(', '),
@@ -90,11 +90,11 @@ try {
       check('sample_rows ok', sample.parsed?.ok === true, sample.text?.slice(0, 300))
     }
 
-    const query = await client.callTool('run_query', { datasource: sqlite.id, sql: 'select count(*) as n from sqlite_master', max_rows: 5 })
-    check('run_query ok', query.parsed?.ok === true, query.text?.slice(0, 300))
+    const query = await client.callTool('execute_sql', { datasource: sqlite.id, sql: 'select count(*) as n from sqlite_master', max_rows: 5 })
+    check('execute_sql ok', query.parsed?.ok === true, query.text?.slice(0, 300))
     check('query returned a count', Array.isArray(query.parsed?.rows) && query.parsed.rows.length === 1, JSON.stringify(query.parsed?.rows))
 
-    const blocked = await client.callTool('run_query', { datasource: sqlite.id, sql: 'delete from sqlite_master', max_rows: 5 })
+    const blocked = await client.callTool('execute_sql', { datasource: sqlite.id, sql: 'delete from sqlite_master', max_rows: 5 })
     check('write refused on read-only source', blocked.parsed?.ok === false && blocked.parsed?.error?.code === 'user_error', blocked.text?.slice(0, 300))
 
     const unknown = await client.callTool('list_tables', { datasource: 'no-such-source' })
@@ -117,7 +117,7 @@ try {
         probe.text?.slice(0, 300),
       )
       if (probe.parsed?.ok) {
-        const rows = await client.callTool('run_query', { datasource: oracle.id, sql: 'select 1 as n from dual', max_rows: 3 })
+        const rows = await client.callTool('execute_sql', { datasource: oracle.id, sql: 'select 1 as n from dual', max_rows: 3 })
         check('Oracle query returns a row', rows.parsed?.ok === true && rows.parsed?.rows?.length === 1, rows.text?.slice(0, 300))
       }
     } else {

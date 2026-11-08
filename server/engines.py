@@ -549,7 +549,7 @@ def table_ddl(profile: dict, connection, table: str, schema: str | None = None) 
 # queries
 
 
-def run_query(profile: dict, connection, sql: str, max_rows: int) -> dict:
+def execute_sql(profile: dict, connection, sql: str, max_rows: int) -> dict:
     ensure_readable(sql, profile)
     kind = profile.get("kind")
     started = time.perf_counter()
@@ -613,7 +613,7 @@ def connection_autocommit(kind: str) -> bool:
 
 def sample_rows(profile: dict, connection, table: str, limit: int, schema: str | None) -> dict:
     sql = f"SELECT * FROM {qualified(profile, table)}{_limit_clause(profile.get('kind'), limit)}"
-    result = run_query(profile, connection, sql, limit)
+    result = execute_sql(profile, connection, sql, limit)
     result["table"] = table
     result["schema"] = schema or (profile.get("config") or {}).get("schema") or None
     return result

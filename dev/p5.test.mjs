@@ -66,13 +66,13 @@ try {
     join(dir, 'logs', 'audit.jsonl'),
     [
       JSON.stringify({ at: '2026-11-07T14:00:00.000Z', tool: 'mcp__db__list_tables', ok: true, ms: 12, rows: 11 }),
-      JSON.stringify({ at: '2026-11-07T14:01:00.000Z', tool: 'mcp__db__run_query', ok: false, ms: 30, error: 'boom' }),
+      JSON.stringify({ at: '2026-11-07T14:01:00.000Z', tool: 'mcp__db__execute_sql', ok: false, ms: 30, error: 'boom' }),
       '',
     ].join('\n'),
     'utf8',
   )
   const listing = await get('/audit?limit=5')
-  check('audit entries parse newest first', listing.body.entries.length === 2 && listing.body.entries[0].tool === 'mcp__db__run_query')
+  check('audit entries parse newest first', listing.body.entries.length === 2 && listing.body.entries[0].tool === 'mcp__db__execute_sql')
   check('failed entry keeps its error', listing.body.entries[0].error === 'boom')
   const limited = await get('/audit?limit=1')
   check('limit is honoured', limited.body.entries.length === 1)
