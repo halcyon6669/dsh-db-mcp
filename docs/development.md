@@ -99,6 +99,23 @@ is younger than its 1440-minute cooldown: that line is pnpm recording a per-vers
 exception so the explicit pin may install. See
 [guide.md](guide.md#install-and-upgrade) for the policy knobs.
 
+## When git says "not a git repository"
+
+Three times on this machine `git status` answered `fatal: not a git repository` while
+`.git/objects` still held every commit: `HEAD`, `config` and `index` had vanished,
+and git refuses to run at all without `HEAD` (even with an explicit `--git-dir`).
+The history was never lost, so it can be rebuilt from the refs:
+
+```sh
+node dev/git-repair.mjs --check   # report what is missing
+node dev/git-repair.mjs           # write HEAD + config, then git reset to rebuild the index
+```
+
+The remote URL comes from `package.json`'s `repository`, and the branch is the one
+with the newest ref, so the script stays machine independent. It is a repair, not a
+backup: if `.git/objects` itself is missing, restore from a bundle instead
+(`git bundle create backup.bundle --all` in a healthy checkout, then `git clone`).
+
 ## Adding an engine
 
 1. `server/engines.py`: extend `connect()` and the dialect tables (`_quote`,
