@@ -61,7 +61,7 @@ dsh plugin --profile web add dsh-db-mcp       # Web 端
 
 | 文档 | 内容 |
 | ---- | ---- |
-| [docs/guide.md](docs/guide.md) | 面板操作、连接串、分组、Docker 测试库、排错（英文） |
+| [docs/guide.zh.md](docs/guide.zh.md) | 面板操作、连接串、分组、Docker 测试库、排错（中文） |
 | [docs/reference.md](docs/reference.md) | HTTP 接口、工具契约、注册表与设置文件、插件配置（英文） |
 | [docs/development.md](docs/development.md) | 目录结构、热重载、测试套件、发布流程（英文） |
 | [docs/design-notes.md](docs/design-notes.md) | 设计日志（P1 → P7）与决策记录（英文） |

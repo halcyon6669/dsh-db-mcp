@@ -1,3 +1,5 @@
+English | [中文](guide.zh.md)
+
 # Guide
 
 Everything the panel can do, in the order you meet it. For the wire protocol and
