@@ -83,7 +83,6 @@ SQL console.
 | Document | Contents |
 | -------- | -------- |
 | [docs/guide.md](docs/guide.md) | Panel walkthrough, connection strings, groups, Docker test databases, troubleshooting |
-| [docs/guide.zh.md](docs/guide.zh.md) | The same guide in Chinese |
 | [docs/reference.md](docs/reference.md) | HTTP routes, tool contracts, registry and settings files, plugin config |
 | [docs/development.md](docs/development.md) | Repository layout, hot reload, test suites, release flow |
 | [docs/design-notes.md](docs/design-notes.md) | Historical design log (P1 → P7) and the decisions behind them |
