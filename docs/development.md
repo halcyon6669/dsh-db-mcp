@@ -38,8 +38,8 @@ The Cordis Loader imports a plugin entry **once per process**, so editing
   button) replaces it. Tool registrations stay in place — disposing and re-registering
   them makes the agent's tool catalog go stale and report `unknown tool`.
 
-A profile that links this directory (`dsh plugin add <path>`) reflects edits
-immediately; one installed from npm needs a release.
+A profile that links this directory (`dsh plugin --profile desktop add <path>`)
+reflects edits immediately; one installed from npm needs a release.
 
 ## Tests
 
@@ -85,6 +85,19 @@ a trusted publisher exists.
 
 Keep `src/host.js`'s `PLUGIN_VERSION` in step with `package.json` — the panel and
 `/health` read it, and a mismatch ships a package that reports the previous version.
+
+Installing that release into a profile (the profile name is required, the verb is
+pnpm's):
+
+```sh
+dsh plugin --profile desktop add dsh-db-mcp@0.6.10
+dsh plugin --profile desktop remove dsh-db-mcp
+```
+
+Expect pnpm to print `Added 1 entry to minimumReleaseAgeExclude …` when the version
+is younger than its 1440-minute cooldown: that line is pnpm recording a per-version
+exception so the explicit pin may install. See
+[guide.md](guide.md#install-and-upgrade) for the policy knobs.
 
 ## Adding an engine
 

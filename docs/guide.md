@@ -6,24 +6,42 @@ file formats see [reference.md](reference.md); for build and release see
 
 ## Install and upgrade
 
+`dsh plugin` forwards its arguments to pnpm inside the profile directory, so it
+needs `--profile` before the pnpm verb:
+
 ```sh
-dsh plugin add dsh-db-mcp@latest     # fresh install
-dsh plugin add dsh-db-mcp@0.6.10     # pin a version (skips dist-tag and cache games)
+dsh plugin --profile desktop add dsh-db-mcp@latest     # fresh install, desktop app
+dsh plugin --profile web add dsh-db-mcp@latest         # the web UI's profile
+dsh plugin --profile desktop add dsh-db-mcp@0.6.10     # pin a version
+dsh plugin --profile desktop remove dsh-db-mcp         # uninstall
+dsh plugin --profile desktop why dsh-db-mcp            # which version is installed
 ```
+
+`desktop` and `web` ship with DSH; any other name is initialized on first use
+(`--profile scratch add dsh-db-mcp`). Check what a profile has with
+`dsh plugin --profile desktop list dsh-db-mcp`.
 
 From a source checkout, install the directory instead — the profile then links it,
 so edits are live:
 
 ```sh
-dsh plugin add C:\path\to\dsh-db-mcp
+dsh plugin --profile desktop add C:\path\to\dsh-db-mcp
 ```
 
-Two things to know about upgrades:
+Three things to know about upgrades:
 
 - pnpm caches a package's metadata. A version published minutes ago may still be
   invisible to `@latest`; naming the version sidesteps it.
-- DSH applies a supply-chain cooldown to freshly published releases. Pinning is
-  also the way around that.
+- pnpm holds new releases behind a cooldown (`minimumReleaseAge`, 1440 minutes by
+  default) so a freshly published — possibly compromised — version is not resolved
+  automatically. Asking for an exact version makes pnpm record that version in
+  `minimumReleaseAgeExclude` inside the profile's `pnpm-workspace.yaml`; that is the
+  `Added 1 entry to minimumReleaseAgeExclude …` line you will see. Nothing is broken:
+  the exclusion is per version and only lets *that* pin through. To be asked instead,
+  set `minimumReleaseAgeStrict: true` in the profile's `pnpm-workspace.yaml`; to drop
+  stale entries, set `minimumReleaseAgeExcludePrune: true`.
+- Upgrading needs either an exact version or a removed lock entry: `add` will not
+  move a dependency that still satisfies its existing range.
 
 If the sidebar entry disappears after a restart, see [Troubleshooting](#troubleshooting).
 
@@ -213,7 +231,7 @@ oracle://system:dbmcp-demo@127.0.0.1:1521/FREEPDB1
 
 | Symptom | Cause | Fix |
 | ------- | ----- | --- |
-| Sidebar entry gone, plugin card says *not installed* | `package.json` carries a UTF-8 BOM, so the host's `JSON.parse` fails and the bundle is skipped silently | rewrite the file without a BOM; re-apply with `plugin_manager set_bundle` |
+| Sidebar entry gone, plugin card says *not installed* | `package.json` carries a UTF-8 BOM, so the host's `JSON.parse` fails and the bundle is skipped silently | rewrite the file without a BOM (any editor's "UTF-8 without BOM"), then toggle the plugin off and on in the **Plugins** panel |
 | Panel says *Host interface disconnected* | the Host half is not mounted (plugin disabled, or bundle failed to load) | check the plugin card, then reload the page |
 | Edited `src/host.js` but nothing changed | the Cordis entry is imported once per process | `POST /plugins/db-mcp/api/reload`, or restart DSH after changing `index.js` |
 | Tools missing from the agent | the Python server never started | *Runtime* → tools count and error; then **Restart MCP** |

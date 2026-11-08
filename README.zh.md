@@ -18,8 +18,12 @@
 ## 运行
 
 ```sh
-dsh plugin add dsh-db-mcp@latest
+dsh plugin --profile desktop add dsh-db-mcp@latest   # 桌面端
+dsh plugin --profile web add dsh-db-mcp@latest       # Web 端
 ```
+
+`--profile` 指定装进哪个 profile（随 DSH 提供的是 `desktop` 与 `web`，其它名字首次使用时自动创建）。卸载用
+`dsh plugin --profile desktop remove dsh-db-mcp`。
 
 然后：
 

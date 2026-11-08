@@ -28,8 +28,13 @@ twice: import the connections DBeaver already knows, then just ask.
 ## Run
 
 ```sh
-dsh plugin add dsh-db-mcp@latest
+dsh plugin --profile desktop add dsh-db-mcp@latest   # desktop app
+dsh plugin --profile web add dsh-db-mcp@latest       # web UI
 ```
+
+`--profile` picks the profile to install into (`desktop` and `web` ship with DSH;
+any other name is created on first use). Remove with
+`dsh plugin --profile desktop remove dsh-db-mcp`.
 
 Then:
 
