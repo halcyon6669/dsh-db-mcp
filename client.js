@@ -167,6 +167,7 @@ window.__ModuleLoader__.load({
         'audit.err': 'failed',
         'audit.hint': 'One line per MCP tool call: tool, source, duration and outcome. Query results are never logged.',
         'audit.rows': '{n} row(s)',
+        'audit.tz': 'Times follow your computer clock ({zone}); the log file keeps UTC.',
         'action.schema': 'Structure',
         'action.backToSources': 'Data sources',
         'tab.list': 'Data source list',
@@ -339,6 +340,7 @@ window.__ModuleLoader__.load({
         'audit.err': '失败',
         'audit.hint': '每次 MCP 工具调用记一行：工具、数据源、耗时与结果。查询结果不会被记录。',
         'audit.rows': '{n} 行',
+        'audit.tz': '时间按本机时区显示（{zone}），日志文件里存的是 UTC。',
         'action.schema': '结构',
         'action.backToSources': '数据源',
         'tab.list': '数据源列表',
@@ -1438,6 +1440,38 @@ window.__ModuleLoader__.load({
       if (minutes < 60) return `${minutes}m`
       const hours = Math.floor(minutes / 60)
       return `${hours}h ${minutes % 60}m`
+    }
+
+    /** UTC offset of the viewer's clock, e.g. "UTC+08:00". */
+    function zoneLabel() {
+      const offset = -new Date().getTimezoneOffset()
+      const sign = offset >= 0 ? '+' : '-'
+      const abs = Math.abs(offset)
+      const pad = (part) => String(part).padStart(2, '0')
+      return `UTC${sign}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}`
+    }
+
+    /**
+     * The audit log keeps UTC ISO stamps so the file stays comparable across
+     * machines; the panel shows them on the viewer's clock instead.
+     */
+    function localClock(value) {
+      const at = Date.parse(String(value || ''))
+      if (!Number.isFinite(at)) return String(value || '').slice(11, 19)
+      const date = new Date(at)
+      return [date.getHours(), date.getMinutes(), date.getSeconds()]
+        .map((part) => String(part).padStart(2, '0'))
+        .join(':')
+    }
+
+    /** Full local timestamp, used as the hover title of an audit row. */
+    function localStamp(value) {
+      const at = Date.parse(String(value || ''))
+      if (!Number.isFinite(at)) return String(value || '')
+      const date = new Date(at)
+      const pad = (part) => String(part).padStart(2, '0')
+      const day = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+      return `${day} ${localClock(value)} ${zoneLabel()}`
     }
 
     function pythonLabel(t, python) {
@@ -2933,7 +2967,11 @@ window.__ModuleLoader__.load({
                     h(
                       'div',
                       { className: 'dbmcp-audit', key: `${entry.at || 'entry'}-${index}` },
-                      h('span', { className: 'dbmcp-audit-time' }, String(entry.at || '').slice(11, 19)),
+                      h(
+                        'span',
+                        { className: 'dbmcp-audit-time', title: localStamp(entry.at) },
+                        localClock(entry.at),
+                      ),
                       h('span', { className: 'dbmcp-audit-tool' }, entry.tool || '?'),
                       h('span', { className: 'dbmcp-pill' }, entry.datasource || t('sources.default')),
                       h('span', { className: 'dbmcp-hint' }, `${entry.ms ?? 0}ms`),
@@ -2950,6 +2988,7 @@ window.__ModuleLoader__.load({
                     ),
                   ),
               h('p', { className: 'dbmcp-hint' }, t('audit.hint')),
+              h('p', { className: 'dbmcp-hint' }, t('audit.tz').replace('{zone}', zoneLabel())),
               audit.file ? h('p', { className: 'dbmcp-hint' }, `${t('audit.file')}: ${audit.file}`) : null,
             ),
           ),

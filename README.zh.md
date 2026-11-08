@@ -210,7 +210,7 @@ Python 服务启动时从环境变量 `DB_MCP_ALLOW_WRITE` 读取全局标记；
 
 ## 审计日志
 
-每次 MCP 工具调用都会向 `<运行时目录>/logs/audit.jsonl`（0600）追加一行 JSON：时间、工具、数据源、耗时、行数、截断到 2000 字符的 SQL，以及失败时的错误。结果行永不记录。文件超过 512 KiB 轮转为 `audit.1.jsonl`，也可以在 `settings.json` 里用 `auditLog: false` 关掉。面板显示最近十几条。
+每次 MCP 工具调用都会向 `<运行时目录>/logs/audit.jsonl`（0600）追加一行 JSON：时间、工具、数据源、耗时、行数、截断到 2000 字符的 SQL，以及失败时的错误。结果行永不记录。文件超过 512 KiB 轮转为 `audit.1.jsonl`，也可以在 `settings.json` 里用 `auditLog: false` 关掉。面板显示最近十几条，时间按**本机时区**换算——文件里存的是 UTC，这样换机器也仍然可比；卡片会把每条时间戳转成浏览者的时区，并标出所用偏移。
 
 `dev/shims.test.mjs` 还断言 `package.json` 不带 UTF-8 BOM：Host 用 `JSON.parse` 读它，而 `JSON.parse` 会拒绝 BOM，插件随之显示为 `availability: missing`，并不加载。会「添加 BOM」的编辑器会静默弄坏 bundle——如果重启后侧边栏入口消失，先查这一项。
 

@@ -308,7 +308,9 @@ Every MCP tool call appends one JSON line to `<runtime>/logs/audit.jsonl` (0600)
 time, tool, source, duration, row count, the SQL truncated to 2000 characters and
 the error when it failed. Result rows are never logged. The file rotates to
 `audit.1.jsonl` at 512 KiB and logging can be turned off with `auditLog: false` in
-`settings.json`. The panel shows the last dozen entries.
+`settings.json`. The panel shows the last dozen entries on **your own clock** —
+the file keeps UTC so it stays comparable across machines, the card converts each
+stamp to the viewer's time zone and prints the offset it used.
 
 `dev/shims.test.mjs` also asserts that `package.json` has no UTF-8 BOM: the host
 parses it with `JSON.parse`, which rejects a BOM, and the plugin then shows up as
