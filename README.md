@@ -310,6 +310,21 @@ driver itself where the engine allows it (`mode=ro` for SQLite,
 `default_transaction_read_only` for PostgreSQL, `SET SESSION TRANSACTION READ ONLY`
 for MySQL).
 
+### What the plugin runs, and with what
+
+- The Python server is started with a fixed interpreter path, a fixed script and a
+  fixed argument list — never through a shell, so no string is ever re-parsed by
+  `cmd.exe` or `/bin/sh`.
+- The child does **not** inherit the host environment. It gets a short allowlist
+  (`PATH`, `TEMP`, `HOME`, `PYTHON*`, and similar) plus the three `DB_MCP_*` flags
+  the plugin sets. Tokens or cloud credentials in the DSH process are not passed
+  down.
+- Connections to PostgreSQL, MySQL and Oracle are opened by that child; only SQLite
+  is read in-process. The raw TCP probe is a fallback used when the child cannot
+  start, and it never sends credentials.
+- Passwords live in `secrets.json` (mode `0600`) and are never returned by any HTTP
+  route; the panel only learns `hasSecret`.
+
 ## Audit log
 
 Every MCP tool call appends one JSON line to `<runtime>/logs/audit.jsonl` (0600):

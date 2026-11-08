@@ -16,6 +16,50 @@ import { spawn } from 'node:child_process';
 const DEFAULT_TIMEOUT_MS = 30_000;
 const INIT_TIMEOUT_MS = 60_000;
 
+/**
+ * The Python child gets a small, explicit environment instead of a copy of ours.
+ * Spreading `process.env` would hand every token and cloud credential in the
+ * DSH process to a driver stack that only ever needs to find its interpreter.
+ */
+const ENV_ALLOW = [
+  'PATH',
+  'Path',
+  'PATHEXT',
+  'SystemRoot',
+  'SYSTEMROOT',
+  'windir',
+  'ComSpec',
+  'COMSPEC',
+  'TEMP',
+  'TMP',
+  'TMPDIR',
+  'HOME',
+  'USERPROFILE',
+  'HOMEDRIVE',
+  'HOMEPATH',
+  'APPDATA',
+  'LOCALAPPDATA',
+  'PROGRAMDATA',
+  'PROGRAMFILES',
+  'LANG',
+  'LC_ALL',
+  'TZ',
+  'PWD',
+  'PYTHONPATH',
+  'PYTHONHOME',
+  'PYTHONIOENCODING',
+  'VIRTUAL_ENV',
+];
+
+function childEnvironment(extra) {
+  const env = {};
+  for (const key of ENV_ALLOW) {
+    const value = process.env[key];
+    if (typeof value === 'string' && value !== '') env[key] = value;
+  }
+  return Object.assign(env, extra || {});
+}
+
 export class McpError extends Error {
   constructor(message, { code = 'mcp_error', data } = {}) {
     super(message);
@@ -61,7 +105,7 @@ export class McpClient {
     if (this.#child) return this;
     const child = spawn(this.command, this.args, {
       cwd: this.cwd,
-      env: { ...process.env, ...this.env },
+      env: childEnvironment(this.env),
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
     });

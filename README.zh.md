@@ -209,6 +209,14 @@ node dev/mcp.test.mjs     # 19 项：真实 Python 服务走 stdio，真实 SQLi
 
 Python 服务启动时从环境变量 `DB_MCP_ALLOW_WRITE` 读取全局标记；开关一变，Host 就会重启它。只要引擎支持，只读还会在驱动层再兜一次（SQLite 的 `mode=ro`、PostgreSQL 的 `default_transaction_read_only`、MySQL 的 `SET SESSION TRANSACTION READ ONLY`）。
 
+### 插件会启动什么，以及带着什么
+
+- Python 服务用固定的解释器路径、固定脚本、固定参数启动，**从不经过 shell**，所以任何字符串都不会被 `cmd.exe` 或 `/bin/sh` 再解析一次。
+- 子进程**不继承** Host 的环境变量。它只拿到一张很短的允许清单（`PATH`、`TEMP`、`HOME`、`PYTHON*` 之类）再加上插件自己设置的 `DB_MCP_*`。DSH 进程里的 token、云凭据不会被带下去。
+- PostgreSQL / MySQL / Oracle 都由这个子进程连接，只有 SQLite 是在进程内读的。裸 TCP 探测只是子进程起不来时的兜底，且不发任何凭据。
+- 口令存在 `secrets.json`（`0600`），任何 HTTP 接口都不会返回它；面板只知道 `hasSecret`。
+
+
 ## 审计日志
 
 每次 MCP 工具调用都会向 `<运行时目录>/logs/audit.jsonl`（0600）追加一行 JSON：时间、工具、数据源、耗时、行数、截断到 2000 字符的 SQL，以及失败时的错误。结果行永不记录。文件超过 512 KiB 轮转为 `audit.1.jsonl`，也可以在 `settings.json` 里用 `auditLog: false` 关掉。面板显示最近十几条，时间按**本机时区**换算——文件里存的是 UTC，这样换机器也仍然可比；卡片会把每条时间戳转成浏览者的时区，并标出所用偏移。
