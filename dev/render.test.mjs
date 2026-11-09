@@ -269,10 +269,28 @@ check('audit clock survives a malformed stamp', localClock('not-a-date') === 'no
 
 // The list strip classifies rows by their last stored probe, so the classifier
 // has to treat "never probed" and "probe ok" very differently from a failure.
-const { kindBadge, probeFailed, sourceMatches } = mod.__test
+const { kindBadge, probeFailed, sourceMatches, probeReport, reportTarget } = mod.__test
 check('status: a failed probe is a failure', probeFailed({ lastProbe: { ok: false } }) === true)
 check('status: a healthy probe is not a failure', probeFailed({ lastProbe: { ok: true } }) === false)
 check('status: an untested source is not a failure', probeFailed({}) === false)
+
+const mysqlReport = probeReport(
+  {
+    id: 'mysql',
+    name: 'mysql',
+    kind: 'mysql',
+    target: '127.0.0.1:3306 / demo',
+    readOnly: false,
+    lastProbe: { ok: false, message: 'MySQL connection failed: (2003, ...)', at: '2026-11-09T13:41:06.000Z' },
+  },
+  { name: 'dsh-db-mcp', version: '0.7.5' },
+)
+check('report: the target loses the spaces around the slash', reportTarget({ target: '127.0.0.1:3306 / demo' }) === '127.0.0.1:3306/demo', JSON.stringify(reportTarget({ target: '127.0.0.1:3306 / demo' })))
+check('report: a file target is left alone', reportTarget({ target: 'C:\\data\\app.db' }) === 'C:\\data\\app.db')
+check('report: the target line is the compact form', mysqlReport.includes('target: 127.0.0.1:3306/demo'), mysqlReport)
+check('report: it carries the error verbatim', mysqlReport.includes('error: MySQL connection failed: (2003, ...)'), mysqlReport)
+check('report: it carries the plugin version', mysqlReport.includes('plugin: dsh-db-mcp 0.7.5'), mysqlReport)
+check('report: it carries the source id once', mysqlReport.split('\n').filter((line) => line.startsWith('id: ')).length === 1, mysqlReport)
 const pgBadge = kindBadge('postgres')
 check('status: engine badge keeps its brand colour', pgBadge.label === 'PG' && pgBadge.color === '#336791', JSON.stringify(pgBadge))
 const oddBadge = kindBadge('duckdb')

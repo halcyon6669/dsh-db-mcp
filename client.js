@@ -2417,6 +2417,29 @@ async function copyText(text) {
 /** A stored probe that ended in failure is what the red row is about. */
 const probeFailed = (source) => Boolean(source && source.lastProbe && source.lastProbe.ok === false)
 
+/** `host:port / database` is how the list renders it; a pasted report reads better as `host:port/database`. */
+const reportTarget = (source) => {
+  const raw = String((source && source.target) || '').trim()
+  if (!raw) return '-'
+  return raw.replace(/\s+\/\s+/g, '/')
+}
+
+/** Whole failure report for one source, so it can be pasted straight into an issue. */
+const probeReport = (source, plugin) => {
+  const probeInfo = (source && source.lastProbe) || {}
+  return [
+    `datasource: ${source.name || source.id}`,
+    `id: ${source.id}`,
+    `kind: ${source.kind}`,
+    `target: ${reportTarget(source)}`,
+    probeInfo.at ? `at: ${localStamp(probeInfo.at)}` : '',
+    `error: ${probeInfo.message || '-'}`,
+    plugin ? `plugin: ${plugin.name} ${plugin.version}` : '',
+  ]
+    .filter(Boolean)
+    .join('\n')
+}
+
 const sourceMatches = (source, needle) => {
   const text = String(needle || '').trim().toLowerCase()
   if (!text) return true
@@ -3127,24 +3150,9 @@ function groupTables(tables) {
         }
       }
 
-      /** Whole failure report for one source, so it can be pasted into an issue. */
-      const probeReport = (source) => {
-        const probeInfo = source.lastProbe || {}
-        return [
-          `datasource: ${source.name || source.id} (${source.id})`,
-          `kind: ${source.kind}`,
-          `target: ${source.target || '-'}`,
-          probeInfo.at ? `at: ${localStamp(probeInfo.at)}` : '',
-          `error: ${probeInfo.message || '-'}`,
-          `plugin: ${data.plugin.name} ${data.plugin.version}`,
-        ]
-          .filter(Boolean)
-          .join('\n')
-      }
-
       const copyProbe = async (source) => {
         try {
-          await copyText(probeReport(source))
+          await copyText(probeReport(source, data.plugin))
           setCopiedId(source.id)
           setTimeout(() => setCopiedId((prev) => (prev === source.id ? null : prev)), 1600)
         } catch (error) {
@@ -4017,6 +4025,8 @@ function groupTables(tables) {
         MainPanel,
         kindBadge,
         probeFailed,
+        probeReport,
+        reportTarget,
         StatusStrip,
         sourceMatches,
       },
