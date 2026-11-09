@@ -1114,6 +1114,27 @@ export function createHost(options = {}) {
       return { status: 400, body: { ok: false, error: `at most ${MAX_SOURCES} datasources are supported` } }
     }
 
+    /* The same endpoint reached with the same login is one data source, not two:
+       an agent that names it by host would otherwise have to guess which row it
+       meant. Only creation is gated — rows that already exist (created before
+       this rule) must stay editable and deletable. */
+    if (!existing) {
+      const identity = sourceIdentity(profile.kind, profile.config, profile.config.user)
+      const twin = list.find(
+        (item) => sourceIdentity(item.kind, item.config, item.config.user) === identity,
+      )
+      if (twin) {
+        return {
+          status: 409,
+          body: {
+            ok: false,
+            error: `${twin.name || twin.id} already uses this connection and user`,
+            existingId: twin.id,
+          },
+        }
+      }
+    }
+
     if (profile.isDefault || list.length === 0) {
       for (const item of list) item.isDefault = false
       profile.isDefault = true

@@ -102,6 +102,7 @@ window.__ModuleLoader__.load({
         'form.probeOk': '{name}: connection OK ({ms} ms).',
         'form.probeFail': 'Connection failed:',
         'form.probeUnknown': 'no message',
+        'form.duplicate': 'A data source already uses this connection and user: {name}. Open that row instead of adding a second one.',
         'form.userPlaceholder': 'e.g. root or postgres',
         'form.pasteHintEdit': 'Paste a new connection string to overwrite the fields below; the identifier stays fixed.',
         'form.pastePlaceholder': 'postgresql://user:pass@localhost:5432/app',
@@ -309,6 +310,7 @@ window.__ModuleLoader__.load({
         'form.probeOk': '{name}：连接正常（{ms} ms）',
         'form.probeFail': '连接失败：',
         'form.probeUnknown': '无返回信息',
+        'form.duplicate': '已经有一个数据源在用同一个地址和用户：{name}。直接用那一条即可，不必重复添加。',
         'form.userPlaceholder': '例如 root 或 postgres',
         'form.pasteHintEdit': '粘贴新的连接串会覆盖下面的字段；标识符保持不变。',
         'form.pastePlaceholder': 'postgresql://用户:密码@localhost:5432/库名',
@@ -921,19 +923,22 @@ window.__ModuleLoader__.load({
         max-width: 34em;
       }
       .dbmcp-rows {
-        display: grid;
-        grid-template-columns: 116px minmax(0, 1fr);
-        column-gap: 14px;
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
         font-size: 13px;
         line-height: 1.5;
       }
-      .dbmcp-rows > * {
-        padding: 2px 0;
-        border-bottom: 1px solid var(--dsw-alias-border-l1);
+      .dbmcp-row {
+        display: grid;
+        grid-template-columns: 116px minmax(0, 1fr);
+        column-gap: 10px;
+        align-items: baseline;
+        padding: 3px 8px;
+        border: 1px solid var(--dsw-alias-border-l1);
+        border-radius: 8px;
+        background: var(--dsw-alias-bg-layer-1);
         min-width: 0;
-      }
-      .dbmcp-rows > *:nth-last-child(-n + 2) {
-        border-bottom: none;
       }
       .dbmcp-k {
         color: var(--dsw-alias-label-secondary);
@@ -1876,12 +1881,14 @@ window.__ModuleLoader__.load({
       )
     }
 
-    /** Two grid cells: label + value. */
+    /** One card per line, matching the audit entries below it. */
     function Row(props) {
-      return [
+      return h(
+        'div',
+        { className: 'dbmcp-row' },
         h('span', { key: 'k', className: 'dbmcp-k' }, props.label),
-        h('span', { key: 'v', className: 'dbmcp-v' }, props.children),
-      ]
+        h('div', { key: 'v', className: 'dbmcp-v' }, props.children),
+      )
     }
 
     function Field(props) {
@@ -2344,7 +2351,8 @@ window.__ModuleLoader__.load({
           const data = await apiPost('/datasources/save', body)
           props.onSaved(data.datasource)
         } catch (caught) {
-          setError(String((caught && caught.message) || caught))
+          const existingId = caught && caught.payload && caught.payload.existingId
+          setError(existingId ? fmt(t('form.duplicate'), { name: existingId }) : String((caught && caught.message) || caught))
         } finally {
           setBusy(false)
         }

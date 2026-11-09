@@ -82,6 +82,12 @@ try {
   const cross = await call('POST', '/datasources/save', { id: 'x2', name: 'x', kind: 'sqlite', config: { file: 'y' } }, { origin: 'http://evil.example' })
   check('cross-origin write rejected', cross.status === 403)
 
+  // Two rows pointing at the same file and login would be indistinguishable to
+  // the agent, so the second save is refused.
+  const twin = await call('POST', '/datasources/save', { id: 'chinook-copy', name: 'Copy', kind: 'sqlite', config: { file: item.config.file } })
+  check('the same endpoint is not saved twice', twin.status === 409, twin.body.error)
+  check('the duplicate error names the existing row', twin.body.existingId === 'chinook', twin.body.existingId)
+
   const scan = await call('GET', '/dbeaver/scan')
   const all = (scan.body.sources || []).flatMap((source) => source.connections)
   check('dbeaver scan finds the sample connection', all.some((entry) => entry.kind === 'sqlite'), `${all.length} connection(s)`)
