@@ -182,7 +182,22 @@ if (schemaView) {
     (node) => node.type === 'button' && String(node.children[0]) === 'action.back',
   )
   check('schema view: no page-level back button (breadcrumb owns navigation)', backButton.length === 0, `got ${backButton.length}`)
+  // The card header already names the source, so the view must not repeat it.
+  const repeated = collect(schemaView, (node) => typeof node === 'string' && node.includes('schema.title'))
+  check('schema view: the title appears once, in the card header', repeated.length === 0, `got ${repeated.length}`)
 }
+
+// Required-field marking only shows up after a save attempt, so check the input
+// primitive can carry the state the form turns on.
+const { TextInput } = mod.__test
+const plainInput = TextInput({ value: '', onChange: noop })
+const markedInput = TextInput({ value: '', onChange: noop, invalid: true })
+check('input: unmarked by default', plainInput.props.className === 'dbmcp-input', plainInput.props.className)
+check(
+  'input: invalid marks the field',
+  markedInput.props.className === 'dbmcp-input is-invalid' && markedInput.props['aria-invalid'] === 'true',
+  JSON.stringify(markedInput.props),
+)
 
 // The table list is grouped per schema and filterable; both helpers are pure so
 // they can be checked without a live MCP server.

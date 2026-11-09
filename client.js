@@ -125,6 +125,7 @@ window.__ModuleLoader__.load({
         'form.readOnly': 'Read-only (recommended)',
         'form.readOnlyHint': 'blocks writes for this source unless the global write switch is on',
         'form.invalid': 'Fill the required fields first.',
+        'form.requiredHint': 'The connection string, user and password are required: fill them, then save.',
         'import.body': 'Reads data-sources.json from the DBeaver workspace and decrypts credentials-config.json when it exists.',
         'import.empty': 'No DBeaver connection found on this machine.',
         'import.file': 'File',
@@ -310,6 +311,7 @@ window.__ModuleLoader__.load({
         'form.readOnly': '只读（推荐）',
         'form.readOnlyHint': '未打开全局写开关时，此数据源拒绝写操作',
         'form.invalid': '请先填写必填字段。',
+        'form.requiredHint': '连接串、用户与口令都是必填项：填好之后再保存。',
         'import.body': '读取 DBeaver 工作区里的 data-sources.json；存在 credentials-config.json 时一并解密口令。',
         'import.empty': '这台机器上没有找到 DBeaver 连接。',
         'import.file': '文件',
@@ -1185,6 +1187,12 @@ window.__ModuleLoader__.load({
         outline: none;
         border-color: var(--dsw-alias-brand-primary);
       }
+      .dbmcp-input.is-invalid {
+        border-color: var(--dsw-alias-state-error-primary);
+      }
+      .dbmcp-input.is-invalid:focus {
+        border-color: var(--dsw-alias-state-error-primary);
+      }
       .dbmcp-hint {
         font-size: 12px;
         color: var(--dsw-alias-label-secondary);
@@ -1343,7 +1351,7 @@ window.__ModuleLoader__.load({
 
     function TextInput(props) {
       return h('input', {
-        className: 'dbmcp-input',
+        className: 'dbmcp-input' + (props.invalid ? ' is-invalid' : ''),
         type: props.type || 'text',
         value: props.value == null ? '' : props.value,
         placeholder: props.placeholder || '',
@@ -1352,6 +1360,7 @@ window.__ModuleLoader__.load({
         spellCheck: false,
         disabled: props.disabled === true,
         title: props.title || undefined,
+        'aria-invalid': props.invalid ? 'true' : undefined,
         onChange: (event) => props.onChange(event.target.value),
         onKeyDown: props.onKeyDown || undefined,
       })
@@ -1696,6 +1705,9 @@ window.__ModuleLoader__.load({
       const [saveSecret, setSaveSecret] = React.useState(true)
       const [busy, setBusy] = React.useState(false)
       const [error, setError] = React.useState(null)
+      // Required fields stay unmarked until the first save attempt, so the form
+      // does not open in a red state.
+      const [missing, setMissing] = React.useState({})
       const editing = props.editing
 
       const patch = (changes) => setDraft((prev) => ({ ...prev, ...changes }))
@@ -1734,10 +1746,23 @@ window.__ModuleLoader__.load({
 
       const submit = async () => {
         setError(null)
+        // The connection string, the user and the password are what a source
+        // cannot work without, so they are checked before anything is sent.
+        const needsCredentials = draft.kind !== 'sqlite'
+        const gaps = {
+          url: !raw.trim(),
+          user: needsCredentials && !String(draft.config.user || '').trim(),
+          password: needsCredentials && !editing && !draft.hasSecret && !draft.password.trim(),
+        }
+        setMissing(gaps)
+        if (gaps.url || gaps.user || gaps.password) {
+          setError(t('form.requiredHint'))
+          return
+        }
         const needsTarget =
           draft.kind === 'oracle' ? !draft.config.serviceName.trim() && !draft.config.sid.trim() : !draft.config.database.trim()
-        const missing = draft.kind === 'sqlite' ? !draft.config.file.trim() : !draft.config.host.trim() || needsTarget
-        if (missing) {
+        const incomplete = draft.kind === 'sqlite' ? !draft.config.file.trim() : !draft.config.host.trim() || needsTarget
+        if (incomplete) {
           setError(t('form.invalid'))
           return
         }
@@ -1875,7 +1900,11 @@ window.__ModuleLoader__.load({
               { className: 'dbmcp-paste' },
               h(TextInput, {
                 value: raw,
-                onChange: onRawChange,
+                onChange: (value) => {
+                  onRawChange(value)
+                  if (missing.url) setMissing((prev) => ({ ...prev, url: false }))
+                },
+                invalid: missing.url === true,
                 placeholder: t('form.pastePlaceholder'),
                 autoFocus: !editing,
               }),
@@ -1893,7 +1922,11 @@ window.__ModuleLoader__.load({
             { key: 'user', label: t('form.user') },
             h(TextInput, {
               value: draft.config.user,
-              onChange: (value) => patchConfig({ user: value }),
+              onChange: (value) => {
+                patchConfig({ user: value })
+                if (missing.user) setMissing((prev) => ({ ...prev, user: false }))
+              },
+              invalid: missing.user === true,
               autoComplete: 'off',
             }),
           ),
@@ -1907,8 +1940,12 @@ window.__ModuleLoader__.load({
                 type: 'password',
                 value: draft.password,
                 autoComplete: 'new-password',
+                invalid: missing.password === true,
                 placeholder: draft.hasSecret ? '********' : t('form.passwordEmpty'),
-                onChange: (value) => patch({ password: value }),
+                onChange: (value) => {
+                  patch({ password: value })
+                  if (missing.password && value.trim()) setMissing((prev) => ({ ...prev, password: false }))
+                },
               }),
               h(
                 'label',
@@ -2389,12 +2426,7 @@ window.__ModuleLoader__.load({
         )
       }
 
-      return h(
-        'div',
-        { className: 'dbmcp-schema-wrap' },
-        h('div', { className: 'dbmcp-schema-head' }, h('span', { className: 'dbmcp-hint' }, fmt(t('schema.title'), { name: source.name || source.id }))),
-        content,
-      )
+      return h('div', { className: 'dbmcp-schema-wrap' }, content)
     }
 
     function crumbLabel(t, view) {
@@ -3356,6 +3388,7 @@ window.__ModuleLoader__.load({
         connectionMatches,
         localClock,
         localStamp,
+        TextInput,
         Breadcrumbs,
         MainPanel,
       },

@@ -71,6 +71,11 @@ database/service, name and identifier; the derived values only appear under
 **More settings**, together with schema, SID, SSL mode, charset and the read-only
 switch.
 
+The connection string, the user and the password are required for every engine but
+SQLite (which needs only the file): saving with one of them empty stops at the form,
+marks the empty field in red and leaves your typing alone. Editing an existing source
+may leave the password empty — that keeps the stored one.
+
 Accepted shapes — a DSN, a JDBC URL, an Oracle TNS descriptor, a JDBC thin
 descriptor, or a bare database file:
 
