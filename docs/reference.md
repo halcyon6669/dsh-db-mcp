@@ -48,7 +48,10 @@ are `GET`; every mutation is `POST` (the same-origin check compares `Origin` wit
 ## Tools
 
 Names are prefixed at publication time: `mcp__db__list_datasources` and so on.
-`datasource` is optional everywhere — omitted, the default source is used.
+`datasource` is optional everywhere — omitted, the server falls back to the source
+flagged `isDefault`, else the first entry in the registry. The panel stopped offering
+a "make default" action in 0.8, so `isDefault` normally stays on the imported sample
+or the very first source created.
 Row limits come from the server: `DB_MCP_MAX_ROWS` (default 200) per call, capped at
 `DB_MCP_MAX_ROWS_HARD` (default 2000).
 

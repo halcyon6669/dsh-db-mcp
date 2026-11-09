@@ -64,7 +64,8 @@ Prefer to start from scratch? **New data source** takes one connection string
 | `mcp__db__get_ddl` | `CREATE TABLE` statement |
 | `mcp__db__test_connection` | real login, `select 1`, server/user/schema |
 
-`datasource` is optional on all of them: omitted, the default source is used.
+`datasource` is optional on all of them: omitted, the plugin falls back to the source
+flagged `isDefault` (or the first one in the registry).
 Queries run **in the conversation**; the panel is for managing connections, not a
 SQL console.
 
