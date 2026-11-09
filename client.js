@@ -63,7 +63,6 @@ window.__ModuleLoader__.load({
         'action.testing': 'Testing…',
         'action.delete': 'Delete',
         'action.deleteConfirm': 'Delete for real',
-        'action.makeDefault': 'Make default',
         'action.importSelected': 'Import selected',
         'action.importing': 'Importing…',
         'state.connected': 'connected',
@@ -75,7 +74,6 @@ window.__ModuleLoader__.load({
         'error.retry': 'Retry',
         'notice.saved': 'Saved {name}.',
         'notice.deleted': 'Removed {name}.',
-        'notice.default': '{name} is now the default source.',
         'notice.imported': 'Imported {n} data source(s).',
         'notice.importedSkipped': 'Imported {n} data source(s); skipped {m} already configured.',
         'notice.probeOk': '{name}: connection OK ({ms} ms).',
@@ -273,7 +271,6 @@ window.__ModuleLoader__.load({
         'action.testing': '测试中…',
         'action.delete': '删除',
         'action.deleteConfirm': '确认删除',
-        'action.makeDefault': '设为默认',
         'action.importSelected': '导入所选',
         'action.importing': '导入中…',
         'state.connected': '已连接',
@@ -285,7 +282,6 @@ window.__ModuleLoader__.load({
         'error.retry': '重试',
         'notice.saved': '已保存 {name}。',
         'notice.deleted': '已删除 {name}。',
-        'notice.default': '{name} 已设为默认数据源。',
         'notice.imported': '已导入 {n} 个数据源。',
         'notice.importedSkipped': '已导入 {n} 个数据源，跳过 {m} 个已存在的。',
         'notice.probeOk': '{name}：连接正常（{ms} ms）。',
@@ -706,25 +702,24 @@ window.__ModuleLoader__.load({
       .dbmcp-audit-list {
         display: flex;
         flex-direction: column;
-        gap: 6px;
+        gap: 8px;
       }
       .dbmcp-audit {
         display: flex;
         flex-wrap: wrap;
         align-items: center;
         gap: 8px;
-        padding: 8px 0;
-        border-top: 1px solid var(--dsw-alias-border-l1);
+        padding: 10px 12px;
+        border: 1px solid var(--dsw-alias-border-l1);
+        border-radius: 10px;
+        background: var(--dsw-alias-bg-layer-1);
         font-size: 13px;
         min-width: 0;
-      }
-      .dbmcp-audit:first-child {
-        border-top: none;
-        padding-top: 0;
       }
       .dbmcp-audit-time {
         color: var(--dsw-alias-label-secondary);
         font-variant-numeric: tabular-nums;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
         font-size: 12px;
         white-space: nowrap;
       }
@@ -732,6 +727,9 @@ window.__ModuleLoader__.load({
         font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
         font-size: 12px;
         color: var(--dsw-alias-label-primary);
+        padding: 1px 7px;
+        border-radius: 999px;
+        border: 1px solid var(--dsw-alias-border-l1);
       }
       .dbmcp-audit-ok {
         font-size: 12px;
@@ -769,6 +767,10 @@ window.__ModuleLoader__.load({
         flex-direction: column;
         gap: 8px;
         min-width: 0;
+        padding: 12px;
+        border: 1px solid var(--dsw-alias-border-l1);
+        border-radius: 10px;
+        background: var(--dsw-alias-bg-layer-1);
       }
       .dbmcp-schema-main {
         min-width: 0;
@@ -841,9 +843,9 @@ window.__ModuleLoader__.load({
         gap: 8px;
         width: 100%;
         padding: 6px 8px;
-        border: 1px solid transparent;
-        border-radius: 6px;
-        background: transparent;
+        border: 1px solid var(--dsw-alias-border-l1);
+        border-radius: 8px;
+        background: var(--dsw-alias-bg-base);
         color: var(--dsw-alias-label-primary);
         font: inherit;
         font-size: 13px;
@@ -862,18 +864,25 @@ window.__ModuleLoader__.load({
         border-collapse: collapse;
         font-size: 13px;
         margin-top: 6px;
+        border: 1px solid var(--dsw-alias-border-l1);
+        border-radius: 10px;
+        overflow: hidden;
       }
       .dbmcp-schema-tablegrid th,
       .dbmcp-schema-tablegrid td {
         text-align: left;
-        padding: 6px 8px;
+        padding: 8px 10px;
         border-bottom: 1px solid var(--dsw-alias-border-l1);
         vertical-align: top;
+      }
+      .dbmcp-schema-tablegrid tr:last-child td {
+        border-bottom: none;
       }
       .dbmcp-schema-tablegrid th {
         font-weight: 600;
         font-size: 12px;
         color: var(--dsw-alias-label-secondary);
+        background: var(--dsw-alias-bg-layer-1);
       }
       .dbmcp-schema-note {
         margin-top: 10px;
@@ -913,11 +922,18 @@ window.__ModuleLoader__.load({
       }
       .dbmcp-rows {
         display: grid;
-        grid-template-columns: 104px minmax(0, 1fr);
-        row-gap: 10px;
-        column-gap: 12px;
+        grid-template-columns: 116px minmax(0, 1fr);
+        column-gap: 14px;
         font-size: 13px;
         line-height: 1.5;
+      }
+      .dbmcp-rows > * {
+        padding: 7px 0;
+        border-bottom: 1px solid var(--dsw-alias-border-l1);
+        min-width: 0;
+      }
+      .dbmcp-rows > *:nth-last-child(-n + 2) {
+        border-bottom: none;
       }
       .dbmcp-k {
         color: var(--dsw-alias-label-secondary);
@@ -1757,10 +1773,11 @@ window.__ModuleLoader__.load({
         align-items: center;
         gap: 10px;
         flex-wrap: wrap;
-        margin: 0 0 12px;
-        padding: 10px 0;
+        margin: 0 0 14px;
+        padding: 10px 12px;
+        border: 1px solid var(--dsw-alias-border-l1);
+        border-radius: 10px;
         background: var(--dsw-alias-bg-layer-1);
-        border-bottom: 1px solid var(--dsw-alias-border-l1);
       }
       .dbmcp-scan-bar .dbmcp-input {
         flex: 1 1 240px;
@@ -2259,6 +2276,22 @@ window.__ModuleLoader__.load({
         setRaw(value)
         if (!value.trim()) {
           setParsed(null)
+          // Deleting a recognised connection string also drops what it filled
+          // in; editing keeps the identifier and group the source already owns.
+          setDraft((prev) => {
+            const fresh = emptyDraft()
+            if (!editing) return fresh
+            return {
+              ...fresh,
+              id: prev.id,
+              nameTouched: prev.nameTouched,
+              idTouched: prev.idTouched,
+              group: prev.group,
+              readOnly: prev.readOnly,
+            }
+          })
+          setMissing({})
+          setProbeResult(null)
           return
         }
         const result = parseConnectionText(value)
@@ -3374,22 +3407,6 @@ function groupTables(tables) {
         await runBulk('delete')
       }
 
-      const makeDefault = async (source) => {
-        try {
-          await apiPost('/datasources/save', {
-            id: source.id,
-            name: source.name,
-            kind: source.kind,
-            readOnly: source.readOnly,
-            isDefault: true,
-            config: source.config,
-          })
-          finish(fmt(t('notice.default'), { name: source.name || source.id }), false)
-        } catch (error) {
-          setNotice({ message: String((error && error.message) || error), isError: true })
-        }
-      }
-
       const probe = async (source) => {        setProbing(source.id)
         try {
           const result = await apiPost('/datasources/test', { id: source.id })
@@ -3727,7 +3744,6 @@ function groupTables(tables) {
                       source.name || source.id,
                     ),
                     h('span', { className: 'dbmcp-pill' }, source.kind),
-                    source.isDefault ? h('span', { className: 'dbmcp-pill' }, t('sources.default')) : null,
                     h(
                       'button',
                       {
@@ -3762,9 +3778,6 @@ function groupTables(tables) {
               ),
               h('button', { type: 'button', className: 'dbmcp-btn is-small is-plain', onClick: () => setView({ mode: 'schema', source }) }, t('action.schema')),
               h('button', { type: 'button', className: 'dbmcp-btn is-small is-plain', onClick: () => setView({ mode: 'edit', source }) }, t('action.edit')),
-              source.isDefault
-                ? null
-                : h('button', { type: 'button', className: 'dbmcp-btn is-small is-plain', onClick: () => makeDefault(source) }, t('action.makeDefault')),
               h(
                 'button',
                 {
