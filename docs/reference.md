@@ -118,6 +118,7 @@ and is read only by the Host, never sent to the page.
 | ---- | ------------- |
 | `sqlite` | `file` (absolute path), `readOnlyOpen?`, `busyTimeoutMs?` |
 | `postgres` | `host`, `port` (5432), `database`, `user`, `schema?`, `sslMode?` |
+| `gauss` | same as `postgres`, plus `hosts: [{ host, port }]` for an openGauss cluster; `host` may also be `h1:1,h2:2` |
 | `mysql` | `host`, `port` (3306), `database`, `user`, `charset?` |
 | `oracle` | `host`, `port` (1521), `serviceName` **or** `sid`, `user`, `schema?` |
 

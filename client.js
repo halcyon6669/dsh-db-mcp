@@ -39,8 +39,8 @@ window.__ModuleLoader__.load({
       return 'list'
     }
     const API = '/plugins/db-mcp/api'
-    const KINDS = ['sqlite', 'postgres', 'mysql', 'oracle']
-    const DEFAULT_PORTS = { postgres: '5432', mysql: '3306', oracle: '1521' }
+    const KINDS = ['sqlite', 'postgres', 'gauss', 'mysql', 'oracle']
+    const DEFAULT_PORTS = { postgres: '5432', gauss: '5432', mysql: '3306', oracle: '1521' }
 
     /** Set by apply(); bind() reads the active locale at call time, so only the
      *  re-render subscription has to live on the component side. */
@@ -131,6 +131,9 @@ window.__ModuleLoader__.load({
         'import.credentialsFound': 'found and decrypted',
         'import.already': 'already added',
         'import.alreadyAs': 'already added as {name}',
+        'import.searchPlaceholder': 'Filter by name, host or user',
+        'import.noMatch': 'No DBeaver connection matches this filter.',
+        'import.matches': '{n} of {total}',
         'import.credentialsMissing': 'not present — the password has to be typed in manually later',
         'diag.title': 'Runtime diagnostics',
         'diag.hostApi': 'Host API',
@@ -225,6 +228,10 @@ window.__ModuleLoader__.load({
         'schema.yes': 'yes',
         'schema.no': 'no',
         'schema.columns': '{n} column(s)',
+        'schema.matching': '{n} match(es)',
+        'schema.search': 'Filter tables',
+        'schema.noMatch': 'No table matches this filter.',
+        'schema.defaultSchema': 'default schema',
         'schema.readonlyNote': 'Read-only view: this page never runs SQL.',
       },
       zh: {
@@ -309,6 +316,9 @@ window.__ModuleLoader__.load({
         'import.credentialsFound': '已找到并解密',
         'import.already': '已添加',
         'import.alreadyAs': '已作为 {name} 添加',
+        'import.searchPlaceholder': '按名称、主机或用户过滤',
+        'import.noMatch': '没有匹配该过滤条件的 DBeaver 连接。',
+        'import.matches': '{n} / {total}',
         'import.credentialsMissing': '不存在——口令需要稍后手动填写',
         'diag.title': '运行时诊断',
         'diag.hostApi': 'Host 接口',
@@ -403,6 +413,10 @@ window.__ModuleLoader__.load({
         'schema.yes': '是',
         'schema.no': '否',
         'schema.columns': '{n} 列',
+        'schema.matching': '匹配 {n} 个',
+        'schema.search': '过滤表名',
+        'schema.noMatch': '没有匹配的表。',
+        'schema.defaultSchema': '默认模式',
         'schema.readonlyNote': '只读视图：这个页面不会执行任何 SQL。',
       },
     }
@@ -709,6 +723,49 @@ window.__ModuleLoader__.load({
         gap: 2px;
         max-height: 420px;
         overflow: auto;
+      }
+      .dbmcp-schema-groups {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        max-height: 460px;
+        overflow: auto;
+      }
+      .dbmcp-schema-group {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        min-width: 0;
+      }
+      .dbmcp-schema-group-head {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        width: 100%;
+        padding: 4px 6px;
+        border: 0;
+        border-radius: 6px;
+        background: transparent;
+        color: var(--dsw-alias-label-secondary);
+        font: inherit;
+        font-size: 12px;
+        font-weight: 600;
+        text-align: left;
+        cursor: pointer;
+      }
+      .dbmcp-schema-group-head:hover {
+        background: var(--dsw-alias-bg-layer-1);
+      }
+      .dbmcp-schema-caret {
+        width: 12px;
+        flex: 0 0 auto;
+        color: var(--dsw-alias-label-secondary);
+      }
+      .dbmcp-schema-group-name {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
       .dbmcp-schema-table {
         display: flex;
@@ -1155,6 +1212,27 @@ window.__ModuleLoader__.load({
         color: var(--dsw-alias-label-secondary);
         word-break: break-all;
       }
+      .dbmcp-scan-bar {
+        position: sticky;
+        top: 0;
+        z-index: 2;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin: 0 0 12px;
+        padding: 10px 0;
+        background: var(--dsw-alias-bg-layer-1);
+        border-bottom: 1px solid var(--dsw-alias-border-l1);
+      }
+      .dbmcp-scan-bar .dbmcp-input {
+        flex: 1 1 240px;
+        min-width: 180px;
+      }
+      .dbmcp-scan-bar .dbmcp-btn {
+        margin-left: auto;
+        flex: 0 0 auto;
+      }
     `
 
     /** Re-render on locale switch / late dictionary registration. */
@@ -1333,17 +1411,41 @@ window.__ModuleLoader__.load({
     }
 
     function fromUrl(kind, body) {
+      const source = body.startsWith('//') ? body : '//' + body
+      // `new URL` rejects a comma-separated authority, so the cluster list is
+      // peeled off first and only the first node is handed to the URL parser.
+      const cluster = /^\/\/([^/?#]+)/.exec(source)
+      const authorityText = cluster ? cluster[1] : ''
+      const at = authorityText.lastIndexOf('@')
+      const hostList = at >= 0 ? authorityText.slice(at + 1) : authorityText
+      const single = hostList.includes(',') ? hostList.split(',')[0] : hostList
+      const normalized = cluster
+        ? `//${at >= 0 ? authorityText.slice(0, at + 1) : ''}${single}${source.slice(cluster[0].length)}`
+        : source
       let url
       try {
-        url = new URL('db:' + (body.startsWith('//') ? body : '//' + body))
+        url = new URL('db:' + normalized)
       } catch (error) {
         return { ok: false, code: 'url' }
       }
       const query = parseQueryString(url.search)
       const database = decodePart(url.pathname.replace(/^\/+/, ''))
       const config = baseConfig(kind)
+      // openGauss lists every node before the path (`h1:1,h2:2`); the URL parser
+      // keeps the first one, so split the original authority for the rest.
       config.host = url.hostname || 'localhost'
       config.port = url.port || DEFAULT_PORTS[kind] || ''
+      if (cluster && hostList.includes(',')) {
+        const nodes = hostList
+          .split(',')
+          .map((piece) => /^([^:]+)(?::(\d+))?$/.exec(piece.trim()))
+          .filter(Boolean)
+          .map((match) => ({ host: match[1], port: match[2] ? Number(match[2]) : Number(config.port) || null }))
+        if (nodes.length > 1) {
+          config.hosts = nodes
+          config.host = nodes.map((node) => node.host).join(',')
+        }
+      }
       config.user = decodePart(url.username) || query.user || query.username || ''
       if (kind === 'oracle') {
         config.serviceName = database || query.servicename || query.service || ''
@@ -1423,6 +1525,8 @@ window.__ModuleLoader__.load({
         if (restLower.startsWith('sqlite:')) return parseSqliteFile(rest.slice('sqlite:'.length))
         if (restLower.startsWith('oracle:thin:@')) return parseOracleThin(rest.slice('oracle:thin:@'.length))
         if (restLower.startsWith('postgresql://')) return fromUrl('postgres', rest.slice('postgresql:'.length))
+        if (restLower.startsWith('opengauss://')) return fromUrl('gauss', rest.slice('opengauss:'.length))
+        if (restLower.startsWith('gaussdb://')) return fromUrl('gauss', rest.slice('gaussdb:'.length))
         if (restLower.startsWith('mysql://')) return fromUrl('mysql', rest.slice('mysql:'.length))
         if (restLower.startsWith('mariadb://')) return fromUrl('mysql', rest.slice('mariadb:'.length))
         return { ok: false, code: 'jdbc' }
@@ -1435,6 +1539,7 @@ window.__ModuleLoader__.load({
         if (name === 'sqlite' || name === 'sqlite3' || name === 'file') return parseSqliteFile(body.slice(2))
         if (name === 'oracle') return fromUrl('oracle', body)
         if (name === 'postgres' || name === 'postgresql' || name === 'psql') return fromUrl('postgres', body)
+        if (name === 'opengauss' || name === 'gaussdb' || name === 'gauss') return fromUrl('gauss', body)
         if (name === 'mysql' || name === 'mariadb') return fromUrl('mysql', body)
         return { ok: false, code: 'scheme' }
       }
@@ -1558,6 +1663,14 @@ window.__ModuleLoader__.load({
         if (config.serviceName) return `oracle://${user}${host}${port}/${config.serviceName}`
         if (config.sid && config.port) return `jdbc:oracle:thin:@${host}${port}:${config.sid}`
         return ''
+      }
+      // openGauss URLs carry the scheme the driver expects, and every node.
+      if (draft.kind === 'gauss') {
+        if (!config.database) return ''
+        const nodes = Array.isArray(config.hosts) && config.hosts.length > 1
+          ? config.hosts.map((node) => `${node.host}${node.port ? `:${node.port}` : ''}`).join(',')
+          : `${host}${port}`
+        return `opengauss://${user}${nodes}/${config.database}`
       }
       return config.database ? `${draft.kind}://${user}${host}${port}/${config.database}` : ''
     }
@@ -1692,7 +1805,7 @@ window.__ModuleLoader__.load({
           ),
         )
       }
-      if (draft.kind === 'postgres') {
+      if (draft.kind === 'postgres' || draft.kind === 'gauss') {
         manual.push(
           h(
             Field,
@@ -1876,11 +1989,38 @@ window.__ModuleLoader__.load({
       )
     }
 
+    /** Tables grouped by schema; the group order is stable and alphabetical. */
+    function groupTables(tables) {
+      const buckets = new Map()
+      for (const table of tables || []) {
+        const key = table.schema || ''
+        if (!buckets.has(key)) buckets.set(key, [])
+        buckets.get(key).push(table)
+      }
+      return Array.from(buckets.entries()).sort((left, right) => (left[0] || '').localeCompare(right[0] || ''))
+    }
+
+    function tableMatches(table, needle) {
+      if (!needle) return true
+      return (
+        String(table.name || '').toLowerCase().includes(needle) ||
+        String(table.schema || '').toLowerCase().includes(needle)
+      )
+    }
+
+    function connectionMatches(item, needle) {
+      if (!needle) return true
+      return [item.name, item.id, item.target, item.user, item.kind].some((value) =>
+        String(value || '').toLowerCase().includes(needle),
+      )
+    }
+
     function ImportView(props) {
       const t = props.t
       const [state, setState] = React.useState({ status: 'loading', data: null, error: null })
       const [selected, setSelected] = React.useState([])
       const [busy, setBusy] = React.useState(false)
+      const [filter, setFilter] = React.useState('')
 
       React.useEffect(() => {
         let alive = true
@@ -1914,6 +2054,13 @@ window.__ModuleLoader__.load({
         }
       }
 
+      const needle = filter.trim().toLowerCase()
+      const files = (all || [])
+        .map((source) => ({ ...source, connections: (source.connections || []).filter((item) => connectionMatches(item, needle)) }))
+        .filter((source) => source.connections.length > 0)
+      const totalConnections = (all || []).reduce((sum, source) => sum + (source.connections || []).length, 0)
+      const visibleConnections = files.reduce((sum, source) => sum + source.connections.length, 0)
+
       if (state.status === 'loading') return h('div', { className: 'dbmcp-empty' }, t('loading'))
       if (state.status === 'error') {
         return h('div', { className: 'dbmcp-error' }, h('div', null, state.error))
@@ -1922,6 +2069,24 @@ window.__ModuleLoader__.load({
       return h(
         'div',
         { className: 'dbmcp-scan' },
+        // The bar stays put while the list scrolls, so the action never leaves
+        // the viewport no matter how many connections DBeaver knows about.
+        h(
+          'div',
+          { className: 'dbmcp-scan-bar' },
+          h(TextInput, {
+            value: filter,
+            placeholder: t('import.searchPlaceholder'),
+            label: t('import.searchPlaceholder'),
+            onChange: setFilter,
+          }),
+          h('span', { className: 'dbmcp-hint' }, fmt(t('import.matches'), { n: visibleConnections, total: totalConnections })),
+          h(
+            'button',
+            { type: 'button', className: 'dbmcp-btn is-primary', disabled: busy || selected.length === 0, onClick: runImport },
+            busy ? t('action.importing') : `${t('action.importSelected')} (${selected.length})`,
+          ),
+        ),
         h('p', { className: 'dbmcp-sub' }, t('import.body')),
         all.length === 0
           ? h(
@@ -1934,7 +2099,9 @@ window.__ModuleLoader__.load({
                 state.data.roots.join(' · '),
               ),
             )
-          : all.map((source) =>
+          : visibleConnections === 0
+            ? h('div', { className: 'dbmcp-empty' }, t('import.noMatch'))
+            : files.map((source) =>
               h(
                 'div',
                 { key: source.file },
@@ -1989,15 +2156,6 @@ window.__ModuleLoader__.load({
                 ),
               ),
             ),
-        h(
-          'div',
-          { className: 'dbmcp-toolbar' },
-          h(
-            'button',
-            { type: 'button', className: 'dbmcp-btn is-primary', disabled: busy || selected.length === 0, onClick: runImport },
-            busy ? t('action.importing') : `${t('action.importSelected')} (${selected.length})`,
-          ),
-        ),
       )
     }
 
@@ -2005,10 +2163,14 @@ window.__ModuleLoader__.load({
     function SchemaView(props) {
       const { t, source, onBack } = props
       const [tables, setTables] = React.useState(null)
+      // A table is identified by schema + name: the same name can live in two
+      // schemas, and describe_table needs the schema to find the right one.
       const [picked, setPicked] = React.useState(null)
       const [detail, setDetail] = React.useState(null)
       const [error, setError] = React.useState(null)
       const [busy, setBusy] = React.useState(true)
+      const [filter, setFilter] = React.useState('')
+      const [collapsed, setCollapsed] = React.useState({})
 
       React.useEffect(() => {
         let alive = true
@@ -2039,6 +2201,9 @@ window.__ModuleLoader__.load({
         }
       }, [source.id])
 
+      const pickedSchema = picked ? picked.schema || '' : ''
+      const pickedName = picked ? picked.name : ''
+
       React.useEffect(() => {
         if (!picked) {
           setDetail(null)
@@ -2048,8 +2213,9 @@ window.__ModuleLoader__.load({
         setDetail({ loading: true })
         ;(async () => {
           try {
+            const schemaPart = picked.schema ? `&schema=${encodeURIComponent(picked.schema)}` : ''
             const data = await apiGet(
-              `/schema?datasource=${encodeURIComponent(source.id)}&table=${encodeURIComponent(picked)}`,
+              `/schema?datasource=${encodeURIComponent(source.id)}&table=${encodeURIComponent(picked.name)}${schemaPart}`,
             )
             if (alive) setDetail(data)
           } catch (failure) {
@@ -2060,7 +2226,16 @@ window.__ModuleLoader__.load({
         return () => {
           alive = false
         }
-      }, [picked, source.id])
+      }, [pickedSchema, pickedName, source.id])
+
+      const groups = React.useMemo(() => groupTables(tables), [tables])
+
+      const needle = filter.trim().toLowerCase()
+      const visible = groups
+        .map(([schema, items]) => [schema, items.filter((table) => tableMatches(table, needle))])
+        .filter(([, items]) => items.length > 0)
+      const visibleCount = visible.reduce((sum, [, items]) => sum + items.length, 0)
+      const groupLabel = (schema) => (schema ? schema : t('schema.defaultSchema'))
 
       let content
       if (busy && !tables) {
@@ -2070,34 +2245,75 @@ window.__ModuleLoader__.load({
       } else if (!tables || tables.length === 0) {
         content = h('div', { className: 'dbmcp-empty' }, t('schema.empty'))
       } else {
+        const side = h(
+          'div',
+          { className: 'dbmcp-schema-side' },
+          h(
+            'div',
+            { className: 'dbmcp-schema-head' },
+            h('span', null, fmt(t('schema.tables'), { n: tables.length })),
+            needle ? h('span', { className: 'dbmcp-hint' }, fmt(t('schema.matching'), { n: visibleCount })) : null,
+          ),
+          h(TextInput, {
+            value: filter,
+            placeholder: t('schema.search'),
+            label: t('schema.search'),
+            onChange: setFilter,
+          }),
+          visibleCount === 0
+            ? h('div', { className: 'dbmcp-empty' }, t('schema.noMatch'))
+            : h(
+                'div',
+                { className: 'dbmcp-schema-groups' },
+                visible.map(([schema, items]) => {
+                  const closed = collapsed[schema] === true
+                  return h(
+                    'section',
+                    { key: `group-${schema || '_'}`, className: 'dbmcp-schema-group' },
+                    h(
+                      'button',
+                      {
+                        type: 'button',
+                        className: 'dbmcp-schema-group-head',
+                        'aria-expanded': closed ? 'false' : 'true',
+                        onClick: () => setCollapsed({ ...collapsed, [schema]: !closed }),
+                      },
+                      h('span', { className: 'dbmcp-schema-caret', 'aria-hidden': 'true' }, closed ? '▸' : '▾'),
+                      h('span', { className: 'dbmcp-schema-group-name' }, groupLabel(schema)),
+                      h('span', { className: 'dbmcp-hint' }, String(items.length)),
+                    ),
+                    closed
+                      ? null
+                      : h(
+                          'ul',
+                          { className: 'dbmcp-schema-tables' },
+                          items.map((table) => {
+                            const active = pickedName === table.name && pickedSchema === (table.schema || '')
+                            return h(
+                              'li',
+                              { key: `${table.schema || ''}.${table.name}` },
+                              h(
+                                'button',
+                                {
+                                  type: 'button',
+                                  className: 'dbmcp-schema-table' + (active ? ' is-active' : ''),
+                                  onClick: () => setPicked({ schema: table.schema || '', name: table.name }),
+                                },
+                                h('span', null, table.name),
+                                table.type ? h('span', { className: 'dbmcp-pill' }, table.type) : null,
+                              ),
+                            )
+                          }),
+                        ),
+                  )
+                }),
+              ),
+        )
+
         content = h(
           'div',
           { className: 'dbmcp-schema' },
-          h(
-            'div',
-            { className: 'dbmcp-schema-side' },
-            h('div', { className: 'dbmcp-schema-head' }, fmt(t('schema.tables'), { n: tables.length })),
-            h(
-              'ul',
-              { className: 'dbmcp-schema-tables' },
-              tables.map((table) =>
-                h(
-                  'li',
-                  { key: `${table.schema || ''}.${table.name}` },
-                  h(
-                    'button',
-                    {
-                      type: 'button',
-                      className: 'dbmcp-schema-table' + (picked === table.name ? ' is-active' : ''),
-                      onClick: () => setPicked(table.name),
-                    },
-                    h('span', null, table.name),
-                    table.type ? h('span', { className: 'dbmcp-pill' }, table.type) : null,
-                  ),
-                ),
-              ),
-            ),
-          ),
+          side,
           h(
             'div',
             { className: 'dbmcp-schema-main' },
@@ -2118,7 +2334,7 @@ window.__ModuleLoader__.load({
                         h(
                           'div',
                           { className: 'dbmcp-schema-head' },
-                          h('span', null, detail.table),
+                          h('span', null, pickedSchema ? `${pickedSchema}.${detail.table}` : detail.table),
                           h('span', { className: 'dbmcp-hint' }, fmt(t('schema.columns'), { n: (detail.columns || []).length })),
                         ),
                         h(
@@ -3112,7 +3328,22 @@ window.__ModuleLoader__.load({
     return {
       inject: ['slots', 'locale', 'layout'],
       /** Parser and components exposed for the offline tests in dev/. */
-      __test: { parseConnectionText, uniqueId, slugId, canonicalUrl, emptyDraft, draftFromSource, SourceForm, SchemaView, Breadcrumbs, MainPanel },
+      __test: {
+        parseConnectionText,
+        uniqueId,
+        slugId,
+        canonicalUrl,
+        emptyDraft,
+        draftFromSource,
+        SourceForm,
+        SchemaView,
+        ImportView,
+        groupTables,
+        tableMatches,
+        connectionMatches,
+        Breadcrumbs,
+        MainPanel,
+      },
       apply(ctx) {
         localeService = ctx.locale
         layoutService = ctx.layout || null

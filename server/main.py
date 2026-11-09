@@ -71,6 +71,9 @@ def _source(profile: dict) -> dict:
         target = config.get("file") or ""
     elif kind == "oracle":
         target = f"{config.get('host')}:{config.get('port') or 1521}/{config.get('serviceName') or config.get('sid') or ''}"
+    elif kind == "gauss" and isinstance(config.get("hosts"), list) and len(config["hosts"]) > 1:
+        nodes = ",".join(str(node.get("host")) for node in config["hosts"] if isinstance(node, dict))
+        target = f"{nodes}:{config.get('port') or 5432}/{config.get('database') or ''}"
     else:
         target = f"{config.get('host')}:{config.get('port') or ''}/{config.get('database') or ''}"
     return {
@@ -86,7 +89,7 @@ def _source(profile: dict) -> dict:
 def _inline_profile(kind: str, config: Any, read_only: Optional[bool]) -> dict:
     if not isinstance(config, dict):
         raise store.StoreError("user_error", "inline test needs a config object", "pass kind plus config")
-    if kind not in ("sqlite", "postgres", "mysql", "oracle"):
+    if kind not in ("sqlite", "postgres", "gauss", "mysql", "oracle"):
         raise store.StoreError("user_error", f"unsupported datasource kind: {kind}")
     return {
         "id": None,

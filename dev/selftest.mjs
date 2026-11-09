@@ -111,6 +111,49 @@ try {
     JSON.stringify(pgUrl),
   )
 
+  // openGauss lists every cluster node in the authority and hangs options off a
+  // query string; falling back to the postgres parser must not lose them.
+  const gaussUrl = host.__test.parseJdbcUrl(
+    'jdbc:opengauss://h1:30100,h2:30100,h3:30100/demo?targetServerType=master&connectionExtraInfo=true',
+  )
+  check(
+    'opengauss url keeps all three hosts',
+    gaussUrl?.hosts?.length === 3 && gaussUrl.hosts[2].port === 30100 && gaussUrl.database === 'demo',
+    JSON.stringify(gaussUrl?.hosts),
+  )
+  check(
+    'opengauss url keeps its query options',
+    gaussUrl?.params?.targetServerType === 'master',
+    JSON.stringify(gaussUrl?.params),
+  )
+
+  const gaussEntry = host.__test.mapDBeaverConnection({
+    provider: 'generic',
+    driver: 'opengauss-jdbc',
+    name: 'gauss',
+    configuration: {
+      url: 'jdbc:opengauss://10.0.0.1:30100,10.0.0.2:30100/app?targetServerType=master',
+      user: 'gauss_user',
+      configurationType: 'URL',
+    },
+  })
+  check('dbeaver opengauss entry maps', gaussEntry.ok === true && gaussEntry.kind === 'gauss', String(gaussEntry.reason))
+  check('dbeaver opengauss keeps both nodes', gaussEntry.config?.hosts?.length === 2, JSON.stringify(gaussEntry.config?.hosts))
+
+  const oracleList = host.__test.parseOracleUrl(
+    'jdbc:oracle:thin:@(DESCRIPTION_LIST=(LOAD_BALANCE=ON)(FAILOVER=ON)' +
+      '(DESCRIPTION=(ADDRESS=(PROTOCOL=TCP)(HOST=ora-1.example.com)(PORT=1522))' +
+      '(CONNECT_DATA=(SERVICE_NAME=ORCLPDB1))))',
+  )
+  check(
+    'oracle DESCRIPTION_LIST yields host/port/service',
+    oracleList?.host === 'ora-1.example.com' && oracleList.port === 1522 && oracleList.serviceName === 'ORCLPDB1',
+    JSON.stringify(oracleList),
+  )
+
+  const oracleSid = host.__test.parseOracleUrl('jdbc:oracle:thin:@ora.example.com:1521:ORCL')
+  check('oracle thin SID url still parses', oracleSid?.sid === 'ORCL' && oracleSid.serviceName === '', JSON.stringify(oracleSid))
+
   const importable = all.find((entry) => entry.importable && entry.kind === 'sqlite')
   if (importable) {
     // `chinook` already points at the same file and account, so the scan must
@@ -262,7 +305,7 @@ try {
   const unknownGroup = await call('POST', '/groups/delete', { name: 'nope' })
   check('deleting an unknown group is a 404', unknownGroup.status === 404, unknownGroup.body.error)
 } finally {
-  server.close()
+  await new Promise((resolve) => server.close(resolve))
   const failed = results.filter((entry) => !entry.ok)
   console.log(`\n${results.length - failed.length}/${results.length} checks passed`)
   if (failed.length > 0) {
@@ -273,4 +316,7 @@ try {
   } else {
     await rm(dir, { recursive: true, force: true })
   }
+  // Let libuv unwind the sockets and timers before the process exits: exiting
+  // straight after a failure trips an assertion inside win/async.c.
+  await new Promise((resolve) => setTimeout(resolve, 250))
 }

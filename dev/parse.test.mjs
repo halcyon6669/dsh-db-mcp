@@ -96,6 +96,21 @@ expectParse('jdbc mariadb maps to mysql', 'jdbc:mariadb://10.0.0.5:3307/legacy',
   config: { host: '10.0.0.5', port: '3307', database: 'legacy' },
 })
 
+// openGauss hands over its whole cluster in the authority; the form must keep
+// every node so the driver can fail over, and the URL must round-trip.
+const gauss = parseConnectionText('jdbc:opengauss://h1:30100,h2:30100,h3:30100/demo?targetServerType=master')
+check(
+  'opengauss url keeps every node',
+  gauss.ok === true && gauss.kind === 'gauss' && gauss.config.hosts?.length === 3 && gauss.config.hosts[2].port === 30100,
+  JSON.stringify(gauss),
+)
+check('opengauss url reads the database', gauss.ok === true && gauss.config.database === 'demo', JSON.stringify(gauss.config))
+check(
+  'opengauss url round-trips',
+  canonicalUrl({ kind: 'gauss', config: gauss.config }) === 'opengauss://h1:30100,h2:30100,h3:30100/demo',
+  canonicalUrl({ kind: 'gauss', config: gauss.config }),
+)
+
 expectParse('oracle url with service name', 'oracle://system:oracle@localhost:1521/XEPDB1', {
   ok: true,
   kind: 'oracle',

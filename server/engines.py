@@ -13,10 +13,18 @@ import decimal
 import os
 import re
 import sqlite3
+import ssl
 import time
 from pathlib import Path
+from urllib.parse import quote
 
 READ_STARTERS = ("select", "with", "show", "describe", "desc", "explain", "pragma", "values", "table", "set")
+
+# GaussDB/openGauss speaks the PostgreSQL wire protocol and its catalogs are
+# PostgreSQL shaped, so every introspection path treats the two alike. Only the
+# driver differs: openGauss servers answer SASL with SHA256, which libpq-based
+# drivers (psycopg) cannot negotiate.
+PG_LIKE = ("postgres", "gauss")
 
 
 def allow_write() -> bool:
@@ -117,7 +125,7 @@ def qualified(profile: dict, table: str) -> str:
     schema = (profile.get("config") or {}).get("schema") or None
     if kind == "oracle":
         schema = (schema or (profile.get("config") or {}).get("user") or "").upper() or None
-    if schema and kind in ("postgres", "oracle", "mysql"):
+    if schema and kind in ("postgres", "gauss", "oracle", "mysql"):
         return f"{_quote(kind, schema)}.{_quote(kind, table)}"
     return _quote(kind, table)
 
@@ -140,6 +148,8 @@ def connect(profile: dict, password: str | None):
         return _connect_sqlite(profile, config)
     if kind == "postgres":
         return _connect_postgres(profile, config, password)
+    if kind == "gauss":
+        return _connect_gauss(profile, config, password)
     if kind == "mysql":
         return _connect_mysql(profile, config, password)
     if kind == "oracle":
@@ -183,6 +193,201 @@ def _connect_postgres(profile: dict, config: dict, password: str | None):
     except Exception as error:  # noqa: BLE001 - driver specific exception types
         raise DbError("db_error", f"PostgreSQL connection failed: {error}")
     return connection, connection.close
+
+
+def _host_list(config: dict) -> list[tuple[str, int]]:
+    """Hosts to try, in order. `hosts` wins over `host`, and a comma list works too.
+
+    openGauss clusters are usually given as three addresses with
+    `targetServerType=master`, so the shape has to survive the trip from the URL.
+    """
+    default_port = int(config.get("port") or 5432)
+    entries: list[tuple[str, int]] = []
+    declared = config.get("hosts")
+    if isinstance(declared, list):
+        for item in declared:
+            if isinstance(item, dict) and item.get("host"):
+                entries.append((str(item["host"]), int(item.get("port") or default_port)))
+            elif isinstance(item, str) and item.strip():
+                entries.append((item.strip(), default_port))
+    if not entries:
+        for piece in str(config.get("host") or "localhost").split(","):
+            piece = piece.strip()
+            if not piece:
+                continue
+            host, _, maybe_port = piece.rpartition(":")
+            if host and maybe_port.isdigit():
+                entries.append((host, int(maybe_port)))
+            else:
+                entries.append((piece, default_port))
+    return entries or [("localhost", default_port)]
+
+
+def _gauss_iri(config: dict, password: str | None) -> str:
+    user = quote(str(config.get("user") or ""), safe="")
+    secret = quote(password or "", safe="")
+    authority = ",".join(f"{host}:{port}" for host, port in _host_list(config))
+    database = quote(str(config.get("database") or ""), safe="")
+    credentials = f"{user}:{secret}@" if user else ""
+    return f"opengauss://{credentials}{authority}/{database}"
+
+
+def _ssl_shim() -> None:
+    """Give py_opengauss back `ssl.wrap_socket`, which Python 3.12 removed.
+
+    The shim has to switch certificate checking off explicitly: `wrap_socket`
+    defaulted to CERT_NONE, while PROTOCOL_TLS_CLIENT defaults to verifying, so a
+    naive replacement would fail every TLS handshake against these servers.
+    """
+    if hasattr(ssl, "wrap_socket"):
+        return
+
+    def wrap_socket(
+        sock,
+        keyfile=None,
+        certfile=None,
+        server_side=False,
+        cert_reqs=ssl.CERT_NONE,
+        ssl_version=None,
+        ca_certs=None,
+        do_handshake_on_connect=True,
+        suppress_ragged_eofs=True,
+        ciphers=None,
+    ):
+        protocol = ssl.PROTOCOL_TLS_SERVER if server_side else ssl.PROTOCOL_TLS_CLIENT
+        context = ssl.SSLContext(protocol)
+        context.check_hostname = False
+        context.verify_mode = cert_reqs if cert_reqs is not None else ssl.CERT_NONE
+        if certfile:
+            context.load_cert_chain(certfile, keyfile)
+        if ca_certs:
+            context.load_verify_locations(ca_certs)
+        if ciphers:
+            context.set_ciphers(ciphers)
+        return context.wrap_socket(
+            sock,
+            server_side=server_side,
+            do_handshake_on_connect=do_handshake_on_connect,
+            suppress_ragged_eofs=suppress_ragged_eofs,
+        )
+
+    ssl.wrap_socket = wrap_socket
+
+
+class _GaussCursor:
+    """A DB-API cursor over py_opengauss' native statement API.
+
+    py_opengauss 1.3.x ships its DB-API module with a TabError, so
+    `connection.cursor()` does not exist on the connection `open()` returns. What
+    does work is `connection.prepare(sql)(*params)`, and that keeps `%s` as the
+    placeholder style the rest of this module already emits — no rewriting of SQL.
+    """
+
+    def __init__(self, connection):
+        self._connection = connection
+        self._rows: list = []
+        self._index = 0
+        self.description = None
+        self.rowcount = -1
+
+    def execute(self, sql: str, params=()):
+        statement = self._connection.prepare(sql)
+        result = statement(*(params or ()))
+        names = list(getattr(statement, "column_names", None) or [])
+        self._rows = list(result or [])
+        self._index = 0
+        self.rowcount = len(self._rows)
+        self.description = (
+            [(name, None, None, None, None, None, None) for name in names] if names else None
+        )
+        return self
+
+    def fetchone(self):
+        if self._index >= len(self._rows):
+            return None
+        row = self._rows[self._index]
+        self._index += 1
+        return row
+
+    def fetchall(self):
+        rows = self._rows[self._index :]
+        self._index = len(self._rows)
+        return rows
+
+    def __iter__(self):
+        while True:
+            row = self.fetchone()
+            if row is None:
+                return
+            yield row
+
+    def close(self):
+        self._rows = []
+        self._index = 0
+
+
+class _GaussConnection:
+    """Keeps the commit/rollback/close surface `execute_sql` expects."""
+
+    def __init__(self, raw):
+        self.raw = raw
+
+    def cursor(self):
+        return _GaussCursor(self.raw)
+
+    def _plain(self, statement: str) -> None:
+        try:
+            self.raw.execute(statement)
+        except Exception:  # noqa: BLE001 - closing a dead session must not raise
+            pass
+
+    def commit(self):
+        self._plain("COMMIT")
+
+    def rollback(self):
+        self._plain("ROLLBACK")
+
+    def close(self):
+        try:
+            self.raw.close()
+        except Exception:  # noqa: BLE001 - already gone
+            pass
+
+
+def _connect_gauss(profile: dict, config: dict, password: str | None):
+    """openGauss/GaussDB, where libpq cannot do the SHA256 SASL handshake.
+
+    The pure-Python driver is tried first because it is the only one that speaks
+    that handshake; psycopg stays as a fallback for clusters configured with
+    md5/native passwords, and its error is reported only when both fail.
+    """
+    _ssl_shim()
+    errors: list[str] = []
+    try:
+        import py_opengauss
+
+        connection = py_opengauss.open(_gauss_iri(config, password))
+        wrapped = _GaussConnection(connection)
+        if profile.get("readOnly"):
+            try:
+                wrapped.cursor().execute("SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY")
+            except Exception:  # noqa: BLE001 - older builds refuse the switch
+                pass
+        return wrapped, wrapped.close
+    except ImportError as error:
+        errors.append(f"py_opengauss is not installed ({error})")
+    except Exception as error:  # noqa: BLE001 - driver specific exception types
+        errors.append(f"py_opengauss: {error}")
+    try:
+        return _connect_postgres(profile, config, password)
+    except DbError as error:
+        errors.append(f"psycopg: {error}")
+    raise DbError(
+        "db_error",
+        "GaussDB connection failed: " + " | ".join(errors),
+        "openGauss SHA256 authentication needs the pure-Python driver "
+        "(py_opengauss); install the plugin dependencies again",
+    )
 
 
 def _connect_mysql(profile: dict, config: dict, password: str | None):
@@ -252,7 +457,7 @@ def _probe_identity(kind: str, connection, profile: dict) -> dict:
     if kind == "sqlite":
         row = _fetch(kind, connection, "select sqlite_version()")
         return {"server": f"SQLite {row[0] if row else ''}".strip(), "database": config.get("file")}
-    if kind == "postgres":
+    if kind in PG_LIKE:
         row = _fetch(kind, connection, "select version()")
         banner = str(row[0]) if row else "PostgreSQL"
         row = _fetch(kind, connection, "select current_database(), current_user, current_schema()")
@@ -301,6 +506,7 @@ def _probe_message(kind: str, identity: dict) -> str:
         "sqlite": "select 1",
         "postgres": "select version()",
         "mysql": "select version()",
+        "gauss": "select version()",
         "oracle": "select 1 from dual",
     }[kind]
     parts.append(f"{example} ok")
@@ -347,7 +553,7 @@ def list_tables(profile: dict, connection, schema: str | None, limit: int = 500)
                 "and name not like 'sqlite_%' order by type, name"
             )
             rows = [[name, "view" if kind_of == "view" else "table", "main"] for name, kind_of in cursor.fetchall()]
-        elif kind == "postgres":
+        elif kind in PG_LIKE:
             base = (
                 "select table_schema, table_name, table_type from information_schema.tables "
                 "where table_schema not in ('pg_catalog','information_schema')"
@@ -408,7 +614,7 @@ def describe_table(profile: dict, connection, table: str, schema: str | None) ->
                 )
                 if pk:
                     primary.append(name)
-        elif kind in ("postgres", "mysql"):
+        elif kind in ("postgres", "gauss", "mysql"):
             owner = effective or (config.get("database") if kind == "mysql" else "public")
             placeholder = "%s"
             cursor.execute(
@@ -521,7 +727,7 @@ def table_ddl(profile: dict, connection, table: str, schema: str | None = None) 
 
     info = describe_table(profile, connection, table, schema)
     effective = info.get("schema") or None
-    if effective and kind in ("postgres", "oracle", "mysql"):
+    if effective and kind in ("postgres", "gauss", "oracle", "mysql"):
         target = f"{_quote(kind, effective)}.{_quote(kind, table)}"
     else:
         target = _quote(kind, table)
@@ -627,7 +833,7 @@ def explain_query(profile: dict, connection, sql: str) -> dict:
         if kind == "sqlite":
             cursor.execute(f"EXPLAIN QUERY PLAN {sql}")
             plan = "\n".join(" | ".join(str(part) for part in row) for row in cursor.fetchall())
-        elif kind == "postgres":
+        elif kind in PG_LIKE:
             cursor.execute(f"EXPLAIN {sql}")
             plan = "\n".join(str(row[0]) for row in cursor.fetchall())
         elif kind == "mysql":

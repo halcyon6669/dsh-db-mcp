@@ -83,6 +83,7 @@ oracle://system:oracle@localhost:1521/XEPDB1
 jdbc:oracle:thin:@//ora:1521/ORCLPDB1        # service name
 jdbc:oracle:thin:@ora:1521:ORCL              # SID
 (DESCRIPTION=(ADDRESS=(HOST=tns-host)(PORT=1522))(CONNECT_DATA=(SERVICE_NAME=svc1)))
+jdbc:opengauss://h1:30100,h2:30100,h3:30100/demo?targetServerType=master
 jdbc:sqlite:C:\data\app.db
 sqlite:///C:/data/chinook.db
 C:\data\app.db          /  /var/lib/app.sqlite3
@@ -91,6 +92,12 @@ C:\data\app.db          /  /var/lib/app.sqlite3
 A password found inside the URL is sent once and then only stored; it is never
 echoed back. `id` is immutable once created — rename the *display name* instead
 (double-click the name on a row).
+
+openGauss and GaussDB are their own kind: their SHA256 authentication is outside
+what libpq negotiates, so the server talks to them with the pure-Python
+`py_opengauss` driver (installed with the other Python dependencies) and falls
+back to psycopg only for clusters that still use md5. Paste the cluster URL and
+every node is kept, in order — the panel shows `h1 +2:30100`.
 
 ## Importing from DBeaver
 
@@ -111,6 +118,8 @@ Two details make real DBeaver workspaces work:
   kind + host + port + database/service/SID + user (SQLite by file path); a match
   comes back as `alreadyImported`, the checkbox is disabled and the row says
   *already added as …*.
+- The list has a filter box (name, host or user) and a bar pinned to the top of the
+  view, so *Import selected* stays in reach however long the workspace is.
 
 A workspace that never saved passwords is fine: the connection is imported with an
 empty password and the row shows **no password**. Fill it in once and it stays.
@@ -152,9 +161,12 @@ delete (two-step confirmation).
 
 **Structure** on a source row opens a read-only view: tables and views on the left,
 columns of the selected table on the right (name, type, nullability, default,
-primary-key marker). It is served by `GET /schema`, which only forwards
-`list_tables` / `describe_table` to the MCP server — the page cannot run SQL, and
-nothing is cached.
+primary-key marker). Tables are grouped by schema and each group folds open and
+closed; the filter box above the tree matches table names and schema names. The
+controller sends the table's schema along with its name, so two tables with the
+same name in different schemas stay distinct. It is served by `GET /schema`,
+which only forwards `list_tables` / `describe_table` to the MCP server — the page
+cannot run SQL, and nothing is cached.
 
 ## Safety switches
 

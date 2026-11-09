@@ -184,6 +184,31 @@ if (schemaView) {
   check('schema view: no page-level back button (breadcrumb owns navigation)', backButton.length === 0, `got ${backButton.length}`)
 }
 
+// The table list is grouped per schema and filterable; both helpers are pure so
+// they can be checked without a live MCP server.
+const { groupTables, tableMatches, connectionMatches } = mod.__test
+const grouped = groupTables([
+  { name: 'orders', schema: 'sales' },
+  { name: 'customers', schema: 'sales' },
+  { name: 'settings', schema: 'public' },
+  { name: 'plain', schema: '' },
+])
+check(
+  'schema grouping keeps every table',
+  grouped.reduce((sum, [, items]) => sum + items.length, 0) === 4,
+  JSON.stringify(grouped.map(([schema, items]) => `${schema}:${items.length}`)),
+)
+check('schema grouping sorts groups', grouped.map(([schema]) => schema).join(',') === ',public,sales', grouped.map(([schema]) => schema).join(','))
+check('schema filter matches table names', tableMatches({ name: 'Orders' }, 'ord') === true)
+check('schema filter matches schema names', tableMatches({ name: 'x', schema: 'Sales' }, 'sales') === true)
+check('schema filter drops non-matches', tableMatches({ name: 'x', schema: 'y' }, 'zzz') === false)
+
+check(
+  'import filter matches name/host/user',
+  connectionMatches({ name: 'mysql', target: '127.0.0.1:3306 / demo', user: 'demo' }, 'demo') === true &&
+    connectionMatches({ name: 'mysql' }, 'postgres') === false,
+)
+
 const { Breadcrumbs } = mod.__test
 const crumbs = render('breadcrumbs', () =>
   Breadcrumbs({ t, trail: [{ label: 'panel.title', onSelect: noop }, { label: 'form.new' }] }),

@@ -61,12 +61,15 @@ oracle://system:oracle@localhost:1521/XEPDB1
 jdbc:oracle:thin:@//ora:1521/ORCLPDB1        # 服务名
 jdbc:oracle:thin:@ora:1521:ORCL              # SID
 (DESCRIPTION=(ADDRESS=(HOST=tns-host)(PORT=1522))(CONNECT_DATA=(SERVICE_NAME=svc1)))
+jdbc:opengauss://h1:30100,h2:30100,h3:30100/demo?targetServerType=master
 jdbc:sqlite:C:\data\app.db
 sqlite:///C:/data/chinook.db
 C:\data\app.db          /  /var/lib/app.sqlite3
 ```
 
 连接串里带的密码只发送一次，之后仅保存，永远不会回显。`id` 创建后不可修改——要改的是 *显示名称*（双击行上的名字）。
+
+openGauss 与 GaussDB 是独立的类型：它们的 SHA256 认证不在 libpq 的协商范围内，所以服务端用纯 Python 的 `py_opengauss` 驱动连接（随其它 Python 依赖一起安装），只在仍用 md5 的集群上回落到 psycopg。粘贴集群 URL 时每个节点都会按顺序保留——面板上显示为 `h1 +2:30100`。
 
 ## 从 DBeaver 导入
 
@@ -76,6 +79,7 @@ C:\data\app.db          /  /var/lib/app.sqlite3
 
 - 通过驱动对话框创建的连接常常只有一条 JDBC URL（`configurationType: URL`），既没有 `database` 字段也没有 `user`。导入器会从 URL 里解析表单缺失的部分，用户名则取自解密后的凭据。
 - 已经配置过的连接不会重复出现。数据源按 类型 + 主机 + 端口 + 库名/服务名/SID + 用户 识别（SQLite 用文件路径）；命中时返回 `alreadyImported`，复选框被禁用，行上写着 *已作为 … 添加*。
+- 列表带过滤框（按名称、主机或用户），操作栏固定在视图顶部，工作区再长 **导入所选** 也一直在手边。
 
 从未保存过口令的工作区也没问题：连接会以空口令导入，行上显示 **无密码**。补填一次就会一直保留。
 
@@ -105,7 +109,7 @@ MySQL 8.0.46 · demo@%@demo · select version() ok
 
 ## 结构浏览
 
-数据源行上的 **结构** 会打开只读视图：左边是表和视图，右边是所选表的列（名称、类型、可空、默认值、主键标记）。它由 `GET /schema` 提供，该接口只把 `list_tables` / `describe_table` 转发给 MCP 服务——页面无法执行 SQL，也不做缓存。
+数据源行上的 **结构** 会打开只读视图：左边是表和视图，右边是所选表的列（名称、类型、可空、默认值、主键标记）。表按模式分组，每组可以折叠展开；树上方有过滤框，同时匹配表名与模式名。请求时会带上表所属的模式，因此不同模式下的同名表不会混淆。它由 `GET /schema` 提供，该接口只把 `list_tables` / `describe_table` 转发给 MCP 服务——页面无法执行 SQL，也不做缓存。
 
 ## 两道安全闸门
 

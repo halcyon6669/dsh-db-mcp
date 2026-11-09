@@ -53,6 +53,7 @@ npm run test:engines  # server/engines.py against a stub DB-API connection
 | Suite | Covers |
 | ----- | ------ |
 | `dev/engines.test.mjs` + `engines.test.py` | commit/rollback and `affectedRows` contract of `execute_sql`, no database needed |
+| `dev/gauss.check.py` | openGauss plumbing offline: comma host list, IRI escaping, the `ssl.wrap_socket` shim, no network |
 | `dev/selftest.mjs` | mounts `src/host.js` on a throwaway port: registry, validation, groups, bulk, schema route, DBeaver scan, probes |
 | `dev/shims.test.mjs` | mounts `index.js`, checks both routes, `/reload`, tool publication, and that `package.json` has no BOM |
 | `dev/parse.test.mjs` | the connection-string parser (DSN, JDBC, TNS, SID, paths) |

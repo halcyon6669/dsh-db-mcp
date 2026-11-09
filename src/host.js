@@ -33,7 +33,7 @@ const { createBridge } = await import(new URL(`./tools.js?v=${GENERATION}`, impo
 
 const API_PREFIX = '/plugins/db-mcp/api'
 const PLUGIN_NAME = 'dsh-db-mcp'
-const PLUGIN_VERSION = '0.7.1'
+const PLUGIN_VERSION = '0.7.5'
 const SCHEMA_VERSION = 1
 const REGISTRY_FILE = 'datasources.json'
 const SECRETS_FILE = 'secrets.json'
@@ -44,8 +44,8 @@ const PYTHON_CACHE_MS = 30_000
 const MAX_BODY_BYTES = 1024 * 1024
 const MAX_SOURCES = 32
 
-const KINDS = ['sqlite', 'postgres', 'mysql', 'oracle']
-const DEFAULT_PORTS = { postgres: 5432, mysql: 3306, oracle: 1521 }
+const KINDS = ['sqlite', 'postgres', 'gauss', 'mysql', 'oracle']
+const DEFAULT_PORTS = { postgres: 5432, gauss: 5432, mysql: 3306, oracle: 1521 }
 const ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,31}$/
 
 /** DBeaver's own secure-storage key (DefaultSecureStorage.java). */
@@ -101,13 +101,49 @@ async function writeJsonAtomic(file, value, mode) {
 
 /* --------------------------------------------------------------- schemas */
 
+/**
+ * Endpoints in the order they are tried. openGauss clusters are usually handed
+ * over as `host1:1,host2:2,host3:3`, so a single `host` string and a declared
+ * `hosts` array both have to survive.
+ */
+function hostsOf(config) {
+  const cfg = cleanRecord(config)
+  const entries = []
+  if (Array.isArray(cfg.hosts)) {
+    for (const item of cfg.hosts) {
+      if (item && typeof item === 'object' && item.host) {
+        entries.push({ host: String(item.host), port: Number(item.port) || null })
+      } else if (typeof item === 'string' && item.trim()) {
+        entries.push({ host: item.trim(), port: null })
+      }
+    }
+  }
+  if (entries.length) return entries
+  return String(cfg.host || '')
+    .split(',')
+    .map((piece) => piece.trim())
+    .filter(Boolean)
+    .map((piece) => {
+      const match = /^(.*):(\d+)$/.exec(piece)
+      return match ? { host: match[1], port: Number(match[2]) } : { host: piece, port: null }
+    })
+}
+
+function endpointLabel(config) {
+  const hosts = hostsOf(config)
+  if (!hosts.length) return ''
+  const port = cleanRecord(config).port
+  const first = hosts[0].host
+  const head = hosts.length > 1 ? `${first} +${hosts.length - 1}` : first
+  const effectivePort = hosts[0].port || port
+  return effectivePort ? `${head}:${effectivePort}` : head
+}
+
 function describeTarget(kind, config) {
   const cfg = cleanRecord(config)
   if (kind === 'sqlite') return trimmed(cfg.file)
-  const host = trimmed(cfg.host)
-  const port = cfg.port ? `:${cfg.port}` : ''
   const database = trimmed(cfg.database) || trimmed(cfg.serviceName) || trimmed(cfg.sid)
-  return [host + port, database].filter(Boolean).join(' / ')
+  return [endpointLabel(cfg), database].filter(Boolean).join(' / ')
 }
 
 /**
@@ -121,7 +157,10 @@ function sourceIdentity(kind, config, user) {
     const file = trimmed(cfg.file)
     return `sqlite|${process.platform === 'win32' ? file.toLowerCase() : file}`
   }
-  const host = trimmed(cfg.host).toLowerCase()
+  const host = hostsOf(cfg)
+    .map((entry) => entry.host)
+    .join(',')
+    .toLowerCase()
   const port = String(cfg.port || DEFAULT_PORTS[kind] || '').trim()
   const database = (trimmed(cfg.database) || trimmed(cfg.serviceName) || trimmed(cfg.sid)).toLowerCase()
   const account = (user === undefined ? trimmed(cfg.user) : trimmed(user)).toLowerCase()
@@ -131,9 +170,11 @@ function sourceIdentity(kind, config, user) {
 /** Connection settings minus anything credential-shaped. */
 function configToPublic(kind, config) {  const cfg = cleanRecord(config)
   if (kind === 'sqlite') return { file: trimmed(cfg.file), busyTimeoutMs: cfg.busyTimeoutMs ?? null }
+  const hosts = hostsOf(cfg).map((entry) => ({ host: entry.host, port: entry.port || null }))
   return {
     host: trimmed(cfg.host),
     port: cfg.port ?? null,
+    hosts: hosts.length > 1 ? hosts : [],
     database: trimmed(cfg.database),
     serviceName: trimmed(cfg.serviceName),
     sid: trimmed(cfg.sid),
@@ -197,12 +238,17 @@ function normalizeInput(input, existing) {
     delete config.port
     delete config.user
   } else {
-    const host = trimmed(config.host)
-    if (!host) return { error: `${kind} requires config.host` }
-    config.host = host
+    const entries = hostsOf(config)
+    if (!entries.length) return { error: `${kind} requires config.host` }
     const port = Number(config.port) || DEFAULT_PORTS[kind]
     if (!Number.isInteger(port) || port < 1 || port > 65535) return { error: 'config.port must be 1-65535' }
     config.port = port
+    config.host = entries.map((entry) => entry.host).join(',')
+    if (entries.length > 1) {
+      config.hosts = entries.map((entry) => ({ host: entry.host, port: entry.port || port }))
+    } else {
+      delete config.hosts
+    }
     config.user = trimmed(config.user)
     config.database = trimmed(config.database)
     config.serviceName = trimmed(config.serviceName)
@@ -465,16 +511,46 @@ function pickCredential(entry) {
 function mapDBeaverProvider(provider, driver) {
   const p = `${provider || ''} ${driver || ''}`.toLowerCase()
   if (p.includes('sqlite')) return 'sqlite'
+  if (p.includes('opengauss') || p.includes('gaussdb') || p.includes('gauss')) return 'gauss'
   if (p.includes('postgres')) return 'postgres'
   if (p.includes('mysql') || p.includes('mariadb')) return 'mysql'
   if (p.includes('oracle')) return 'oracle'
   return null
 }
 
+/**
+ * Oracle DBeaver entries come in three shapes: a thin URL, a plain TNS name, and
+ * a `DESCRIPTION_LIST` descriptor (often pasted across several lines) used by
+ * RAC/load-balanced services. The descriptor is read with a small scan instead
+ * of one rigid expression so the multi-line form parses too.
+ */
 function parseOracleUrl(url) {
-  const match = /jdbc:oracle:thin:@(?:\/\/)?([^:/]+)(?::(\d+))?[:/]([^?]+)/i.exec(url || '')
+  const text = String(url || '').replace(/\s+/g, ' ').trim()
+  if (!text) return null
+  if (/\((DESCRIPTION|ADDRESS|CONNECT_DATA)/i.test(text)) {
+    const host = /\(HOST\s*=\s*([^)\s]+)\)/i.exec(text)
+    const port = /\(PORT\s*=\s*(\d+)\)/i.exec(text)
+    const service = /\(SERVICE_NAME\s*=\s*([^)\s]+)\)/i.exec(text)
+    const sid = /\(SID\s*=\s*([^)\s]+)\)/i.exec(text)
+    if (!host) return null
+    return {
+      host: host[1],
+      port: port ? Number(port[1]) : 1521,
+      serviceName: service ? service[1] : '',
+      sid: sid ? sid[1] : '',
+    }
+  }
+  // `@host:port/service` names a service; `@host:port:SID` names a SID.
+  const match = /jdbc:oracle:thin:@(?:\/\/)?([^:/]+)(?::(\d+))?([:/])([^?]+)/i.exec(text)
   if (!match) return null
-  return { host: match[1], port: match[2] ? Number(match[2]) : 1521, serviceName: match[3] }
+  const bySid = match[3] === ':'
+  const target = match[4]
+  return {
+    host: match[1],
+    port: match[2] ? Number(match[2]) : 1521,
+    serviceName: bySid ? '' : target,
+    sid: bySid ? target : '',
+  }
 }
 
 /**
@@ -482,20 +558,69 @@ function parseOracleUrl(url) {
  * the URL configuration type, only as a JDBC URL — the MySQL connection created
  * through the driver dialog has just `host`, `port` and the URL, with the
  * database and the user only inside the URL. Parse it so both shapes import.
+ *
+ * openGauss URLs list every cluster node (`h1:1,h2:2,h3:3`) and hang options off
+ * a query string, so the authority is split on commas and the options are parsed.
  */
 function parseJdbcUrl(url) {
   const text = trimmed(url)
   if (!text) return null
   const body = text.replace(/^jdbc:/i, '')
-  const match = /^([a-z0-9+]+):\/\/(?:([^:@/]+)(?::([^@/]*))?@)?(\[[^\]]+\]|[^:/?]+)(?::(\d+))?(?:\/([^?;]*))?/i.exec(body)
-  if (!match) return null
+  const schemeMatch = /^([a-z0-9+]+):\/\//i.exec(body)
+  if (!schemeMatch) return null
+  const scheme = schemeMatch[1].toLowerCase()
+  let rest = body.slice(schemeMatch[0].length)
+
+  let user = ''
+  let password = ''
+  const at = rest.lastIndexOf('@')
+  if (at >= 0) {
+    const credentials = rest.slice(0, at)
+    rest = rest.slice(at + 1)
+    const colon = credentials.indexOf(':')
+    user = decodeURIComponent(colon >= 0 ? credentials.slice(0, colon) : credentials)
+    password = colon >= 0 ? decodeURIComponent(credentials.slice(colon + 1)) : ''
+  }
+
+  let query = ''
+  const mark = rest.indexOf('?')
+  if (mark >= 0) {
+    query = rest.slice(mark + 1)
+    rest = rest.slice(0, mark)
+  }
+
+  const slash = rest.indexOf('/')
+  const authority = slash >= 0 ? rest.slice(0, slash) : rest
+  const path = slash >= 0 ? rest.slice(slash + 1) : ''
+
+  const hosts = authority
+    .split(',')
+    .map((piece) => /^(\[[^\]]+\]|[^:]+)(?::(\d+))?$/.exec(piece.trim()))
+    .filter(Boolean)
+    .map((match) => ({
+      host: match[1].replace(/^\[|\]$/g, ''),
+      port: match[2] ? Number(match[2]) : null,
+    }))
+  if (!hosts.length) return null
+
+  const params = {}
+  for (const pair of query.split('&')) {
+    if (!pair) continue
+    const equals = pair.indexOf('=')
+    const key = decodeURIComponent(equals >= 0 ? pair.slice(0, equals) : pair)
+    const value = equals >= 0 ? decodeURIComponent(pair.slice(equals + 1)) : ''
+    if (key) params[key] = value
+  }
+
   return {
-    scheme: match[1].toLowerCase(),
-    user: match[2] ? decodeURIComponent(match[2]) : '',
-    password: match[3] ? decodeURIComponent(match[3]) : '',
-    host: match[4].replace(/^\[|\]$/g, ''),
-    port: match[5] ? Number(match[5]) : null,
-    database: match[6] ? decodeURIComponent(match[6].split(';')[0]) : '',
+    scheme,
+    user,
+    password,
+    host: hosts[0].host,
+    port: hosts[0].port,
+    hosts,
+    database: decodeURIComponent(path.split(';')[0] || ''),
+    params,
   }
 }
 
@@ -524,8 +649,15 @@ function mapDBeaverConnection(connection) {
     const host = pick(thin && thin.host, trimmed(cfg.host))
     const port = Number(pick(thin && thin.port, Number(cfg.port)) || 0) || 1521
     const serviceName = trimmed(cfg.serviceName) || (thin && thin.serviceName) || ''
-    const sid = trimmed(cfg.sid) || ''
-    if (!host || (!serviceName && !sid)) return { ok: false, reason: 'incomplete Oracle host/service in the DBeaver entry' }
+    const sid = trimmed(cfg.sid) || (thin && thin.sid) || ''
+    if (!host || (!serviceName && !sid)) {
+      return {
+        ok: false,
+        reason: `incomplete Oracle host/service in the DBeaver entry (host=${host || '?'}, service=${
+          serviceName || sid || '?'
+        }, url=${trimmed(cfg.url) || '-'})`,
+      }
+    }
     return {
       ok: true,
       kind,
@@ -534,7 +666,13 @@ function mapDBeaverConnection(connection) {
     }
   }
 
-  const host = pick(fromUrl && fromUrl.host, trimmed(cfg.host))
+  // A cluster URL carries every node; keep them so the driver can fail over
+  // instead of silently connecting to the first host only.
+  const hosts = (fromUrl && Array.isArray(fromUrl.hosts) ? fromUrl.hosts : []).filter((entry) => entry && entry.host)
+  const host = pick(
+    hosts.length > 1 ? hosts.map((entry) => entry.host).join(',') : fromUrl && fromUrl.host,
+    trimmed(cfg.host),
+  )
   const database = pick(fromUrl && fromUrl.database, trimmed(cfg.database))
   const user = pick(fromUrl && fromUrl.user, trimmed(cfg.user))
   const port = Number(pick(fromUrl && fromUrl.port, Number(cfg.port)) || 0) || DEFAULT_PORTS[kind]
@@ -546,19 +684,18 @@ function mapDBeaverConnection(connection) {
     ].join(', ')
     return { ok: false, reason: `incomplete host/database in the DBeaver entry (${seen})` }
   }
-  return {
-    ok: true,
-    kind,
-    config: {
-      host,
-      port,
-      database,
-      user,
-      schema: trimmed(cfg.schema),
-      sslMode: trimmed(cfg.sslMode),
-    },
+  const config = {
+    host,
+    port,
+    database,
     user,
+    schema: trimmed(cfg.schema),
+    sslMode: trimmed(cfg.sslMode),
   }
+  if (hosts.length > 1) {
+    config.hosts = hosts.map((entry) => ({ host: entry.host, port: entry.port || port }))
+  }
+  return { ok: true, kind, config, user }
 }
 
 async function scanDBeaver(options = {}) {
@@ -1499,7 +1636,7 @@ export function createHost(options = {}) {
   return {
     version: PLUGIN_VERSION,
     handle,
-    __test: { parseJdbcUrl, mapDBeaverConnection, sourceIdentity },
+    __test: { parseJdbcUrl, parseOracleUrl, mapDBeaverConnection, sourceIdentity, hostsOf, endpointLabel },
     dispose: async () => {
       await bridge.dispose()
     },
