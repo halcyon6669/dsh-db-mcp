@@ -3515,6 +3515,7 @@ function groupTables(tables) {
         body = h(
           'div',
           { className: 'dbmcp-grid is-single' },
+          tab === 'list' ? renderStatus() : null,
           tab === 'list'
             ? h(
                 Card,
@@ -3576,7 +3577,6 @@ function groupTables(tables) {
                     ),
                   ],
                 },
-                renderStatus(),
                 renderGroupCreate(),
                 renderBulk(),
                 renderList(),
