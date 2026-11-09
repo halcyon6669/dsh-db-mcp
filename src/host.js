@@ -33,11 +33,14 @@ const { createBridge } = await import(new URL(`./tools.js?v=${GENERATION}`, impo
 
 const API_PREFIX = '/plugins/db-mcp/api'
 const PLUGIN_NAME = 'dsh-db-mcp'
-const PLUGIN_VERSION = '0.8.0'
+const PLUGIN_VERSION = '0.9.0'
 const SCHEMA_VERSION = 1
 const REGISTRY_FILE = 'datasources.json'
 const SECRETS_FILE = 'secrets.json'
 const SETTINGS_FILE = 'settings.json'
+// Per-conversation data-source allowlists. Missing file or an empty id list
+// means "no limit": every source stays reachable.
+const SCOPES_FILE = 'sessions.json'
 const AUDIT_FILE = 'logs/audit.jsonl'
 const AUDIT_LIMIT_BYTES = 512 * 1024
 const PYTHON_CACHE_MS = 30_000
@@ -860,6 +863,8 @@ export function createHost(options = {}) {
     packageDir: options.packageDir || fileURLToPath(new URL('..', import.meta.url)),
     runtimeDir: dir,
     settings: () => readSettings(),
+    scope: () => readScopes(),
+    setScope: (sessionId, ids) => setSessionScope(sessionId, ids),
     audit: (entry) => appendAudit(entry),
     log: (message) => {
       if (config.debug) console.log(`[db-mcp] ${message}`)
@@ -953,6 +958,50 @@ export function createHost(options = {}) {
     }
     await writeJsonAtomic(settingsFile, next, 0o600)
     return { ...next, file: settingsFile, error: null }
+  }
+
+  const scopesFile = join(dir, SCOPES_FILE)
+
+  async function readScopes() {
+    const read = await readJson(scopesFile)
+    const raw = read.value && cleanRecord(read.value.sessions) ? read.value.sessions : {}
+    const sessions = {}
+    for (const [session, entry] of Object.entries(raw)) {
+      if (!session || !entry || typeof entry !== 'object') continue
+      const ids = Array.isArray(entry.ids)
+        ? entry.ids
+            .filter((id) => typeof id === 'string' && id.trim())
+            .map((id) => id.trim())
+            .slice(0, MAX_SOURCES)
+        : []
+      sessions[session] = { ids, updatedAt: typeof entry.updatedAt === 'string' ? entry.updatedAt : null }
+    }
+    return { file: scopesFile, error: read.error || null, sessions }
+  }
+
+  async function writeScopes(sessions) {
+    await writeJsonAtomic(scopesFile, { schemaVersion: SCHEMA_VERSION, sessions }, 0o600)
+  }
+
+  async function setSessionScope(sessionId, ids) {
+    const session = String(sessionId || '').trim()
+    if (!session) return { error: 'a conversation id is required' }
+    const registry = await readRegistry()
+    if (registry.error) return { error: registry.error }
+    const known = new Set((registry.datasources || []).map((item) => item.id))
+    const wanted = []
+    for (const id of Array.isArray(ids) ? ids : []) {
+      const clean = String(id || '').trim()
+      if (!clean) continue
+      if (!known.has(clean)) return { error: `unknown datasource: ${clean}` }
+      if (!wanted.includes(clean)) wanted.push(clean)
+    }
+    const current = await readScopes()
+    const sessions = { ...current.sessions }
+    if (wanted.length === 0) delete sessions[session]
+    else sessions[session] = { ids: wanted, updatedAt: isoNow() }
+    await writeScopes(sessions)
+    return { ids: wanted, sessions }
   }
 
   async function appendAudit(entry) {
@@ -1590,6 +1639,15 @@ export function createHost(options = {}) {
           return sendJson(response, ...(await inspectSchema(search)))
         }
         if (route === '/settings') return sendJson(response, 200, { ok: true, settings: await readSettings() })
+        if (route === '/scopes') {
+          const listing = await readScopes()
+          return sendJson(response, 200, {
+            ok: listing.error === null,
+            file: listing.file,
+            error: listing.error,
+            sessions: Object.entries(listing.sessions).map(([session, entry]) => ({ session, ...entry })),
+          })
+        }
         if (route === '/audit') {
           const limit = Math.min(200, Math.max(1, Number(new URL(request.url, 'http://localhost').searchParams.get('limit')) || 20))
           const listing = await readAudit(limit)
@@ -1653,6 +1711,16 @@ export function createHost(options = {}) {
         })
         if (payload.allowWrite !== undefined) void bridge.restart().catch(() => {})
         return sendJson(response, 200, { ok: true, settings })
+      }
+      if (route === '/scopes') {
+        const result = await setSessionScope(payload.session, payload.datasources)
+        if (result.error) return sendJson(response, 400, { ok: false, error: result.error })
+        return sendJson(response, 200, {
+          ok: true,
+          session: String(payload.session || ''),
+          datasources: result.ids,
+          sessions: Object.entries(result.sessions || {}).map(([session, entry]) => ({ session, ...entry })),
+        })
       }
       if (route === '/python/setup') {
         const result = await setupPython()

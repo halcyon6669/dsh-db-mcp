@@ -87,6 +87,9 @@ window.__ModuleLoader__.load({
         'sources.hasPassword': 'password saved',
         'sources.noPassword': 'no password',
         'sources.neverProbed': 'never tested',
+        'sources.idChip': 'ID',
+        'sources.idChipHint': 'this is the identifier every MCP tool takes as its datasource argument — click to copy',
+        'sources.idCopied': 'copied',
         'form.edit': 'Edit {name}',
         'form.name': 'Display name',
         'form.id': 'Identifier',
@@ -150,6 +153,8 @@ window.__ModuleLoader__.load({
         'diag.registry': 'Registry file',
         'diag.sources': 'Data sources',
         'diag.mcp': 'MCP server',
+        'diag.scopes': 'Conversation limits',
+        'diag.scopesNone': 'No limit: every conversation can use every data source',
         'diag.mcpPending': 'not wired yet',
         'diag.mcpLive': '{count} tool(s) live',
         'diag.mcpFailed': 'failed:',
@@ -296,6 +301,9 @@ window.__ModuleLoader__.load({
         'sources.hasPassword': '已存密码',
         'sources.noPassword': '无密码',
         'sources.neverProbed': '尚未测试',
+        'sources.idChip': '标识符',
+        'sources.idChipHint': '智能体调用 MCP 工具时，用 datasource 参数传这个标识符 · 点击复制',
+        'sources.idCopied': '已复制',
         'form.edit': '编辑 {name}',
         'form.name': '显示名称',
         'form.id': '标识符',
@@ -358,6 +366,8 @@ window.__ModuleLoader__.load({
         'diag.registry': '注册表文件',
         'diag.sources': '数据源数量',
         'diag.mcp': 'MCP 服务名',
+        'diag.scopes': '会话访问范围',
+        'diag.scopesNone': '未设置：任何会话都能访问全部数据源',
         'diag.mcpPending': '尚未接入',
         'diag.mcpLive': '{count} 个工具已就绪',
         'diag.mcpFailed': '启动失败：',
@@ -685,6 +695,56 @@ window.__ModuleLoader__.load({
         color: var(--dsw-alias-state-warn-primary);
         border-color: var(--dsw-alias-state-warn-primary);
       }
+      /* The identifier is the handle every MCP tool takes as its datasource
+         argument, so it gets a chip of its own instead of trailing the target
+         string: the label says what it is, the mono value is what gets pasted
+         into chat. */
+      .dbmcp-idchip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        max-width: 100%;
+        padding: 1px 9px;
+        border: 1px solid color-mix(in srgb, var(--dsw-alias-brand-primary) 32%, transparent);
+        border-radius: 999px;
+        background: color-mix(in srgb, var(--dsw-alias-brand-primary) 8%, transparent);
+        color: var(--dsw-alias-brand-primary);
+        font-family: inherit;
+        font-size: 11px;
+        line-height: 1.6;
+        cursor: pointer;
+        transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
+      }
+      .dbmcp-idchip:hover {
+        border-color: var(--dsw-alias-brand-primary);
+        background: color-mix(in srgb, var(--dsw-alias-brand-primary) 14%, transparent);
+      }
+      .dbmcp-idchip-key {
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+        text-transform: uppercase;
+        opacity: 0.75;
+        white-space: nowrap;
+      }
+      .dbmcp-idchip-value {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 12px;
+        font-weight: 600;
+      }
+      .dbmcp-idchip.is-copied {
+        border-color: color-mix(in srgb, var(--dsw-alias-state-success-primary) 55%, transparent);
+        background: color-mix(in srgb, var(--dsw-alias-state-success-primary) 10%, transparent);
+        color: var(--dsw-alias-state-success-primary);
+      }
+      .dbmcp-idchip-mark {
+        font-size: 11px;
+        line-height: 1;
+      }
       .dbmcp-grid {
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
@@ -776,6 +836,22 @@ window.__ModuleLoader__.load({
       }
       .dbmcp-schema-main {
         min-width: 0;
+      }
+      /* Sub-view header row: where you came from, which connection it is, and
+         the identifier to hand to the agent — all on one line. */
+      .dbmcp-view-bar {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+        min-width: 0;
+        margin-bottom: 12px;
+      }
+      .dbmcp-view-target {
+        min-width: 0;
+        color: var(--dsw-alias-label-secondary);
+        font-size: 12px;
+        word-break: break-all;
       }
       .dbmcp-schema-head {
         display: flex;
@@ -928,6 +1004,27 @@ window.__ModuleLoader__.load({
         gap: 3px;
         font-size: 13px;
         line-height: 1.5;
+      }
+      .dbmcp-scope-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        min-width: 0;
+      }
+      .dbmcp-scope {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 1px 8px;
+        border: 1px solid var(--dsw-alias-border-l1);
+        border-radius: 8px;
+        background: var(--dsw-alias-bg-base);
+        min-width: 0;
+      }
+      .dbmcp-scope-id {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 12px;
+        color: var(--dsw-alias-label-secondary);
       }
       .dbmcp-row {
         display: grid;
@@ -1436,11 +1533,22 @@ window.__ModuleLoader__.load({
         font-weight: 600;
         flex-wrap: wrap;
       }
+      .dbmcp-item-meta {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+        min-width: 0;
+        margin-top: 3px;
+      }
       .dbmcp-item-target {
         color: var(--dsw-alias-label-secondary);
         font-size: 12px;
         word-break: break-all;
         margin-top: 2px;
+      }
+      .dbmcp-item-meta > .dbmcp-item-target {
+        margin-top: 0;
       }
       .dbmcp-item-name > .is-renamable,
       .dbmcp-group-name.is-renamable {
@@ -2142,6 +2250,12 @@ window.__ModuleLoader__.load({
       return `${hours}h ${minutes % 60}m`
     }
 
+    /** Conversation ids are long uuids; the panel only needs to tell them apart. */
+    function shortSession(value) {
+      const text = String(value || '')
+      return text.length > 10 ? `…${text.slice(-8)}` : text || '—'
+    }
+
     /** UTC offset of the viewer's clock, e.g. "UTC+08:00". */
     function zoneLabel() {
       const offset = -new Date().getTimezoneOffset()
@@ -2705,6 +2819,32 @@ const kindBadge = (kind) => {
   if (KIND_BADGE[key]) return KIND_BADGE[key]
   const label = key ? key.slice(0, 2).toUpperCase() : '?'
   return { label, color: 'var(--dsw-alias-label-secondary)' }
+}
+
+/**
+ * The identifier is the value every MCP tool takes as its `datasource`
+ * argument, which is why it is a labelled chip and not a tail on the target
+ * line: click it to copy the exact token the user has to type in chat.
+ */
+function IdChip(props) {
+  const { t, id, copied, onCopy } = props
+  if (!id) return null
+  return h(
+    'button',
+    {
+      type: 'button',
+      className: 'dbmcp-idchip' + (copied ? ' is-copied' : ''),
+      title: copied ? t('sources.idCopied') : `${id} — ${t('sources.idChipHint')}`,
+      'aria-label': `${t('sources.idChip')}: ${id}`,
+      onClick: (event) => {
+        event.stopPropagation()
+        if (typeof onCopy === 'function') onCopy(id)
+      },
+    },
+    h('span', { className: 'dbmcp-idchip-key' }, t('sources.idChip')),
+    h('code', { className: 'dbmcp-idchip-value' }, id),
+    copied ? h('span', { className: 'dbmcp-idchip-mark', 'aria-hidden': 'true' }, '✓') : null,
+  )
 }
 
 /** Clipboard write that still works when the async API is blocked by the host shell. */
@@ -3295,6 +3435,7 @@ function groupTables(tables) {
       const [filter, setFilter] = React.useState('all')
       const [expandedFail, setExpandedFail] = React.useState(null)
       const [copiedId, setCopiedId] = React.useState(null)
+      const [copiedChip, setCopiedChip] = React.useState(null)
       const [collapsed, setCollapsed] = React.useState([])
 
       const toggleFolded = (name) => {
@@ -3319,6 +3460,7 @@ function groupTables(tables) {
       const [audit, setAudit] = React.useState({ entries: [], file: null })
       const [env, setEnv] = React.useState(null)
       const [installing, setInstalling] = React.useState(false)
+      const [scopes, setScopes] = React.useState(null)
 
       const load = React.useCallback(async () => {
         setBusy(true)
@@ -3331,6 +3473,9 @@ function groupTables(tables) {
             .catch(() => {})
           void apiGet('/python/env')
             .then((payload) => setEnv(payload))
+            .catch(() => {})
+          void apiGet('/scopes')
+            .then((payload) => setScopes(payload.sessions || []))
             .catch(() => {})
         } catch (error) {
           setState({ status: 'error', data: null, error: String((error && error.message) || error) })
@@ -3469,6 +3614,17 @@ function groupTables(tables) {
           await copyText(probeReport(source, data.plugin))
           setCopiedId(source.id)
           setTimeout(() => setCopiedId((prev) => (prev === source.id ? null : prev)), 1600)
+        } catch (error) {
+          setNotice({ message: String((error && error.message) || error), isError: true })
+        }
+      }
+
+      /** The chip copies the bare id: that is the token the user pastes in chat. */
+      const copyId = async (id) => {
+        try {
+          await copyText(id)
+          setCopiedChip(id)
+          setTimeout(() => setCopiedChip((prev) => (prev === id ? null : prev)), 1600)
         } catch (error) {
           setNotice({ message: String((error && error.message) || error), isError: true })
         }
@@ -3780,7 +3936,12 @@ function groupTables(tables) {
                       source.readOnly === false ? t('sources.readwrite') : t('sources.readonly'),
                     ),
                   ),
-              h('div', { className: 'dbmcp-item-target' }, [source.target, source.id].filter(Boolean).join(' · ')),
+              h(
+                'div',
+                { className: 'dbmcp-item-meta' },
+                source.target ? h('span', { className: 'dbmcp-item-target' }, source.target) : null,
+                h(IdChip, { t, id: source.id, copied: copiedChip === source.id, onCopy: copyId }),
+              ),
               failed
                 ? null
                 : h(
@@ -4100,12 +4261,19 @@ function groupTables(tables) {
         body = h(Card, { title: fmt(t('schema.title'), { name: view.source.name || view.source.id }) },
           h(
             'div',
-            { className: 'dbmcp-schema-head' },
+            { className: 'dbmcp-view-bar' },
             h(
               'button',
               { type: 'button', className: 'dbmcp-btn is-small', onClick: () => setView({ mode: 'list' }) },
               `← ${t('action.backToSources')}`,
             ),
+            view.source.target ? h('span', { className: 'dbmcp-view-target' }, view.source.target) : null,
+            h(IdChip, {
+              t,
+              id: view.source.id,
+              copied: copiedChip === view.source.id,
+              onCopy: copyId,
+            }),
           ),
           h(SchemaView, {
             t,
@@ -4194,6 +4362,24 @@ function groupTables(tables) {
                       ? `${t('diag.mcpFailed')} ${data.mcp.error || ''}`.trim()
                       : t('diag.mcpPending')
                 }`,
+              ),
+              h(
+                Row,
+                { label: t('diag.scopes') },
+                scopes && scopes.length
+                  ? h(
+                      'span',
+                      { className: 'dbmcp-scope-list' },
+                      scopes.map((entry) =>
+                        h(
+                          'span',
+                          { className: 'dbmcp-scope', key: entry.session, title: entry.session },
+                          h('span', { className: 'dbmcp-scope-id' }, shortSession(entry.session)),
+                          h('span', { className: 'dbmcp-hint' }, (entry.ids || []).join(', ')),
+                        ),
+                      ),
+                    )
+                  : h('span', { className: 'dbmcp-hint' }, t('diag.scopesNone')),
               ),
               h(
                 Row,
@@ -4360,6 +4546,7 @@ function groupTables(tables) {
         TextInput,
         Breadcrumbs,
         MainPanel,
+        IdChip,
         kindBadge,
         probeFailed,
         probeReport,

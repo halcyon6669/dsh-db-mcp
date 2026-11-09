@@ -63,6 +63,7 @@ Prefer to start from scratch? **New data source** takes one connection string
 | `mcp__db__explain_query` | query plan |
 | `mcp__db__get_ddl` | `CREATE TABLE` statement |
 | `mcp__db__test_connection` | real login, `select 1`, server/user/schema |
+| `mcp__db__session_scope` | limit this conversation to some sources, or lift the limit |
 
 `datasource` is optional on all of them: omitted, the plugin falls back to the source
 flagged `isDefault` (or the first one in the registry).

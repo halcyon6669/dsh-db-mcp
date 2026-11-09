@@ -33,6 +33,16 @@ export function serverEntry(packageDir) {
   return join(packageDir, 'server', 'main.py');
 }
 
+/** Render the answer of the session-scope tool. */
+export function renderScope(value) {
+  if (!value || typeof value !== 'object') return String(value);
+  if (value.ok === false && value.error) return `error [${value.error.code || 'error'}]: ${value.error.message || 'unknown error'}`;
+  if (value.all === true) return 'this conversation may use every data source';
+  const ids = Array.isArray(value.datasources) ? value.datasources : [];
+  if (ids.length === 0) return 'this conversation may use every data source';
+  return `this conversation may only use: ${ids.join(', ')}`;
+}
+
 /** Render one MCP tool result as readable text. */
 export function renderResult(value) {
   if (!value || typeof value !== 'object') return typeof value === 'string' ? value : JSON.stringify(value);
@@ -125,6 +135,8 @@ export function createBridge({
   log = () => {},
   settings = null,
   audit = null,
+  scope = null,
+  setScope = null,
 }) {
   let client = null;
   let starting = null;
@@ -152,6 +164,7 @@ export function createBridge({
       error: state.error,
       toolCount: state.tools.length,
       tools: state.tools,
+      scopeTool: scopeDisposer !== null,
       serverInfo: state.serverInfo,
       startedAt: state.startedAt,
       command: state.command ?? null,
@@ -206,6 +219,102 @@ export function createBridge({
     }
   }
 
+  /**
+   * The data sources this conversation is limited to, or null when it may use
+   * everything. A missing entry and an empty id list both mean "no limit".
+   */
+  async function allowedSources(exec) {
+    if (!scope) return null;
+    const session = exec && exec.agent && exec.agent.id ? String(exec.agent.id) : '';
+    if (!session) return null;
+    const listing = await scope().catch(() => null);
+    const entry = listing && listing.sessions ? listing.sessions[session] : null;
+    const ids = entry && Array.isArray(entry.ids) ? entry.ids : [];
+    return ids.length === 0 ? null : ids;
+  }
+
+  function scopeError(allowed, detail) {
+    return {
+      ok: false,
+      error: {
+        code: 'user_error',
+        message: `this conversation may only use: ${allowed.join(', ')}${detail ? ` — ${detail}` : ''}`,
+      },
+    };
+  }
+
+  /** Rewrite the target of a call so it can only name an allowed source. */
+  function applyScope(allowed, toolName, call) {
+    if (!allowed) return { args: call };
+    if (toolName === 'list_datasources') return { args: call };
+    const requested = typeof call.datasource === 'string' ? call.datasource.trim() : '';
+    if (!requested) {
+      if (toolName === 'test_connection') {
+        return { error: scopeError(allowed, 'pass one of those identifiers instead of an inline connection') };
+      }
+      if (allowed.length === 1) return { args: { ...call, datasource: allowed[0] } };
+      return { error: scopeError(allowed, 'name one of them with the `datasource` argument') };
+    }
+    if (!allowed.includes(requested)) return { error: scopeError(allowed, `${requested} is out of scope`) };
+    return { args: call };
+  }
+
+  let scopeDisposer = null;
+
+  /** A native (non-MCP) tool the model calls to scope one conversation. */
+  function registerScopeTool(service) {
+    if (scopeDisposer || !setScope) return;
+    try {
+      scopeDisposer = service.register({
+        name: `${TOOL_PREFIX}session_scope`,
+        description:
+          'Limit which data sources this conversation may use, by identifier. Call it when the user asks to restrict the current conversation to certain data sources, or to lift that restriction again. Without a saved limit every data source is reachable.',
+        parameters: {
+          type: 'object',
+          properties: {
+            datasources: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Identifiers that this conversation keeps. An empty array clears the limit.',
+            },
+            all: { type: 'boolean', description: 'true clears the limit so every data source is reachable again.' },
+          },
+          additionalProperties: false,
+        },
+        timeoutMs: TOOL_TIMEOUT_MS,
+        isConcurrencySafe: () => true,
+        output: {
+          schema: { type: 'object', additionalProperties: true },
+          render: (_args, value) => [{ type: 'text', text: renderScope(value) }],
+        },
+        execute: async (args, exec) => {
+          const call = args && typeof args === 'object' ? args : {};
+          const session = exec && exec.agent && exec.agent.id ? String(exec.agent.id) : '';
+          if (!session) {
+            return { ok: false, error: { code: 'user_error', message: 'this tool only runs inside a conversation' } };
+          }
+          const current = await allowedSources(exec);
+          if (call.all === true) {
+            const saved = await setScope(session, []);
+            if (saved && saved.error) return { ok: false, error: { code: 'user_error', message: saved.error } };
+            return { ok: true, session, datasources: [], all: true };
+          }
+          const wanted = Array.isArray(call.datasources)
+            ? call.datasources.map((id) => String(id || '').trim()).filter(Boolean)
+            : [];
+          if (wanted.length === 0) {
+            return { ok: true, session, datasources: current || [], all: current === null };
+          }
+          const saved = await setScope(session, wanted);
+          if (saved && saved.error) return { ok: false, error: { code: 'user_error', message: saved.error } };
+          return { ok: true, session, datasources: saved.ids, all: false };
+        },
+      });
+    } catch (error) {
+      log(`register session_scope failed: ${error}`);
+    }
+  }
+
   function registerTools(tools) {
     const service = toolsService();
     if (!service || typeof service.register !== 'function') {
@@ -221,6 +330,7 @@ export function createBridge({
     // and let `execute` follow the current client instead.
     if (disposers.length === names.length && names.every((name, index) => registeredNames[index] === name)) {
       state.tools = tools.map((tool) => tool.name);
+      registerScopeTool(service);
       return;
     }
     disposeTools();
@@ -237,20 +347,37 @@ export function createBridge({
           schema: { type: 'object', additionalProperties: true },
           render: (_args, value) => [{ type: 'text', text: renderResult(value) }],
         },
-        execute: async (args) => {
-          const result = await invoke(tool.name, args ?? {});
-          if (result.parsed) return result.parsed;
-          if (result.text) return { ok: true, text: result.text };
-          return { ok: true, content: result.content ?? [] };
+        execute: async (args, exec) => {
+          const call = args && typeof args === 'object' ? args : {};
+          const allowed = await allowedSources(exec);
+          const scoped = applyScope(allowed, tool.name, call);
+          if (scoped.error) return scoped.error;
+          const result = await invoke(tool.name, scoped.args);
+          let value = result.parsed;
+          if (!value) value = result.text ? { ok: true, text: result.text } : { ok: true, content: result.content ?? [] };
+          if (allowed && tool.name === 'list_datasources' && Array.isArray(value.datasources)) {
+            value.datasources = value.datasources.filter((item) => allowed.includes(String(item && item.id)));
+            value.scope = allowed;
+          }
+          return value;
         },
       });
     });
     registeredNames = names;
+    registerScopeTool(service);
     state.tools = tools.map((tool) => tool.name);
   }
 
   function disposeTools() {
     registeredNames = [];
+    if (scopeDisposer) {
+      try {
+        scopeDisposer();
+      } catch (error) {
+        log(`dispose session_scope failed: ${error}`);
+      }
+      scopeDisposer = null;
+    }
     for (const dispose of disposers.splice(0)) {
       try {
         dispose();

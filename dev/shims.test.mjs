@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Host-half smoke test with a stub Cordis context: checks route registration, the
  * health/reload/scan endpoints, and that the Python tools are registered on the
  * host `tools` service as `mcp__db__*`.
@@ -102,8 +102,8 @@ const ok =
   health2.plugin.version === health.plugin.version &&
   scan.ok === true &&
   manifest.ok === true &&
-  (registered.length === 8 || startBody.phase === 'failed')
+  (registered.length === 9 || startBody.phase === 'failed')
 console.log('manifest:', manifest.message)
 console.log(ok ? 'shims: ok' : 'shims: FAILED')
 server.close()
-process.exit(ok && registered.length === 8 ? 0 : 1)
+process.exit(ok && (registered.length === 9 || startBody.phase === 'failed') ? 0 : 1)

@@ -88,6 +88,34 @@ try {
 
   const bad = await post('/settings', { allowWrite: 'yes' })
   check('non-boolean allowWrite is coerced off', bad.body.settings.allowWrite === false)
+
+  const before = await get('/scopes')
+  check('no conversation limits by default', Array.isArray(before.body.sessions) && before.body.sessions.length === 0)
+  check('scopes file sits in the runtime dir', before.body.file === join(dir, 'sessions.json'))
+
+  const refused = await post('/scopes', { session: 's-1', datasources: ['missing-source'] })
+  check('unknown identifiers are refused', refused.status === 400 && /unknown datasource/.test(String(refused.body?.error || '')))
+
+  await post('/datasources/save', { id: 'alpha', name: 'Alpha', kind: 'sqlite', config: { file: 'C:/tmp/alpha.db' } })
+  await post('/datasources/save', { id: 'beta', name: 'Beta', kind: 'sqlite', config: { file: 'C:/tmp/beta.db' } })
+  const saved = await post('/scopes', { session: 's-1', datasources: ['alpha', 'beta', 'alpha'] })
+  check(
+    'POST /scopes stores unique identifiers',
+    saved.status === 200 && JSON.stringify(saved.body.datasources) === JSON.stringify(['alpha', 'beta']),
+    JSON.stringify(saved.body),
+  )
+  const after = await get('/scopes')
+  check(
+    'the limit is listed with its session',
+    after.body.sessions.length === 1 && after.body.sessions[0].session === 's-1' && after.body.sessions[0].ids.length === 2,
+    JSON.stringify(after.body.sessions),
+  )
+
+  const cleared = await post('/scopes', { session: 's-1', datasources: [] })
+  check('an empty list lifts the limit', cleared.status === 200 && cleared.body.datasources.length === 0)
+
+  const missing = await post('/scopes', {})
+  check('a session id is required', missing.status === 400 && /conversation id/.test(String(missing.body?.error || '')))
 } finally {
   await new Promise((resolve) => server.close(resolve))
   await host.dispose?.().catch(() => {})

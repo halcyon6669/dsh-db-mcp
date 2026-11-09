@@ -49,6 +49,7 @@ dsh plugin --profile web add dsh-db-mcp       # Web 端
 | `mcp__db__explain_query` | 执行计划 |
 | `mcp__db__get_ddl` | `CREATE TABLE` 语句 |
 | `mcp__db__test_connection` | 真实登录 + `select 1`，回报服务器/用户/schema |
+| `mcp__db__session_scope` | 把本会话限制在部分数据源，或解除限制 |
 
 `datasource` 在所有工具里都是可选的，省略时回落到标着 `isDefault` 的那条（没有就取注册表里的第一条）。查询发生在**对话里**，面板只负责管理连接，不是 SQL 控制台。
 

@@ -71,6 +71,12 @@ identifier, host, kind and the last probe message; chips and the box narrow the 
 together, and a failed source keeps its red row and an expandable **Error details**
 block either way.
 
+Under each source's connection target sits its identifier as a chip labelled **ID**:
+that is the value every MCP tool takes as its `datasource` argument, so it is shown as
+a handle of its own rather than buried at the end of the target line. Click the chip
+to copy the bare identifier and paste it into chat ("query the `chinook` source"), or
+hover it to see the full value when it is too long for the row.
+
 ## Adding a source
 
 The form is as small as DBeaver's connection dialog: **connection string**, **user**,
@@ -213,7 +219,9 @@ closed; the filter box above the tree matches table names and schema names. The
 controller sends the table's schema along with its name, so two tables with the
 same name in different schemas stay distinct. It is served by `GET /schema`,
 which only forwards `list_tables` / `describe_table` to the MCP server — the page
-cannot run SQL, and nothing is cached.
+cannot run SQL, and nothing is cached. The header row keeps the way back to the
+list, the connection target and the same identifier chip, so the handle the agent
+needs is in view while you read the tables.
 
 ## Safety switches
 
@@ -230,6 +238,28 @@ The Python server reads the global flag at start-up and the host restarts it
 whenever the switch flips. Read-only is enforced again at the driver where the
 engine allows it (`mode=ro` for SQLite, `default_transaction_read_only` for
 PostgreSQL, `SET SESSION TRANSACTION READ ONLY` for MySQL).
+
+## Limiting one conversation
+
+A conversation can be narrowed to a subset of sources. Ask the assistant in plain
+words — *"in this conversation only use pg-demo and oracle-demo"* — and it calls the
+`mcp__db__session_scope` tool with those identifiers. Nothing new to fill in, no file
+to edit; the identifiers are the ones the list shows under each name.
+
+While a limit is saved for that conversation:
+
+- `list_datasources` only returns the allowed rows;
+- a call that names another source is refused with `user_error`;
+- a call that leaves `datasource` out either uses the single allowed source or
+  reports which identifiers are available;
+- `test_connection` cannot be used with an inline connection string, because that
+  would go around the list.
+
+Say *"stop limiting this conversation"* (or call the tool with `all: true`) and the
+limit is removed. Conversations with no saved limit keep access to every source, and
+the *Runtime* tab lists the conversations that are limited so you can see it at a
+glance. The limit is a per-conversation convenience, not a security boundary: the
+files under the runtime directory stay readable by your account.
 
 ## Audit log
 
@@ -250,6 +280,7 @@ $DSH_HOME/db-mcp/
   datasources.json   # sources and groups, never passwords, 0600
   secrets.json       # per-source password, 0600, Host-only
   settings.json      # global write switch + audit switch, 0600
+  sessions.json      # per-conversation source limits, 0600
   logs/mcp.log       # masked log
   logs/audit.jsonl   # one line per MCP tool call, rotates at 512 KiB
   .venv/             # plugin-local venv: mcp, psycopg, PyMySQL, oracledb

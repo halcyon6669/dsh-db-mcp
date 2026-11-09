@@ -314,6 +314,28 @@ const pgBadge = kindBadge('postgres')
 check('status: engine badge keeps its brand colour', pgBadge.label === 'PG' && pgBadge.color === '#336791', JSON.stringify(pgBadge))
 const oddBadge = kindBadge('duckdb')
 check('status: unknown engines still get a badge', oddBadge.label === 'DU' && typeof oddBadge.color === 'string', JSON.stringify(oddBadge))
+
+// The identifier is what MCP tools take as `datasource`, so the row shows it as
+// a labelled chip that copies the bare id — not a tail on the target string.
+const { IdChip } = mod.__test
+let copiedArg = null
+const idChip = IdChip({ t, id: 'chinook', copied: false, onCopy: (value) => { copiedArg = value } })
+check('id chip: labelled with its own key', texts(idChip).includes('sources.idChip'), texts(idChip).join('|'))
+check('id chip: carries the identifier verbatim', texts(idChip).includes('chinook'), texts(idChip).join('|'))
+check(
+  'id chip: the tooltip names the datasource role',
+  String(idChip.props.title).includes('sources.idChipHint') && String(idChip.props.title).includes('chinook'),
+  String(idChip.props.title),
+)
+idChip.props.onClick({ stopPropagation: noop })
+check('id chip: a click copies the bare id', copiedArg === 'chinook', String(copiedArg))
+const copiedIdChip = IdChip({ t, id: 'chinook', copied: true, onCopy: noop })
+check(
+  'id chip: the copied state is visible',
+  /is-copied/.test(String(copiedIdChip.props.className)) && texts(copiedIdChip).includes('✓'),
+  String(copiedIdChip.props.className),
+)
+check('id chip: an empty id renders nothing', IdChip({ t, id: '', onCopy: noop }) === null)
 const sample = { name: 'mysql', id: 'mysql', kind: 'mysql', target: '127.0.0.1:3306 / demo', group: 'docker', lastProbe: { ok: false, message: 'WinError 10061' } }
 check('status: search matches the name', sourceMatches(sample, 'mys') === true)
 check('status: search matches the target', sourceMatches(sample, '3306') === true)

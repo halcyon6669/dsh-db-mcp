@@ -18,6 +18,7 @@ are `GET`; every mutation is `POST` (the same-origin check compares `Origin` wit
 | `GET /dbeaver/scan` | DBeaver connections; never includes passwords |
 | `GET /mcp/status` | Python server phase, tool list, last error, stderr tail |
 | `GET /settings` · `POST /settings` | global write switch and audit switch |
+| `GET /scopes` · `POST /scopes` | per-conversation data-source limits (`{ session, datasources }`; an empty list lifts the limit) |
 | `GET /audit?limit=N` | tail of the tool-call audit log (default 20, max 200) |
 | `GET /python/env` · `GET /python/status` | interpreter, venv path, installed driver versions |
 | `POST /python/setup` | create the venv and install `server/requirements.txt` |
@@ -65,6 +66,16 @@ Row limits come from the server: `DB_MCP_MAX_ROWS` (default 200) per call, cappe
 | `explain_query` | `sql`, `datasource?` | `{ plan }` (engine-specific text) |
 | `get_ddl` | `table`, `datasource?`, `schema?` | `{ ddl, source: 'sqlite_master' \| 'columns' }` |
 | `test_connection` | `datasource?` or `kind`+`config`+`password?`, `read_only?` | `{ ok, latencyMs, message, detail: { stage, server, database, user, schema } }` |
+| `session_scope` | `datasources?`, `all?` | the limit saved for this conversation; `all: true` or an empty list lifts it |
+
+`session_scope` is not an MCP tool: the Host registers it next to the eight bridged
+ones so a conversation can narrow itself. While a limit is saved for the calling
+conversation, `list_datasources` only returns the allowed rows, a call that names
+another source fails with `user_error`, and a call that omits `datasource` either
+picks the single allowed row or asks for one. `test_connection` cannot be used with
+an inline `kind` + `config` while a limit is active, because that would sidestep the
+check. Conversations without an entry — and entries with an empty list — keep access
+to everything.
 
 Failures come back as `{ ok: false, error: { code, message, hint? } }` with
 
@@ -109,6 +120,18 @@ and is read only by the Host, never sent to the page.
 
 `settings.json` holds `{ "allowWrite": false, "auditLog": true, "updatedAt": "…" }`.
 `allowWrite` counts only when it is exactly `true`.
+
+`sessions.json` holds the conversation limits:
+
+```json
+{
+  "schemaVersion": 1,
+  "sessions": { "session-617a10ed-…": { "ids": ["pg-demo", "oracle-demo"], "updatedAt": "…" } }
+}
+```
+
+A conversation missing from that map, or listed with an empty `ids`, may use every
+data source.
 
 `logs/audit.jsonl` — one JSON object per tool call; rotates to `audit.1.jsonl` at
 512 KiB:
