@@ -79,7 +79,6 @@ window.__ModuleLoader__.load({
         'notice.imported': 'Imported {n} data source(s).',
         'notice.importedSkipped': 'Imported {n} data source(s); skipped {m} already configured.',
         'notice.probeOk': '{name}: connection OK ({ms} ms).',
-        'notice.probeFail': '{name}: {message}',
         'notice.mcpReady': 'MCP server is up with {count} tool(s).',
         'sources.count': '{n} configured',
         'sources.empty.title': 'No data source yet',
@@ -248,7 +247,9 @@ window.__ModuleLoader__.load({
         'sources.failedExpand': '(click to expand)',
         'sources.failedCollapse': '(click to collapse)',
         'sources.detail': 'Error details',
-        'action.diagnose': 'Diagnose',
+        'action.copyError': 'Copy',
+        'action.copied': 'Copied',
+        'action.copyErrorHint': 'Copy the whole failure report',
       },
       zh: {
         'panel.title': '数据库',
@@ -281,7 +282,6 @@ window.__ModuleLoader__.load({
         'notice.imported': '已导入 {n} 个数据源。',
         'notice.importedSkipped': '已导入 {n} 个数据源，跳过 {m} 个已存在的。',
         'notice.probeOk': '{name}：连接正常（{ms} ms）。',
-        'notice.probeFail': '{name}：{message}',
         'notice.mcpReady': 'MCP 服务已就绪，共 {count} 个工具。',
         'sources.count': '已配置 {n} 个',
         'sources.empty.title': '还没有数据源',
@@ -449,7 +449,9 @@ window.__ModuleLoader__.load({
         'sources.failedExpand': '（点击展开详情）',
         'sources.failedCollapse': '（点击收起详情）',
         'sources.detail': '错误详情',
-        'action.diagnose': '诊断报错',
+        'action.copyError': '复制',
+        'action.copied': '已复制',
+        'action.copyErrorHint': '复制完整报错信息',
       },
     }
 
@@ -977,24 +979,18 @@ window.__ModuleLoader__.load({
         user-select: none;
         border-radius: 4px;
       }
-      .dbmcp-grip-dot {
+      .dbmcp-grip-dots {
         display: block;
-        width: 3px;
-        height: 3px;
-        border-radius: 50%;
-        background: currentColor;
+        width: 12px;
+        height: 15px;
+        background-image: radial-gradient(circle, currentColor 1.5px, transparent 1.6px);
+        background-size: 6px 5px;
+        background-position: 0 0;
+        background-repeat: repeat;
         color: var(--dsw-alias-label-secondary);
         opacity: 0.45;
       }
-      .dbmcp-grip {
-        display: grid;
-        grid-template-columns: repeat(2, 3px);
-        grid-template-rows: repeat(3, 3px);
-        gap: 3px;
-        justify-content: center;
-        align-content: center;
-      }
-      .dbmcp-grip:hover .dbmcp-grip-dot {
+      .dbmcp-grip:hover .dbmcp-grip-dots {
         opacity: 0.85;
       }
       .dbmcp-grip:active {
@@ -2395,6 +2391,29 @@ const kindBadge = (kind) => {
   return { label, color: 'var(--dsw-alias-label-secondary)' }
 }
 
+/** Clipboard write that still works when the async API is blocked by the host shell. */
+async function copyText(text) {
+  if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+    try {
+      await navigator.clipboard.writeText(text)
+      return
+    } catch (error) {
+      /* fall through to the textarea trick */
+    }
+  }
+  const holder = document.createElement('textarea')
+  holder.value = text
+  holder.setAttribute('readonly', 'readonly')
+  holder.style.position = 'fixed'
+  holder.style.top = '-1000px'
+  holder.style.opacity = '0'
+  document.body.appendChild(holder)
+  holder.select()
+  const done = document.execCommand('copy')
+  document.body.removeChild(holder)
+  if (!done) throw new Error('the clipboard is not available')
+}
+
 /** A stored probe that ended in failure is what the red row is about. */
 const probeFailed = (source) => Boolean(source && source.lastProbe && source.lastProbe.ok === false)
 
@@ -2922,6 +2941,7 @@ function groupTables(tables) {
       const [query, setQuery] = React.useState('')
       const [filter, setFilter] = React.useState('all')
       const [expandedFail, setExpandedFail] = React.useState(null)
+      const [copiedId, setCopiedId] = React.useState(null)
       const [collapsed, setCollapsed] = React.useState([])
 
       const toggleFolded = (name) => {
@@ -3075,17 +3095,60 @@ function groupTables(tables) {
         try {
           const result = await apiPost('/datasources/test', { id: source.id })
           const probeInfo = result.probe || {}
-          setNotice({
-            message: probeInfo.ok
-              ? fmt(t('notice.probeOk'), { name: source.name, ms: probeInfo.latencyMs })
-              : fmt(t('notice.probeFail'), { name: source.name, message: probeInfo.message }),
-            isError: !probeInfo.ok,
-          })
+          if (probeInfo.ok) {
+            setNotice({ message: fmt(t('notice.probeOk'), { name: source.name, ms: probeInfo.latencyMs }), isError: false })
+          } else {
+            /* the failing row already carries the message; a banner on top would just repeat it */
+            setNotice(null)
+          }
           load()
         } catch (error) {
           setNotice({ message: String((error && error.message) || error), isError: true })
         } finally {
           setProbing(null)
+        }
+      }
+
+      const restartMcp = async () => {
+        setBusy(true)
+        try {
+          const result = await apiPost('/mcp/restart', {})
+          setNotice({
+            message: result.ok
+              ? t('notice.mcpReady').replace('{count}', String((result.tools || []).length))
+              : `${t('diag.mcpFailed')} ${result.error || ''}`,
+            isError: !result.ok,
+          })
+          await load()
+        } catch (error) {
+          setNotice({ message: String((error && error.message) || error), isError: true })
+        } finally {
+          setBusy(false)
+        }
+      }
+
+      /** Whole failure report for one source, so it can be pasted into an issue. */
+      const probeReport = (source) => {
+        const probeInfo = source.lastProbe || {}
+        return [
+          `datasource: ${source.name || source.id} (${source.id})`,
+          `kind: ${source.kind}`,
+          `target: ${source.target || '-'}`,
+          probeInfo.at ? `at: ${localStamp(probeInfo.at)}` : '',
+          `error: ${probeInfo.message || '-'}`,
+          `plugin: ${data.plugin.name} ${data.plugin.version}`,
+        ]
+          .filter(Boolean)
+          .join('\n')
+      }
+
+      const copyProbe = async (source) => {
+        try {
+          await copyText(probeReport(source))
+          setCopiedId(source.id)
+          setTimeout(() => setCopiedId((prev) => (prev === source.id ? null : prev)), 1600)
+        } catch (error) {
+          setNotice({ message: String((error && error.message) || error), isError: true })
         }
       }
 
@@ -3270,7 +3333,7 @@ function groupTables(tables) {
                 },
                 onDragEnd: () => setDraggingId(null),
               },
-              [0, 1, 2, 3, 4, 5].map((dot) => h('i', { key: dot, className: 'dbmcp-grip-dot' })),
+              h('span', { className: 'dbmcp-grip-dots', 'aria-hidden': 'true' }),
             ),
             h(
               'label',
@@ -3406,13 +3469,14 @@ function groupTables(tables) {
                   'button',
                   {
                     type: 'button',
-                    className: 'dbmcp-btn is-small',
+                    className: 'dbmcp-btn is-small is-plain',
+                    title: t('action.copyErrorHint'),
                     onClick: (event) => {
                       event.stopPropagation()
-                      toggleDetail()
+                      void copyProbe(source)
                     },
                   },
-                  t('action.diagnose'),
+                  copiedId === source.id ? t('action.copied') : t('action.copyError'),
                 ),
               )
             : null,
@@ -3742,33 +3806,6 @@ function groupTables(tables) {
                       )
                     : null,
                   h('button', { type: 'button', className: 'dbmcp-btn is-small', disabled: busy, onClick: load }, t('action.refresh')),
-                  h(
-                    'button',
-                    {
-                      type: 'button',
-                      className: 'dbmcp-btn is-small',
-                      disabled: busy,
-                      title: t('action.restartMcpHint'),
-                      onClick: async () => {
-                        setBusy(true)
-                        try {
-                          const result = await apiPost('/mcp/restart', {})
-                          setNotice({
-                            message: result.ok
-                              ? t('notice.mcpReady').replace('{count}', String((result.tools || []).length))
-                              : `${t('diag.mcpFailed')} ${result.error || ''}`,
-                            isError: !result.ok,
-                          })
-                          await load()
-                        } catch (error) {
-                          setNotice({ message: String((error && error.message) || error), isError: true })
-                        } finally {
-                          setBusy(false)
-                        }
-                      },
-                    },
-                    t('action.restartMcp'),
-                  ),
                 ),
                 renderBulk(),
                 renderList(),
@@ -3778,7 +3815,20 @@ function groupTables(tables) {
             ? null
             : h(
             Card,
-            { title: t('diag.title') },
+            {
+              title: t('diag.title'),
+              actions: h(
+                'button',
+                {
+                  type: 'button',
+                  className: 'dbmcp-btn is-small',
+                  disabled: busy,
+                  title: t('action.restartMcpHint'),
+                  onClick: restartMcp,
+                },
+                t('action.restartMcp'),
+              ),
+            },
             h(
               'div',
               { className: 'dbmcp-rows' },
