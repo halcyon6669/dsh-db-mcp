@@ -54,7 +54,7 @@ connection and version pills. Below it, five tabs:
 
 | Tab | What it does |
 | ---- | ------------ |
-| Data source list | the registry: health strip, search, group chips, rows grouped by label, bulk actions, refresh, restart MCP |
+| Data source list | the registry: health strip, search, group chips, rows grouped by label, bulk actions, refresh |
 | New data source | one connection string, user, password; also used for editing |
 | Import from DBeaver | scan, tick, import |
 | Runtime | Host facts, tool count, global write switch, venv and driver versions |
@@ -263,8 +263,8 @@ oracle://system:dbmcp-demo@127.0.0.1:1521/FREEPDB1
 | Sidebar entry gone, plugin card says *not installed* | `package.json` carries a UTF-8 BOM, so the host's `JSON.parse` fails and the bundle is skipped silently | rewrite the file without a BOM (any editor's "UTF-8 without BOM"), then toggle the plugin off and on in the **Plugins** panel |
 | Panel says *Host interface disconnected* | the Host half is not mounted (plugin disabled, or bundle failed to load) | check the plugin card, then reload the page |
 | Edited `src/host.js` but nothing changed | the Cordis entry is imported once per process | `POST /plugins/db-mcp/api/reload`, or restart DSH after changing `index.js` |
-| Tools missing from the agent | the Python server never started | *Runtime* → tools count and error; then **Restart MCP** |
-| `unknown tool "mcp__db__…"` right after a restart | tool registration was disposed with the old process | restart DSH once, then drive restarts from **Restart MCP** |
+| Tools missing from the agent | the Python server never started | *Runtime* → tools count and error; then **Restart MCP** in that card |
+| `unknown tool "mcp__db__…"` right after a restart | tool registration was disposed with the old process | restart DSH once, then drive restarts from **Restart MCP** under *Runtime* |
 | Oracle login fails with `DPY-6005` | listener unreachable, or host/port wrong | `docker ps`, then *Test* again |
 | `ORA-01950` on first write | Oracle user has no tablespace quota | `alter user <user> quota unlimited on users` |
 | Import row red: *incomplete host/database* | the DBeaver entry has neither fields nor a parsable URL | open the connection in DBeaver once, or create the source by hand |
