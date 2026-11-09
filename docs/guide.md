@@ -14,7 +14,7 @@ needs `--profile` before the pnpm verb:
 ```sh
 dsh plugin --profile desktop add dsh-db-mcp     # fresh install, desktop app
 dsh plugin --profile web add dsh-db-mcp         # the web UI's profile
-dsh plugin --profile desktop add dsh-db-mcp@0.7.0     # pin a version
+dsh plugin --profile desktop add dsh-db-mcp@0.8.0     # pin a version
 dsh plugin --profile desktop remove dsh-db-mcp         # uninstall
 dsh plugin --profile desktop why dsh-db-mcp            # which version is installed
 ```
@@ -63,13 +63,13 @@ connection and version pills. Below it, five tabs:
 **New data source** and **Import from DBeaver** swap only the card under the tabs —
 the masthead and tabs stay put, and every earlier step is still a tab away.
 
-The list opens with a status strip: whether the MCP bridge is up, the plugin version,
-the total number of sources, how many probed healthy, and which ones failed (with
-their names). The same row holds filter chips — **All**, one chip per group,
-**Ungrouped** and **Only failures** — and the search box sits on its own row below
-them, matching the name, identifier, host, kind and the last probe message. The chips
-and the box narrow the list together; a failed source keeps its red row and an
-expandable **Error details** block either way.
+The list opens with a status strip: whether the MCP bridge is up, the total number of
+sources, how many probed healthy, and which ones failed (with their names), with the
+search box on the right of that first row. Filter chips — **All**, one chip per group,
+**Ungrouped** and **Only failures** — take the second row. The box matches the name,
+identifier, host, kind and the last probe message; chips and the box narrow the list
+together, and a failed source keeps its red row and an expandable **Error details**
+block either way.
 
 ## Adding a source
 
@@ -81,10 +81,18 @@ row, then the engine, the connection fields and the read-only switch.
 
 The connection string, the user and the password are required for every engine but
 SQLite (which needs only the file): saving with one of them empty stops at the form,
-marks the empty field in red and leaves your typing alone. Editing an existing source
-may leave the password empty — that keeps the stored one. The footer repeats where a
-saved source goes: it is live in the panel at once and registered with the local MCP
-server, so the agent can use it without a restart.
+marks the empty field in red and leaves your typing alone. **Test** sits next to
+**Save** and runs the login without saving anything, reporting the result above the
+buttons. Editing an existing source may leave the password empty — that keeps the
+stored one.
+
+One endpoint may exist only once: the same host, port, database and user (SQLite: the
+same file) cannot be added twice. A second attempt comes back as `409` and names the
+row that already holds it, so the agent never sees two indistinguishable sources. The
+import screen enforces the same rule.
+
+The footer repeats where a saved source goes: it is live in the panel at once and
+registered with the local MCP server, so the agent can use it without a restart.
 
 Accepted shapes — a DSN, a JDBC URL, an Oracle TNS descriptor, a JDBC thin
 descriptor, or a bare database file:
@@ -102,7 +110,8 @@ jdbc:oracle:thin:@(DESCRIPTION_LIST=(DESCRIPTION=(ADDRESS_LIST=(ADDRESS=(PROTOCO
 jdbc:opengauss://h1:30100,h2:30100,h3:30100/demo?targetServerType=master
 jdbc:sqlite:C:\data\app.db
 sqlite:///C:/data/chinook.db
-C:\data\app.db          /  /var/lib/app.sqlite3
+C:\data\app.db
+/var/lib/app.sqlite3
 ```
 
 A password found inside the URL is sent once and then only stored; it is never
@@ -133,7 +142,8 @@ Two details make real DBeaver workspaces work:
 - A connection already configured is not offered twice. Sources are identified by
   kind + host + port + database/service/SID + user (SQLite by file path); a match
   comes back as `alreadyImported`, the checkbox is disabled and the row says
-  *already added as …*.
+  *already added as …*. Calling the import route directly does not bypass this: the
+  entry lands in `skipped` instead.
 - The list has a filter box (name, host or user) and a bar pinned to the top of the
   view, so *Import selected* stays in reach however long the workspace is.
 
@@ -168,7 +178,7 @@ kind: mysql
 target: 127.0.0.1:3306/demo
 at: 2026-11-09 21:41:06 UTC+08:00
 error: MySQL connection failed: (2003, "Can't connect to MySQL server on '127.0.0.1' …")
-plugin: dsh-db-mcp 0.7.5
+plugin: dsh-db-mcp 0.8.0
 ```
 
 The panel does not repeat probe failures in the banner above the tabs — that strip

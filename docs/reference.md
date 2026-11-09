@@ -21,10 +21,11 @@ are `GET`; every mutation is `POST` (the same-origin check compares `Origin` wit
 | `GET /audit?limit=N` | tail of the tool-call audit log (default 20, max 200) |
 | `GET /python/env` · `GET /python/status` | interpreter, venv path, installed driver versions |
 | `POST /python/setup` | create the venv and install `server/requirements.txt` |
-| `POST /datasources/save` | create or update a source (`id` immutable) |
+| `POST /datasources/save` | create or update a source (`id` immutable); a second row for the same host + port + database + user is refused with `409` |
 | `POST /datasources/delete` | remove a source and its stored secret |
-| `POST /datasources/test` | real login probe |
+| `POST /datasources/test` | real login probe (accepts `id`, or an inline `kind` + `config` + `password`) |
 | `POST /datasources/bulk` | `action: test \| readOnly \| group \| delete` over `ids` |
+| `POST /datasources/reorder` | rewrite the row order given `ids`; sources it does not name keep their place at the end |
 | `POST /groups/save` · `POST /groups/delete` | create, rename (`from`) or delete a group |
 | `POST /dbeaver/import` | copy selected DBeaver connections into the registry |
 | `POST /mcp/start` · `POST /mcp/restart` | start or restart the Python MCP server |
@@ -40,6 +41,7 @@ are `GET`; every mutation is `POST` (the same-origin check compares `Origin` wit
 | 403 | `Origin` present and different from `Host` |
 | 404 | unknown route, unknown datasource (`unknown datasources: …`), unknown group |
 | 405 | method not GET/HEAD/POST |
+| 409 | a source already uses this host + port + database + user; the body carries `existingId` |
 | 500 | unexpected failure, including a Host module that failed to load |
 | 503 | MCP server not ready (`start the MCP server from the panel and try again`) |
 

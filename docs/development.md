@@ -48,6 +48,7 @@ npm test              # everything below except mcp.test.mjs
 npm run test:ci       # the portable subset the publish workflow runs
 npm run test:mcp      # real Python server, real SQLite; Oracle when its container is up
 npm run test:engines  # server/engines.py against a stub DB-API connection
+npm run test:docs     # fenced blocks, table widths and relative links in the docs
 ```
 
 | Suite | Covers |
@@ -61,6 +62,7 @@ npm run test:engines  # server/engines.py against a stub DB-API connection
 | `dev/i18n.test.mjs` | en/zh key parity, no dead keys, no stray copy outside the dictionaries |
 | `dev/p5.test.mjs` | settings, audit rotation, Python environment discovery |
 | `dev/mcp.test.mjs` | real stdio handshake, all eight tools, read-only refusal, login failures |
+| `dev/docs.check.mjs` | balanced code fences, table column counts, relative links and headings in every Markdown file |
 
 Suites that need external services skip rather than fail: `mcp.test.mjs` probes the
 Oracle port and prints `skip … is not listening` when the container is down.
@@ -73,10 +75,10 @@ The package publishes from GitHub Actions with
 publish credential, so no `NPM_TOKEN` secret exists.
 
 ```sh
-node dev/bump.mjs 0.7.0     # package.json + src/host.js, both
-git commit -am "chore: release 0.7.0"
+node dev/bump.mjs 0.8.0     # package.json + src/host.js, both
+git commit -am "chore: release 0.8.0"
 git push origin main
-git tag v0.7.0 && git push origin v0.7.0
+git tag v0.8.0 && git push origin v0.8.0
 ```
 
 The workflow refuses to publish when the tag and `package.json` disagree, runs
@@ -91,7 +93,7 @@ Installing that release into a profile (the profile name is required, the verb i
 pnpm's):
 
 ```sh
-dsh plugin --profile desktop add dsh-db-mcp@0.7.0
+dsh plugin --profile desktop add dsh-db-mcp@0.8.0
 dsh plugin --profile desktop remove dsh-db-mcp
 ```
 

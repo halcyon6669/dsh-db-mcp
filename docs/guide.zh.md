@@ -11,7 +11,7 @@
 ```sh
 dsh plugin --profile desktop add dsh-db-mcp     # 全新安装，桌面端
 dsh plugin --profile web add dsh-db-mcp         # Web 界面的 profile
-dsh plugin --profile desktop add dsh-db-mcp@0.7.0     # 锁定某个版本
+dsh plugin --profile desktop add dsh-db-mcp@0.8.0     # 锁定某个版本
 dsh plugin --profile desktop remove dsh-db-mcp         # 卸载
 dsh plugin --profile desktop why dsh-db-mcp            # 当前装的是哪个版本
 ```
@@ -38,22 +38,25 @@ dsh plugin --profile desktop add C:\path\to\dsh-db-mcp
 
 | 标签 | 作用 |
 | ---- | ---- |
-| 数据源列表 | 注册表：状态条、搜索、分组筛选、按分组标签分行的列表、批量操作、刷新 |
-| 运行时诊断 | Host 与 Python 的实时状态；**重启 MCP** 按钮也在这里 |
+| 数据源列表 | 注册表：状态条、搜索、分组筛选、分组列表、批量操作、刷新 |
 | 新建数据源 | 一条连接串、用户、口令；编辑也复用这个表单 |
-| 从 DBeaver 导入 | 扫描、勾选、导入 |
-| 运行时诊断 | Host 信息、工具数量、全局写开关、venv 与驱动版本 |
+| 从 DBeaver 导入 | 扫描、过滤、勾选、导入 |
+| 运行时诊断 | Host 与 Python 的实时状态、工具数量、全局写开关、venv 与驱动版本；**重启 MCP** 按钮也在这里 |
 | 审计日志 | 最近十几次工具调用，按你的时区显示 |
 
 **新建数据源** 与 **从 DBeaver 导入** 只替换标签下方那张卡片——页头和标签保持不动，之前所在的位置始终只隔一个标签。
 
-列表顶部有一条状态条：MCP 服务是否就绪、插件版本、数据源总数、探测正常的有几个、异常的有几个（并列出名字）。下面是筛选 chip——**全部**、每个分组一个、**未分组**、**仅看异常**——下一行是搜索框，可匹配名称、标识符、主机、类型和最近一次探测的消息。chip 与搜索框会同时收窄列表；探测失败的数据源无论怎么筛，都保持红色行与可展开的 **错误详情**。
+列表顶部是一条状态条，第一行是 MCP 服务是否就绪、数据源总数、探测正常的有几个、异常的有几个（并列出名字），右侧是搜索框；第二行是筛选 chip——**全部**、每个分组一个、**未分组**、**仅看异常**。搜索匹配名称、标识符、主机、类型和最近一次探测的消息；chip 与搜索框会同时收窄列表；探测失败的数据源无论怎么筛，都保持红色行与可展开的 **错误详情**。
 
 ## 新增数据源
 
 表单和 DBeaver 的连接对话框一样精简：**连接串**、**用户**、**口令**（带 *保存密码* 勾选）。连接串输入框标着 *支持智能解析*，粘贴时就会填出类型、主机、端口、库名/服务名、显示名称与标识符；推导出来的值只出现在 **更多设置** 里——名称、分组、标识符排一行，下面才是类型、连接字段和只读开关。
 
-除 SQLite（只要文件路径）外，连接串、用户与口令都是必填：缺任何一项时保存会停在表单里，把空着的那个框标红，已经填好的内容不会丢。编辑已有数据源时口令可以留空，表示沿用已保存的口令。底部一行说明保存后的去向：立即在面板生效，并注册到本地 MCP 服务，智能体无需重启即可使用。
+除 SQLite（只要文件路径）外，连接串、用户与口令都是必填：缺任何一项时保存会停在表单里，把空着的那个框标红，已经填好的内容不会丢。表单底部的 **测试** 可以先验一次登录而不保存，结果就显示在按钮上方。编辑已有数据源时口令可以留空，表示沿用已保存的口令。
+
+同一个 **主机 + 端口 + 库名 + 用户** 只允许一条（SQLite 按文件路径）：重复新建会返回 409，并把已有那条的标识符告诉你，避免列表里出现两条智能体分不清的记录。这个规则对 DBeaver 导入同样生效。
+
+底部一行说明保存后的去向：立即在面板生效，并注册到本地 MCP 服务，智能体无需重启即可使用。
 
 可接受的写法——DSN、JDBC URL、Oracle TNS 描述符、JDBC thin 描述符，或者干脆一个数据库文件路径：
 
@@ -70,7 +73,8 @@ jdbc:oracle:thin:@(DESCRIPTION_LIST=(DESCRIPTION=(ADDRESS_LIST=(ADDRESS=(PROTOCO
 jdbc:opengauss://h1:30100,h2:30100,h3:30100/demo?targetServerType=master
 jdbc:sqlite:C:\data\app.db
 sqlite:///C:/data/chinook.db
-C:\data\app.db          /  /var/lib/app.sqlite3
+C:\data\app.db
+/var/lib/app.sqlite3
 ```
 
 连接串里带的密码只发送一次，之后仅保存，永远不会回显。`id` 创建后不可修改——要改的是 *显示名称*（双击行上的名字）。
@@ -81,10 +85,10 @@ openGauss 与 GaussDB 是独立的类型：它们的 SHA256 认证不在 libpq �
 
 导入器会在 `%APPDATA%\DBeaverData\workspace*\General\.dbeaver\` 下找 `data-sources.json`，同时兼容 `General` 布局与 Linux/macOS 布局。同目录存在 `credentials-config.json` 时，会用 DBeaver 内置密钥解密（AES-128-CBC、零 IV、前 16 字节前缀——参考 [Tatsh/dbeaver-creds](https://github.com/Tatsh/dbeaver-creds)）。勾选的连接被复制进注册表，口令写入 `secrets.json`。
 
-两个细节让真实的 DBeaver 工作区可用：
+三个细节让真实的 DBeaver 工作区可用：
 
 - 通过驱动对话框创建的连接常常只有一条 JDBC URL（`configurationType: URL`），既没有 `database` 字段也没有 `user`。导入器会从 URL 里解析表单缺失的部分，用户名则取自解密后的凭据。
-- 已经配置过的连接不会重复出现。数据源按 类型 + 主机 + 端口 + 库名/服务名/SID + 用户 识别（SQLite 用文件路径）；命中时返回 `alreadyImported`，复选框被禁用，行上写着 *已作为 … 添加*。
+- 已经配置过的连接不会重复出现。数据源按 类型 + 主机 + 端口 + 库名/服务名/SID + 用户 识别（SQLite 用文件路径）；命中时返回 `alreadyImported`，复选框被禁用，行上写着 *已作为 … 添加*；即使绕过界面直接调用导入接口，也只会进 `skipped`。
 - 列表带过滤框（按名称、主机或用户），操作栏固定在视图顶部，工作区再长 **导入所选** 也一直在手边。
 
 从未保存过口令的工作区也没问题：连接会以空口令导入，行上显示 **无密码**。补填一次就会一直保留。
@@ -110,7 +114,7 @@ kind: mysql
 target: 127.0.0.1:3306/demo
 at: 2026-11-09 21:41:06 UTC+08:00
 error: MySQL connection failed: (2003, "Can't connect to MySQL server on '127.0.0.1' …")
-plugin: dsh-db-mcp 0.7.5
+plugin: dsh-db-mcp 0.8.0
 ```
 
 测试失败不会再弹到标签页上方的横幅——那条横幅只留给保存、删除、安装依赖这类面板操作。
