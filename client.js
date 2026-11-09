@@ -101,6 +101,9 @@ window.__ModuleLoader__.load({
         'form.moreHint': 'name, group, identifier and database settings',
         'form.smart': 'Smart parsing',
         'form.autoApply': 'Saved sources take effect immediately and are registered with the local MCP server.',
+        'form.probeOk': '{name}: connection OK ({ms} ms).',
+        'form.probeFail': 'Connection failed:',
+        'form.probeUnknown': 'no message',
         'form.userPlaceholder': 'e.g. root or postgres',
         'form.pasteHintEdit': 'Paste a new connection string to overwrite the fields below; the identifier stays fixed.',
         'form.pastePlaceholder': 'postgresql://user:pass@localhost:5432/app',
@@ -307,6 +310,9 @@ window.__ModuleLoader__.load({
         'form.moreHint': '名称、分组、标识符及数据库配置',
         'form.smart': '支持智能解析',
         'form.autoApply': '配置将自动生效并注册至本地 MCP 服务节点',
+        'form.probeOk': '{name}：连接正常（{ms} ms）',
+        'form.probeFail': '连接失败：',
+        'form.probeUnknown': '无返回信息',
         'form.userPlaceholder': '例如 root 或 postgres',
         'form.pasteHintEdit': '粘贴新的连接串会覆盖下面的字段；标识符保持不变。',
         'form.pastePlaceholder': 'postgresql://用户:密码@localhost:5432/库名',
@@ -2226,6 +2232,8 @@ window.__ModuleLoader__.load({
       const [parsed, setParsed] = React.useState(null)
       const [saveSecret, setSaveSecret] = React.useState(true)
       const [busy, setBusy] = React.useState(false)
+      const [probing, setProbing] = React.useState(false)
+      const [probeResult, setProbeResult] = React.useState(null)
       const [error, setError] = React.useState(null)
       // Required fields stay unmarked until the first save attempt, so the form
       // does not open in a red state.
@@ -2306,6 +2314,38 @@ window.__ModuleLoader__.load({
           setError(String((caught && caught.message) || caught))
         } finally {
           setBusy(false)
+        }
+      }
+
+      /** Probes the draft as typed, before it is saved. */
+      const testDraft = async () => {
+        setError(null)
+        setProbeResult(null)
+        const needsTarget =
+          draft.kind === 'oracle' ? !String(draft.config.serviceName || '').trim() && !String(draft.config.sid || '').trim() : !String(draft.config.database || '').trim()
+        const incomplete = draft.kind === 'sqlite' ? !String(draft.config.file || '').trim() : !String(draft.config.host || '').trim() || needsTarget
+        if (incomplete) {
+          setError(t('form.invalid'))
+          return
+        }
+        setProbing(true)
+        try {
+          const body = {
+            kind: draft.kind,
+            config: { ...draft.config, port: draft.config.port ? Number(draft.config.port) : undefined },
+          }
+          if (draft.id && props.editing) body.id = draft.id.trim()
+          if (draft.password !== '') body.password = draft.password
+          const data = await apiPost('/datasources/test', body)
+          setProbeResult({
+            ok: Boolean(data.probe && data.probe.ok),
+            message: (data.probe && data.probe.message) || t('form.probeUnknown'),
+            ms: data.probe && data.probe.latencyMs,
+          })
+        } catch (caught) {
+          setProbeResult({ ok: false, message: String((caught && caught.message) || caught) })
+        } finally {
+          setProbing(false)
         }
       }
 
@@ -2577,12 +2617,31 @@ window.__ModuleLoader__.load({
             ),
           ),
         ),
+        probeResult
+          ? h(
+              'div',
+              { className: 'dbmcp-notice' + (probeResult.ok ? '' : ' is-error') },
+              h(
+                'span',
+                null,
+                probeResult.ok
+                  ? fmt(t('form.probeOk'), { name: draft.name || draft.id || draft.kind, ms: probeResult.ms == null ? '—' : probeResult.ms })
+                  : `${t('form.probeFail')} ${probeResult.message}`,
+              ),
+              h('button', { type: 'button', className: 'dbmcp-btn is-small', onClick: () => setProbeResult(null) }, '×'),
+            )
+          : null,
         h(
           'div',
           { className: 'dbmcp-form-foot' },
           h(
             'button',
-            { type: 'button', className: 'dbmcp-btn is-primary is-save', disabled: busy, onClick: submit },
+            { type: 'button', className: 'dbmcp-btn', disabled: busy || probing, onClick: testDraft },
+            probing ? t('action.testing') : t('action.test'),
+          ),
+          h(
+            'button',
+            { type: 'button', className: 'dbmcp-btn is-primary is-save', disabled: busy || probing, onClick: submit },
             busy ? t('action.saving') : t('action.save'),
           ),
           h('span', { className: 'dbmcp-form-foot-hint' }, t('form.autoApply')),
