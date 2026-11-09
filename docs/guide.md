@@ -156,6 +156,22 @@ Wrong passwords now surface the driver's own message (`ORA-01017`, `DPY-6005`,
 be tested too. When the Python server cannot start, the probe degrades to a TCP
 check and says so.
 
+A failing row keeps the message inline — expand it with `⌄` for the raw driver
+text, or press **Copy** to put the whole report on the clipboard:
+
+```
+datasource: mysql
+id: mysql
+kind: mysql
+target: 127.0.0.1:3306/demo
+at: 2026-11-09 21:41:06 UTC+08:00
+error: MySQL connection failed: (2003, "Can't connect to MySQL server on '127.0.0.1' …")
+plugin: dsh-db-mcp 0.7.5
+```
+
+The panel does not repeat probe failures in the banner above the tabs — that strip
+is for panel operations such as saving, deleting or installing dependencies.
+
 ## Groups and bulk actions
 
 Every source carries an optional **group** label, editable under *More settings*.

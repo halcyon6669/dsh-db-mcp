@@ -101,6 +101,20 @@ MySQL 8.0.46 · demo@%@demo · select version() ok
 
 口令错误现在会直接显示驱动自己的报错（`ORA-01017`、`DPY-6005`、`password authentication failed`），而不是笼统的「端口可达」。还没保存的表单也能测试。Python 服务起不来时，探测会退化成 TCP 检查，并明确说明这一点。
 
+失败的信息只留在那一行里：点右侧 `⌄` 展开驱动原文，或点 **复制** 把整份报告放进剪贴板：
+
+```
+datasource: mysql
+id: mysql
+kind: mysql
+target: 127.0.0.1:3306/demo
+at: 2026-11-09 21:41:06 UTC+08:00
+error: MySQL connection failed: (2003, "Can't connect to MySQL server on '127.0.0.1' …")
+plugin: dsh-db-mcp 0.7.5
+```
+
+测试失败不会再弹到标签页上方的横幅——那条横幅只留给保存、删除、安装依赖这类面板操作。
+
 ## 分组与批量操作
 
 每个数据源都可以带一个可选的 **分组** 标签，在 *更多设置* 里编辑。
