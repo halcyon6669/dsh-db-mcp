@@ -54,7 +54,7 @@ connection and version pills. Below it, five tabs:
 
 | Tab | What it does |
 | ---- | ------------ |
-| Data source list | the registry: rows grouped by label, bulk actions, refresh, restart MCP |
+| Data source list | the registry: health strip, search, group chips, rows grouped by label, bulk actions, refresh, restart MCP |
 | New data source | one connection string, user, password; also used for editing |
 | Import from DBeaver | scan, tick, import |
 | Runtime | Host facts, tool count, global write switch, venv and driver versions |
@@ -62,6 +62,13 @@ connection and version pills. Below it, five tabs:
 
 **New data source** and **Import from DBeaver** swap only the card under the tabs —
 the masthead and tabs stay put, and every earlier step is still a tab away.
+
+The list opens with a status strip: whether the MCP bridge is up, the plugin version,
+the total number of sources, how many probed healthy, and which ones failed (with
+their names). Under it sit filter chips — **All**, one chip per group, **Ungrouped**
+and **Only failures** — plus a search box that matches the name, identifier, host,
+kind and the last probe message. The chips and the box narrow the list together; a
+failed source keeps its red row and an expandable **Error details** block either way.
 
 ## Adding a source
 

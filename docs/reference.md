@@ -142,6 +142,8 @@ The Python side reads `DB_MCP_RUNTIME`, `DB_MCP_ALLOW_WRITE`, `DB_MCP_MAX_ROWS` 
 
 ## Runtime requirements
 
+- DSH `>=0.2.0-rc.2`, declared as `engines.dsh` in `package.json` so the market can
+  show the host requirement and refuse an incompatible install.
 - Node 22+ on the Host (the plugin uses `node:sqlite` for the SQLite probe).
 - A Python 3.10+ interpreter for the MCP server, with the four packages from
   `server/requirements.txt`. `mcp` must stay on 1.x — 2.x renamed `FastMCP`.
