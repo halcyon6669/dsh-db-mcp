@@ -65,10 +65,11 @@ the masthead and tabs stay put, and every earlier step is still a tab away.
 
 The list opens with a status strip: whether the MCP bridge is up, the plugin version,
 the total number of sources, how many probed healthy, and which ones failed (with
-their names). Under it sit filter chips — **All**, one chip per group, **Ungrouped**
-and **Only failures** — plus a search box that matches the name, identifier, host,
-kind and the last probe message. The chips and the box narrow the list together; a
-failed source keeps its red row and an expandable **Error details** block either way.
+their names). The same row holds filter chips — **All**, one chip per group,
+**Ungrouped** and **Only failures** — and the search box sits on its own row below
+them, matching the name, identifier, host, kind and the last probe message. The chips
+and the box narrow the list together; a failed source keeps its red row and an
+expandable **Error details** block either way.
 
 ## Adding a source
 
