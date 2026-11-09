@@ -275,6 +275,7 @@ check('status: a healthy probe is not a failure', probeFailed({ lastProbe: { ok:
 check('status: an untested source is not a failure', probeFailed({}) === false)
 const pgBadge = kindBadge('postgres')
 check('status: engine badge keeps its brand colour', pgBadge.label === 'PG' && pgBadge.color === '#336791', JSON.stringify(pgBadge))
+check('status: engine badge carries a glyph', pgBadge.glyph === '🐘', JSON.stringify(pgBadge))
 const oddBadge = kindBadge('duckdb')
 check('status: unknown engines still get a badge', oddBadge.label === 'DU' && typeof oddBadge.color === 'string', JSON.stringify(oddBadge))
 const sample = { name: 'mysql', id: 'mysql', kind: 'mysql', target: '127.0.0.1:3306 / demo', group: 'docker', lastProbe: { ok: false, message: 'WinError 10061' } }
@@ -304,12 +305,18 @@ const stripTree = render('status strip', () =>
 )
 if (stripTree) {
   const chips = collect(stripTree, (node) => node.type === 'button' && String(node.props.className).startsWith('dbmcp-chip'))
-  const labels = chips.map((chip) => String(chip.children[0]))
+  const labelOf = (chip) => String((chip.children || []).find((child) => typeof child === 'string') || '')
+  const countOf = (chip) =>
+    String(
+      ((chip.children || []).filter((child) => child && typeof child === 'object' && /dbmcp-chip-count/.test(String(child.props.className)))[0] || { children: [] })
+        .children[0] || '',
+    )
+  const labels = chips.map(labelOf)
   check('strip: one chip per group plus all and failures', labels.join('|') === 'filter.all|docker|group.unassigned|filter.failed', labels.join('|'))
   check(
     'strip: chips carry counts',
-    chips.map((chip) => String(chip.children[1].children[0])).join(',') === '3,2,1,1',
-    chips.map((chip) => String(chip.children[1].children[0])).join(','),
+    chips.map(countOf).join(',') === '3,2,1,1',
+    chips.map(countOf).join(','),
   )
   check('strip: the failure chip is flagged', /is-warn/.test(String(chips[3].props.className)))
   const labelsText = texts(stripTree)

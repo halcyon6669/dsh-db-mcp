@@ -629,6 +629,24 @@ window.__ModuleLoader__.load({
         padding: 3px 9px;
         border-radius: 7px;
       }
+      .dbmcp-btn.is-plain {
+        border-color: transparent;
+        background: transparent;
+        color: var(--dsw-alias-label-secondary);
+        padding: 3px 8px;
+      }
+      .dbmcp-btn.is-plain:hover:not(:disabled) {
+        border-color: transparent;
+        background: var(--dsw-alias-bg-layer-2);
+        color: var(--dsw-alias-label-primary);
+      }
+      .dbmcp-btn.is-plain.is-danger {
+        color: var(--dsw-alias-state-error-primary);
+      }
+      .dbmcp-btn.is-plain.is-danger:hover:not(:disabled) {
+        background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 12%, transparent);
+        color: var(--dsw-alias-state-error-primary);
+      }
       .dbmcp-pill {
         display: inline-flex;
         align-items: center;
@@ -958,15 +976,17 @@ window.__ModuleLoader__.load({
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        width: 26px;
-        height: 26px;
-        flex: 0 0 26px;
-        border-radius: 7px;
-        color: #fff;
-        font-size: 10px;
+        width: 32px;
+        height: 32px;
+        flex: 0 0 32px;
+        border-radius: 9px;
+        border: 1px solid var(--dsw-alias-border-l1);
+        background: var(--dsw-alias-bg-layer-2);
+        color: var(--dsw-alias-label-primary);
+        font-size: 15px;
         font-weight: 700;
-        letter-spacing: 0.02em;
-        text-transform: uppercase;
+        line-height: 1;
+        letter-spacing: -0.01em;
       }
       .dbmcp-item.is-failed {
         border-color: var(--dsw-alias-state-error-primary);
@@ -981,18 +1001,19 @@ window.__ModuleLoader__.load({
         cursor: pointer;
         color: var(--dsw-alias-state-error-primary);
       }
-      .dbmcp-fail-dot {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        width: 16px;
-        height: 16px;
-        flex: 0 0 16px;
-        border-radius: 50%;
-        background: var(--dsw-alias-state-error-primary);
-        color: var(--dsw-alias-bg-base);
-        font-size: 11px;
-        font-weight: 700;
+      .dbmcp-fail-tri {
+        flex: 0 0 auto;
+        font-size: 13px;
+        line-height: 1;
+      }
+      .dbmcp-fail-caret {
+        flex: 0 0 auto;
+        font-size: 12px;
+        line-height: 1;
+        transition: transform 120ms ease;
+      }
+      .dbmcp-fail-caret.is-open {
+        transform: rotate(180deg);
       }
       .dbmcp-fail-text {
         flex: 1 1 260px;
@@ -1070,6 +1091,11 @@ window.__ModuleLoader__.load({
         align-items: center;
         gap: 6px;
         flex-wrap: wrap;
+        margin-left: 6px;
+      }
+      .dbmcp-chip-icon {
+        font-size: 11px;
+        line-height: 1;
       }
       .dbmcp-chip {
         display: inline-flex;
@@ -1099,9 +1125,8 @@ window.__ModuleLoader__.load({
         opacity: 0.75;
       }
       .dbmcp-status-search {
-        margin-left: auto;
-        flex: 0 1 240px;
-        min-width: 160px;
+        flex: 0 0 300px;
+        max-width: 100%;
       }
       .dbmcp-status-search .dbmcp-input {
         width: 100%;
@@ -1137,8 +1162,6 @@ window.__ModuleLoader__.load({
         align-items: center;
         gap: 8px;
         padding: 0 2px;
-        border-bottom: 1px solid var(--dsw-alias-border-l1);
-        padding-bottom: 6px;
       }
       .dbmcp-group-name {
         font-size: 12px;
@@ -1148,6 +1171,43 @@ window.__ModuleLoader__.load({
       }
       .dbmcp-card-head > .dbmcp-pill {
         margin-left: auto;
+      }
+      .dbmcp-list-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-bottom: 14px;
+      }
+      .dbmcp-list-head .dbmcp-card-title {
+        margin-right: 4px;
+      }
+      .dbmcp-list-spacer {
+        flex: 1 1 auto;
+      }
+      .dbmcp-fold {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 18px;
+        height: 18px;
+        flex: 0 0 18px;
+        padding: 0;
+        border: none;
+        border-radius: 5px;
+        background: transparent;
+        color: var(--dsw-alias-label-secondary);
+        font-family: inherit;
+        font-size: 12px;
+        line-height: 1;
+        cursor: pointer;
+        transition: transform 120ms ease, color 120ms ease;
+      }
+      .dbmcp-fold:hover {
+        color: var(--dsw-alias-label-primary);
+      }
+      .dbmcp-fold.is-folded {
+        transform: rotate(-90deg);
       }
       .dbmcp-card-actions {
         display: flex;
@@ -1197,9 +1257,9 @@ window.__ModuleLoader__.load({
         display: flex;
         align-items: center;
         gap: 6px;
-        margin-bottom: 12px;
       }
       .dbmcp-group-create .dbmcp-input {
+        width: 170px;
         max-width: 220px;
       }
       .dbmcp-group-pick {
@@ -2238,18 +2298,18 @@ window.__ModuleLoader__.load({
     /** Tables grouped by schema; the group order is stable and alphabetical. */
     /** Brand colours keep the four engines readable without an icon font. */
 const KIND_BADGE = {
-  postgres: { label: 'PG', color: '#336791' },
-  gauss: { label: 'GS', color: '#00a3a3' },
-  mysql: { label: 'MY', color: '#00758f' },
-  oracle: { label: 'OR', color: '#c74634' },
-  sqlite: { label: 'SQ', color: '#003b5c' },
+  postgres: { label: 'PG', glyph: '🐘', color: '#336791' },
+  gauss: { label: 'GS', glyph: 'GS', color: '#00a3a3' },
+  mysql: { label: 'MY', glyph: '🐬', color: '#00758f' },
+  oracle: { label: 'OR', glyph: 'O', color: '#c74634' },
+  sqlite: { label: 'SQ', glyph: '🪶', color: '#003b5c' },
 }
 
 const kindBadge = (kind) => {
   const key = String(kind || '').trim().toLowerCase()
   if (KIND_BADGE[key]) return KIND_BADGE[key]
   const label = key ? key.slice(0, 2).toUpperCase() : '?'
-  return { label, color: 'var(--dsw-alias-label-secondary)' }
+  return { label, glyph: label, color: 'var(--dsw-alias-label-secondary)' }
 }
 
 /** A stored probe that ended in failure is what the red row is about. */
@@ -2718,30 +2778,31 @@ function groupTables(tables) {
               ),
             )
           : null,
-      ),
-      h(
-        'div',
-        { className: 'dbmcp-chips' },
-        chips.map((chip) =>
-          h(
-            'button',
-            {
-              key: chip.id,
-              type: 'button',
-              className: 'dbmcp-chip' + (filter === chip.id ? ' is-active' : '') + (chip.warn ? ' is-warn' : ''),
-              onClick: () => setFilter(filter === chip.id ? 'all' : chip.id),
-            },
-            chip.label,
-            h('span', { className: 'dbmcp-chip-count' }, String(chip.count)),
+        h(
+          'div',
+          { className: 'dbmcp-chips' },
+          chips.map((chip) =>
+            h(
+              'button',
+              {
+                key: chip.id,
+                type: 'button',
+                className: 'dbmcp-chip' + (filter === chip.id ? ' is-active' : '') + (chip.warn ? ' is-warn' : ''),
+                onClick: () => setFilter(filter === chip.id ? 'all' : chip.id),
+              },
+              chip.warn ? h('span', { className: 'dbmcp-chip-icon', 'aria-hidden': 'true' }, '⚠') : null,
+              chip.label,
+              h('span', { className: 'dbmcp-chip-count' }, String(chip.count)),
+            ),
           ),
         ),
-        h('div', { className: 'dbmcp-status-search' }, h(TextInput, {
-          value: query,
-          onChange: setQuery,
-          placeholder: t('sources.searchPlaceholder'),
-          title: t('sources.searchPlaceholder'),
-        })),
       ),
+      h('div', { className: 'dbmcp-status-search' }, h(TextInput, {
+        value: query,
+        onChange: setQuery,
+        placeholder: t('sources.searchPlaceholder'),
+        title: t('sources.searchPlaceholder'),
+      })),
     )
   }
 
@@ -2767,6 +2828,11 @@ function groupTables(tables) {
       const [query, setQuery] = React.useState('')
       const [filter, setFilter] = React.useState('all')
       const [expandedFail, setExpandedFail] = React.useState(null)
+      const [collapsed, setCollapsed] = React.useState([])
+
+      const toggleFolded = (name) => {
+        setCollapsed((prev) => (prev.includes(name) ? prev.filter((item) => item !== name) : prev.concat(name)))
+      }
 
       /** Switching a tab only swaps the card below; the chrome never moves. */
       const selectTab = (id) => {
@@ -3113,7 +3179,19 @@ function groupTables(tables) {
                 'aria-label': source.name || source.id,
               }),
             ),
-            h('span', { className: 'dbmcp-kind-badge', style: { background: badge.color }, title: source.kind }, badge.label),
+            h(
+              'span',
+              {
+                className: 'dbmcp-kind-badge',
+                style: {
+                  color: badge.color,
+                  background: `color-mix(in srgb, ${badge.color} 12%, transparent)`,
+                  borderColor: `color-mix(in srgb, ${badge.color} 26%, transparent)`,
+                },
+                title: source.kind,
+              },
+              badge.glyph || badge.label,
+            ),
             h(
               'div',
               { className: 'dbmcp-item-main' },
@@ -3189,19 +3267,19 @@ function groupTables(tables) {
               { className: 'dbmcp-item-actions', onClick: (event) => event.stopPropagation() },
               h(
                 'button',
-                { type: 'button', className: 'dbmcp-btn is-small', disabled: probing === source.id, onClick: () => probe(source) },
+                { type: 'button', className: 'dbmcp-btn is-small is-plain', disabled: probing === source.id, onClick: () => probe(source) },
                 probing === source.id ? t('action.testing') : t('action.test'),
               ),
-              h('button', { type: 'button', className: 'dbmcp-btn is-small', onClick: () => setView({ mode: 'schema', source }) }, t('action.schema')),
-              h('button', { type: 'button', className: 'dbmcp-btn is-small', onClick: () => setView({ mode: 'edit', source }) }, t('action.edit')),
+              h('button', { type: 'button', className: 'dbmcp-btn is-small is-plain', onClick: () => setView({ mode: 'schema', source }) }, t('action.schema')),
+              h('button', { type: 'button', className: 'dbmcp-btn is-small is-plain', onClick: () => setView({ mode: 'edit', source }) }, t('action.edit')),
               source.isDefault
                 ? null
-                : h('button', { type: 'button', className: 'dbmcp-btn is-small', onClick: () => makeDefault(source) }, t('action.makeDefault')),
+                : h('button', { type: 'button', className: 'dbmcp-btn is-small is-plain', onClick: () => makeDefault(source) }, t('action.makeDefault')),
               h(
                 'button',
                 {
                   type: 'button',
-                  className: 'dbmcp-btn is-small is-danger',
+                  className: 'dbmcp-btn is-small is-plain is-danger',
                   onClick: () => remove(source),
                   onBlur: () => setPendingDelete((prev) => (prev === source.id ? null : prev)),
                 },
@@ -3213,13 +3291,14 @@ function groupTables(tables) {
             ? h(
                 'div',
                 { className: 'dbmcp-item-failure', onClick: toggleDetail },
-                h('span', { className: 'dbmcp-fail-dot', 'aria-hidden': 'true' }, '!'),
+                h('span', { className: 'dbmcp-fail-tri', 'aria-hidden': 'true' }, '⚠'),
                 h(
                   'span',
                   { className: 'dbmcp-fail-text' },
                   fmt(t('sources.failedLine'), { message: (probeInfo && probeInfo.message) || t('state.failed') }),
                 ),
                 h('span', { className: 'dbmcp-hint' }, expanded ? t('sources.failedCollapse') : t('sources.failedExpand')),
+                h('span', { className: 'dbmcp-fail-caret' + (expanded ? ' is-open' : ''), 'aria-hidden': 'true' }, '⌄'),
                 h(
                   'button',
                   {
@@ -3246,11 +3325,12 @@ function groupTables(tables) {
         )
       }
 
-      /** One group: a head with a select-all box and rename/delete, plus a drop zone. */
+      /** One group: a chevron, a select-all box and rename/delete, plus a drop zone. */
       const renderGroup = (name, items) => {
         const allChecked = items.length > 0 && items.every((item) => selected.includes(item.id))
         const renaming = editingGroup !== null && editingGroup.from === name
         const dropTarget = name
+        const folded = collapsed.includes(name)
         return h(
           'section',
           {
@@ -3277,6 +3357,17 @@ function groupTables(tables) {
           h(
             'header',
             { className: 'dbmcp-group-head' },
+            h(
+              'button',
+              {
+                type: 'button',
+                className: 'dbmcp-fold' + (folded ? ' is-folded' : ''),
+                'aria-expanded': !folded,
+                title: folded ? t('sources.failedExpand') : t('sources.failedCollapse'),
+                onClick: () => toggleFolded(name),
+              },
+              '⌄',
+            ),
             h('input', {
               type: 'checkbox',
               className: 'dbmcp-group-pick',
@@ -3327,7 +3418,7 @@ function groupTables(tables) {
                     'button',
                     {
                       type: 'button',
-                      className: 'dbmcp-btn is-small is-danger',
+                      className: 'dbmcp-btn is-small is-plain is-danger',
                       onClick: () => void removeGroup(name),
                       onBlur: () => setPendingGroupDelete((prev) => (prev === name ? null : prev)),
                     },
@@ -3335,8 +3426,10 @@ function groupTables(tables) {
                   ),
                 ),
           ),
-          items.length === 0
-            ? h('div', { className: 'dbmcp-hint dbmcp-group-empty' }, t('group.empty'))
+          folded || items.length === 0
+            ? folded
+              ? null
+              : h('div', { className: 'dbmcp-hint dbmcp-group-empty' }, t('group.empty'))
             : h('ul', { className: 'dbmcp-list' }, items.map(renderItem)),
         )
       }
@@ -3519,65 +3612,61 @@ function groupTables(tables) {
           tab === 'list'
             ? h(
                 Card,
-                {
-                  title: t('tab.list'),
-                  aside: t('sources.count').replace('{n}', String(sources.length)),
-                  actions: [
-                    selected.length > 0
-                      ? h(
-                          'span',
-                          { key: 'selected', className: 'dbmcp-hint' },
-                          t('bulk.selected').replace('{n}', String(selected.length)),
-                        )
-                      : null,
-                    selected.length > 0
-                      ? h(
-                          'button',
-                          {
-                            key: 'bulk-delete',
-                            type: 'button',
-                            className: 'dbmcp-btn is-small is-danger',
-                            disabled: busy,
-                            onClick: () => bulkDelete(),
-                            onBlur: () => setPendingBulkDelete(false),
-                          },
-                          pendingBulkDelete
-                            ? t('bulk.deleteConfirm').replace('{n}', String(selected.length))
-                            : t('bulk.delete'),
-                        )
-                      : null,
-                    h('button', { key: 'refresh', type: 'button', className: 'dbmcp-btn is-small', disabled: busy, onClick: load }, t('action.refresh')),
-                    h(
-                      'button',
-                      {
-                        key: 'restart',
-                        type: 'button',
-                        className: 'dbmcp-btn is-small',
-                        disabled: busy,
-                        title: t('action.restartMcpHint'),
-                        onClick: async () => {
-                          setBusy(true)
-                          try {
-                            const result = await apiPost('/mcp/restart', {})
-                            setNotice({
-                              message: result.ok
-                                ? t('notice.mcpReady').replace('{count}', String((result.tools || []).length))
-                                : `${t('diag.mcpFailed')} ${result.error || ''}`,
-                              isError: !result.ok,
-                            })
-                            await load()
-                          } catch (error) {
-                            setNotice({ message: String((error && error.message) || error), isError: true })
-                          } finally {
-                            setBusy(false)
-                          }
+                { title: null },
+                h(
+                  'header',
+                  { className: 'dbmcp-list-head' },
+                  h('h2', { className: 'dbmcp-card-title' }, t('tab.list')),
+                  renderGroupCreate(),
+                  h('span', { className: 'dbmcp-list-spacer' }),
+                  h('span', { className: 'dbmcp-pill' }, t('sources.count').replace('{n}', String(sources.length))),
+                  selected.length > 0
+                    ? h('span', { className: 'dbmcp-hint' }, t('bulk.selected').replace('{n}', String(selected.length)))
+                    : null,
+                  selected.length > 0
+                    ? h(
+                        'button',
+                        {
+                          type: 'button',
+                          className: 'dbmcp-btn is-small is-danger',
+                          disabled: busy,
+                          onClick: () => bulkDelete(),
+                          onBlur: () => setPendingBulkDelete(false),
                         },
+                        pendingBulkDelete
+                          ? t('bulk.deleteConfirm').replace('{n}', String(selected.length))
+                          : t('bulk.delete'),
+                      )
+                    : null,
+                  h('button', { type: 'button', className: 'dbmcp-btn is-small', disabled: busy, onClick: load }, t('action.refresh')),
+                  h(
+                    'button',
+                    {
+                      type: 'button',
+                      className: 'dbmcp-btn is-small',
+                      disabled: busy,
+                      title: t('action.restartMcpHint'),
+                      onClick: async () => {
+                        setBusy(true)
+                        try {
+                          const result = await apiPost('/mcp/restart', {})
+                          setNotice({
+                            message: result.ok
+                              ? t('notice.mcpReady').replace('{count}', String((result.tools || []).length))
+                              : `${t('diag.mcpFailed')} ${result.error || ''}`,
+                            isError: !result.ok,
+                          })
+                          await load()
+                        } catch (error) {
+                          setNotice({ message: String((error && error.message) || error), isError: true })
+                        } finally {
+                          setBusy(false)
+                        }
                       },
-                      t('action.restartMcp'),
-                    ),
-                  ],
-                },
-                renderGroupCreate(),
+                    },
+                    t('action.restartMcp'),
+                  ),
+                ),
                 renderBulk(),
                 renderList(),
               )
