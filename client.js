@@ -98,6 +98,10 @@ window.__ModuleLoader__.load({
           'Paste a JDBC URL, a DSN or the path of a .db file. Type, host, port, database and the identifier are derived from it.',
         'form.savePassword': 'Save password',
         'form.more': 'More settings',
+        'form.moreHint': 'name, group, identifier and database settings',
+        'form.smart': 'Smart parsing',
+        'form.autoApply': 'Saved sources take effect immediately and are registered with the local MCP server.',
+        'form.userPlaceholder': 'e.g. root or postgres',
         'form.pasteHintEdit': 'Paste a new connection string to overwrite the fields below; the identifier stays fixed.',
         'form.pastePlaceholder': 'postgresql://user:pass@localhost:5432/app',
         'form.parseOk': 'recognized',
@@ -300,6 +304,10 @@ window.__ModuleLoader__.load({
         'form.pasteHintShort': '粘贴 JDBC URL、DSN 或 .db 文件路径，类型、主机、端口、库名和标识符都会自动带出。',
         'form.savePassword': '保存密码',
         'form.more': '更多设置',
+        'form.moreHint': '名称、分组、标识符及数据库配置',
+        'form.smart': '支持智能解析',
+        'form.autoApply': '配置将自动生效并注册至本地 MCP 服务节点',
+        'form.userPlaceholder': '例如 root 或 postgres',
         'form.pasteHintEdit': '粘贴新的连接串会覆盖下面的字段；标识符保持不变。',
         'form.pastePlaceholder': 'postgresql://用户:密码@localhost:5432/库名',
         'form.parseOk': '已识别',
@@ -1332,6 +1340,9 @@ window.__ModuleLoader__.load({
       .dbmcp-item.is-drop-before {
         box-shadow: 0 -2px 0 0 var(--dsw-alias-brand-primary);
       }
+      .dbmcp-item.is-drop-after {
+        box-shadow: 0 2px 0 0 var(--dsw-alias-brand-primary);
+      }
       .dbmcp-item.is-taken {
         opacity: 0.6;
       }
@@ -1377,10 +1388,15 @@ window.__ModuleLoader__.load({
         align-items: center;
         gap: 6px;
         flex: 1 1 220px;
-        min-width: 180px;
+        min-width: 220px;
       }
       .dbmcp-bulk-group .dbmcp-input {
+        flex: 1 1 auto;
         min-width: 120px;
+      }
+      .dbmcp-bulk .dbmcp-btn {
+        flex: 0 0 auto;
+        white-space: nowrap;
       }
       .dbmcp-item-main {
         min-width: 0;
@@ -1460,6 +1476,166 @@ window.__ModuleLoader__.load({
       .dbmcp-form.is-compact .dbmcp-paste .dbmcp-check {
         flex: none;
         white-space: nowrap;
+        font-size: 12px;
+        color: var(--dsw-alias-label-secondary);
+      }
+      .dbmcp-form.is-page {
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+        max-width: 900px;
+        font-size: 13px;
+      }
+      .dbmcp-form-section {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        min-width: 0;
+      }
+      .dbmcp-form-section.is-two,
+      .dbmcp-form-section.is-three {
+        display: grid;
+        gap: 16px;
+        align-items: start;
+      }
+      .dbmcp-form-section.is-two {
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      }
+      .dbmcp-form-section.is-three {
+        grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+      }
+      .dbmcp-form-cell {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        min-width: 0;
+      }
+      .dbmcp-form-head {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-height: 20px;
+      }
+      .dbmcp-form-head .dbmcp-check {
+        margin-left: auto;
+        font-size: 12px;
+        color: var(--dsw-alias-label-secondary);
+      }
+      .dbmcp-form-label {
+        color: var(--dsw-alias-label-primary);
+        font-size: 13px;
+        font-weight: 500;
+      }
+      .dbmcp-form-note {
+        display: flex;
+        align-items: flex-start;
+        gap: 6px;
+        margin: 0;
+        font-size: 12px;
+        line-height: 1.5;
+        color: var(--dsw-alias-label-secondary);
+      }
+      .dbmcp-form-mark {
+        flex: none;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 14px;
+        height: 14px;
+        margin-top: 1px;
+        border: 1px solid var(--dsw-alias-border-l2);
+        border-radius: 50%;
+        font-size: 9px;
+        font-style: normal;
+        line-height: 1;
+        text-transform: lowercase;
+        color: var(--dsw-alias-label-secondary);
+      }
+      .dbmcp-tag {
+        margin-left: auto;
+        border: 1px solid color-mix(in srgb, var(--dsw-alias-brand-primary) 35%, transparent);
+        border-radius: 6px;
+        background: color-mix(in srgb, var(--dsw-alias-brand-primary) 10%, transparent);
+        color: var(--dsw-alias-brand-primary);
+        font-size: 11px;
+        line-height: 1;
+        padding: 4px 8px;
+        white-space: nowrap;
+      }
+      .dbmcp-form.is-page .dbmcp-input,
+      .dbmcp-form.is-page .dbmcp-select {
+        padding: 8px 10px;
+      }
+      .dbmcp-form.is-page .dbmcp-input::placeholder {
+        color: var(--dsw-alias-label-secondary);
+        opacity: 0.75;
+      }
+      .dbmcp-form-inner {
+        display: flex;
+        flex-direction: column;
+        gap: 18px;
+        padding: 2px 2px 0;
+      }
+      .dbmcp-advanced.is-page {
+        background: transparent;
+        padding: 0;
+      }
+      .dbmcp-advanced.is-page > summary {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 6px 10px;
+        border: 1px solid var(--dsw-alias-border-l1);
+        border-radius: 8px;
+        font-size: 13px;
+      }
+      .dbmcp-advanced.is-page[open] > summary {
+        margin-bottom: 16px;
+      }
+      .dbmcp-advanced-title {
+        color: var(--dsw-alias-label-primary);
+        font-weight: 500;
+      }
+      .dbmcp-advanced-hint {
+        margin-left: auto;
+        font-size: 12px;
+        color: var(--dsw-alias-label-secondary);
+        font-weight: 400;
+      }
+      .dbmcp-readonly {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        border: 1px solid var(--dsw-alias-border-l1);
+        border-radius: 8px;
+        background: var(--dsw-alias-bg-layer-2);
+        padding: 12px 14px;
+      }
+      .dbmcp-readonly .dbmcp-check {
+        font-size: 13px;
+      }
+      .dbmcp-readonly .dbmcp-hint {
+        padding-left: 24px;
+      }
+      .dbmcp-help {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 14px;
+        height: 14px;
+        border: 1px solid var(--dsw-alias-border-l2);
+        border-radius: 50%;
+        font-size: 9px;
+        line-height: 1;
+        color: var(--dsw-alias-label-secondary);
+        cursor: help;
+      }
+      .dbmcp-btn.is-save {
+        min-width: 104px;
+        padding: 8px 18px;
+      }
+      .dbmcp-form-foot-hint {
+        margin-left: auto;
         font-size: 12px;
         color: var(--dsw-alias-label-secondary);
       }
@@ -2217,9 +2393,18 @@ window.__ModuleLoader__.load({
         )
       }
 
+      const note = (text, extra) =>
+        h(
+          'p',
+          { className: 'dbmcp-form-note' },
+          h('span', { className: 'dbmcp-form-mark', 'aria-hidden': 'true' }, 'i'),
+          h('span', null, text),
+          extra || null,
+        )
+
       return h(
         'div',
-        null,
+        { className: 'dbmcp-form is-page' },
         error
           ? h(
               'div',
@@ -2229,43 +2414,45 @@ window.__ModuleLoader__.load({
             )
           : null,
         h(
-          'div',
-          { className: 'dbmcp-form is-compact' },
+          'section',
+          { className: 'dbmcp-form-section' },
           h(
-            Field,
-            {
-              key: 'raw',
-              wide: true,
-              label: t('form.paste'),
-              hint: editing ? t('form.pasteHintEdit') : t('form.pasteHintShort'),
-            },
-            h(
-              'div',
-              { className: 'dbmcp-paste' },
-              h(TextInput, {
-                value: raw,
-                onChange: (value) => {
-                  onRawChange(value)
-                  if (missing.url) setMissing((prev) => ({ ...prev, url: false }))
-                },
-                invalid: missing.url === true,
-                placeholder: t('form.pastePlaceholder'),
-                autoFocus: !editing,
-              }),
-              parsed
-                ? h(
-                    'span',
-                    { className: 'dbmcp-parse ' + (parsed.ok ? 'is-ok' : 'is-bad') },
-                    parsed.ok ? t('form.parseOk') : t('form.parseBad'),
-                  )
-                : null,
-            ),
+            'div',
+            { className: 'dbmcp-form-head' },
+            h('span', { className: 'dbmcp-form-label' }, t('form.paste')),
+            h('span', { className: 'dbmcp-tag' }, t('form.smart')),
           ),
+          h(TextInput, {
+            value: raw,
+            onChange: (value) => {
+              onRawChange(value)
+              if (missing.url) setMissing((prev) => ({ ...prev, url: false }))
+            },
+            invalid: missing.url === true,
+            placeholder: t('form.pastePlaceholder'),
+            autoFocus: !editing,
+          }),
+          note(
+            editing ? t('form.pasteHintEdit') : t('form.pasteHintShort'),
+            parsed
+              ? h(
+                  'span',
+                  { className: 'dbmcp-parse ' + (parsed.ok ? 'is-ok' : 'is-bad') },
+                  parsed.ok ? t('form.parseOk') : t('form.parseBad'),
+                )
+              : null,
+          ),
+        ),
+        h(
+          'section',
+          { className: 'dbmcp-form-section is-two' },
           h(
-            Field,
-            { key: 'user', label: t('form.user') },
+            'div',
+            { className: 'dbmcp-form-cell' },
+            h('label', { className: 'dbmcp-form-label' }, t('form.user')),
             h(TextInput, {
               value: draft.config.user,
+              placeholder: t('form.userPlaceholder'),
               onChange: (value) => {
                 patchConfig({ user: value })
                 if (missing.user) setMissing((prev) => ({ ...prev, user: false }))
@@ -2275,22 +2462,12 @@ window.__ModuleLoader__.load({
             }),
           ),
           h(
-            Field,
-            { key: 'password', label: t('form.password'), hint: draft.hasSecret ? t('form.passwordKeep') : null },
+            'div',
+            { className: 'dbmcp-form-cell' },
             h(
               'div',
-              { className: 'dbmcp-paste' },
-              h(TextInput, {
-                type: 'password',
-                value: draft.password,
-                autoComplete: 'new-password',
-                invalid: missing.password === true,
-                placeholder: draft.hasSecret ? '********' : t('form.passwordEmpty'),
-                onChange: (value) => {
-                  patch({ password: value })
-                  if (missing.password && value.trim()) setMissing((prev) => ({ ...prev, password: false }))
-                },
-              }),
+              { className: 'dbmcp-form-head' },
+              h('label', { className: 'dbmcp-form-label' }, t('form.password')),
               h(
                 'label',
                 { className: 'dbmcp-check' },
@@ -2302,14 +2479,35 @@ window.__ModuleLoader__.load({
                 h('span', null, t('form.savePassword')),
               ),
             ),
+            h(TextInput, {
+              type: 'password',
+              value: draft.password,
+              autoComplete: 'new-password',
+              invalid: missing.password === true,
+              placeholder: draft.hasSecret ? '********' : t('form.passwordEmpty'),
+              onChange: (value) => {
+                patch({ password: value })
+                if (missing.password && value.trim()) setMissing((prev) => ({ ...prev, password: false }))
+              },
+            }),
+            draft.hasSecret ? h('span', { className: 'dbmcp-hint' }, t('form.passwordKeep')) : null,
+          ),
+        ),
+        h(
+          'details',
+          { className: 'dbmcp-advanced is-page' },
+          h(
+            'summary',
+            null,
+            h('span', { className: 'dbmcp-advanced-title' }, t('form.more')),
+            h('span', { className: 'dbmcp-advanced-hint' }, t('form.moreHint')),
           ),
           h(
-            'details',
-            { key: 'more', className: 'dbmcp-advanced' },
-            h('summary', null, t('form.more')),
+            'div',
+            { className: 'dbmcp-form-inner' },
             h(
               'div',
-              { className: 'dbmcp-form' },
+              { className: 'dbmcp-form-section is-three' },
               h(
                 Field,
                 { key: 'name', label: t('form.name'), hint: t('form.optional') },
@@ -2339,6 +2537,10 @@ window.__ModuleLoader__.load({
                     patch({ id: value.toLowerCase().replace(/[^a-z0-9-]/g, ''), idTouched: true }),
                 }),
               ),
+            ),
+            h(
+              'div',
+              { className: 'dbmcp-form-section is-two' },
               h(
                 Field,
                 { key: 'kind', label: t('form.kind') },
@@ -2353,32 +2555,35 @@ window.__ModuleLoader__.load({
                   KINDS.map((kind) => h('option', { key: kind, value: kind }, kind)),
                 ),
               ),
-              manual,
-              h(
-                Field,
-                { key: 'readOnly', label: t('form.readOnly'), hint: t('form.readOnlyHint') },
-                h(
-                  'label',
-                  { className: 'dbmcp-check' },
-                  h('input', {
-                    type: 'checkbox',
-                    checked: draft.readOnly,
-                    onChange: (event) => patch({ readOnly: event.target.checked }),
-                  }),
-                  h('span', null, draft.readOnly ? t('sources.readonly') : t('sources.readwrite')),
-                ),
-              ),
             ),
-          ),
-          h(
-            'div',
-            { className: 'dbmcp-form-foot' },
+            h('div', { className: 'dbmcp-form-section is-two' }, manual),
             h(
-              'button',
-              { type: 'button', className: 'dbmcp-btn is-primary', disabled: busy, onClick: submit },
-              busy ? t('action.saving') : t('action.save'),
+              'div',
+              { className: 'dbmcp-readonly' },
+              h(
+                'label',
+                { className: 'dbmcp-check' },
+                h('input', {
+                  type: 'checkbox',
+                  checked: draft.readOnly,
+                  onChange: (event) => patch({ readOnly: event.target.checked }),
+                }),
+                h('span', null, t('form.readOnly')),
+                h('span', { className: 'dbmcp-help', title: t('form.readOnlyHint'), 'aria-hidden': 'true' }, '?'),
+              ),
+              h('span', { className: 'dbmcp-hint' }, t('form.readOnlyHint')),
             ),
           ),
+        ),
+        h(
+          'div',
+          { className: 'dbmcp-form-foot' },
+          h(
+            'button',
+            { type: 'button', className: 'dbmcp-btn is-primary is-save', disabled: busy, onClick: submit },
+            busy ? t('action.saving') : t('action.save'),
+          ),
+          h('span', { className: 'dbmcp-form-foot-hint' }, t('form.autoApply')),
         ),
       )
     }
@@ -2969,7 +3174,7 @@ function groupTables(tables) {
       const [pendingGroupDelete, setPendingGroupDelete] = React.useState(null)
       const [draggingId, setDraggingId] = React.useState(null)
       const [dragOverGroup, setDragOverGroup] = React.useState(null)
-      const [dropBefore, setDropBefore] = React.useState(null)
+      const [dropMark, setDropMark] = React.useState(null)
       const [renamingSource, setRenamingSource] = React.useState(null)
       const [query, setQuery] = React.useState('')
       const [filter, setFilter] = React.useState('all')
@@ -3296,8 +3501,8 @@ function groupTables(tables) {
         }
       }
 
-      /** Dropping a row onto another row: adopt its group, then sit right above it. */
-      const dropOnRow = async (draggedId, target) => {
+      /** Dropping a row onto another row: adopt its group, then sit above or below it. */
+      const dropOnRow = async (draggedId, target, after = false) => {
         const dragged = sources.find((item) => item.id === draggedId)
         if (!dragged || dragged.id === target.id) return
         try {
@@ -3306,7 +3511,7 @@ function groupTables(tables) {
           }
           const ids = sources.map((item) => item.id).filter((id) => id !== draggedId)
           const at = ids.indexOf(target.id)
-          ids.splice(at < 0 ? ids.length : at, 0, draggedId)
+          ids.splice(at < 0 ? ids.length : at + (after ? 1 : 0), 0, draggedId)
           await apiPost('/datasources/reorder', { ids })
           setDraggingId(null)
           load()
@@ -3345,22 +3550,28 @@ function groupTables(tables) {
               'dbmcp-item' +
               (checked ? ' is-selected' : '') +
               (draggingId === source.id ? ' is-dragging' : '') +
-              (dropBefore === source.id ? ' is-drop-before' : '') +
+              (dropMark && dropMark.id === source.id ? (dropMark.after ? ' is-drop-after' : ' is-drop-before') : '') +
               (failed ? ' is-failed' : ''),
             key: source.id,
             onDragOver: (event) => {
               if (!draggingId || draggingId === source.id) return
               event.preventDefault()
               event.stopPropagation()
-              if (dropBefore !== source.id) setDropBefore(source.id)
+              /* Landing below the middle of a row means "after this one". */
+              const rect = event.currentTarget.getBoundingClientRect()
+              const after = event.clientY > rect.top + rect.height / 2
+              if (!dropMark || dropMark.id !== source.id || dropMark.after !== after) {
+                setDropMark({ id: source.id, after })
+              }
             },
-            onDragLeave: () => setDropBefore((prev) => (prev === source.id ? null : prev)),
+            onDragLeave: () => setDropMark((prev) => (prev && prev.id === source.id ? null : prev)),
             onDrop: (event) => {
               event.preventDefault()
               event.stopPropagation()
-              setDropBefore(null)
+              const after = Boolean(dropMark && dropMark.id === source.id && dropMark.after)
+              setDropMark(null)
               if (!draggingId || draggingId === source.id) return
-              void dropOnRow(draggingId, source)
+              void dropOnRow(draggingId, source, after)
             },
           },
           h(
@@ -3692,8 +3903,11 @@ function groupTables(tables) {
         const narrowing = filter !== 'all' || query.trim() !== ''
         const order = groupNames.filter((name) => !narrowing || (buckets.get(name) || []).length > 0)
         const loose = buckets.get('') || []
-        if (loose.length > 0) order.push('')
-        if (order.length === 1 && !order[0]) {
+        /* "Ungrouped" is always on offer while the list is whole, so a row can be
+           dragged back out of a group into it. */
+        if (!narrowing) order.push('')
+        /* A single unnamed bucket with rows in it needs no heading. */
+        if (order.length === 1 && !order[0] && loose.length > 0) {
           return h('ul', { className: 'dbmcp-list' }, loose.map(renderItem))
         }
         return h(
@@ -3838,24 +4052,6 @@ function groupTables(tables) {
                   renderGroupCreate(),
                   h('span', { className: 'dbmcp-list-spacer' }),
                   h('span', { className: 'dbmcp-pill' }, t('sources.count').replace('{n}', String(sources.length))),
-                  selected.length > 0
-                    ? h('span', { className: 'dbmcp-hint' }, t('bulk.selected').replace('{n}', String(selected.length)))
-                    : null,
-                  selected.length > 0
-                    ? h(
-                        'button',
-                        {
-                          type: 'button',
-                          className: 'dbmcp-btn is-small is-danger',
-                          disabled: busy,
-                          onClick: () => bulkDelete(),
-                          onBlur: () => setPendingBulkDelete(false),
-                        },
-                        pendingBulkDelete
-                          ? t('bulk.deleteConfirm').replace('{n}', String(selected.length))
-                          : t('bulk.delete'),
-                      )
-                    : null,
                   h('button', { type: 'button', className: 'dbmcp-btn is-small', disabled: busy, onClick: load }, t('action.refresh')),
                 ),
                 renderBulk(),

@@ -102,7 +102,12 @@ function render(name, factory, options) {
     check(`${name}: advanced block`, (details.length > 0) === options.details, `got ${details.length}`)
   }
   for (const label of options.labels || []) {
-    const found = collect(tree, (node) => node.type === 'label' && String(node.children[0]) === label)
+    const found = collect(
+      tree,
+      (node) =>
+        (node.type === 'label' || (node.type === 'span' && node.props && node.props.className === 'dbmcp-form-label')) &&
+        String(node.children[0]) === label,
+    )
     check(`${name}: label ${label}`, found.length > 0)
   }
   return tree
@@ -122,7 +127,9 @@ const sqliteTree = render(
 )
 if (sqliteTree) {
   const summary = collect(sqliteTree, (node) => node.type === 'summary')
-  check('create form: more-settings summary', summary.length === 1 && String(summary[0].children[0]) === 'form.more')
+  check('create form: more-settings summary', summary.length === 1 && texts(summary[0]).includes('form.more'))
+  check('create form: smart-parsing tag', texts(sqliteTree).includes('form.smart'))
+  check('create form: footer hint', texts(sqliteTree).includes('form.autoApply'))
 }
 
 const pgDraft = emptyDraft()

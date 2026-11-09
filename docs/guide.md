@@ -74,15 +74,17 @@ expandable **Error details** block either way.
 ## Adding a source
 
 The form is as small as DBeaver's connection dialog: **connection string**, **user**,
-**password** (with a *save password* box). Pasting fills type, host, port,
-database/service, name and identifier; the derived values only appear under
-**More settings**, together with schema, SID, SSL mode, charset and the read-only
-switch.
+**password** (with a *save password* box). The string field is marked *smart parsing*
+and fills type, host, port, database/service, name and identifier as you paste. The
+derived values only appear under **More settings** — name, group and identifier in one
+row, then the engine, the connection fields and the read-only switch.
 
 The connection string, the user and the password are required for every engine but
 SQLite (which needs only the file): saving with one of them empty stops at the form,
 marks the empty field in red and leaves your typing alone. Editing an existing source
-may leave the password empty — that keeps the stored one.
+may leave the password empty — that keeps the stored one. The footer repeats where a
+saved source goes: it is live in the panel at once and registered with the local MCP
+server, so the agent can use it without a restart.
 
 Accepted shapes — a DSN, a JDBC URL, an Oracle TNS descriptor, a JDBC thin
 descriptor, or a bare database file:
@@ -179,10 +181,15 @@ Every source carries an optional **group** label, editable under *More settings*
 - **Create** — type a name in **New group**.
 - **Rename** — double-click the group name; **delete** drops the label from its
   members.
+- **Collapse** — the triangle next to the group name folds the section; an empty group
+  stays visible as a drop target.
 - **Move** — drag a source row onto a group, or onto **Ungrouped** to clear it.
+- **Reorder** — drag a row onto another row: the top half of the target puts it before,
+  the bottom half after. Dropping across groups re-groups and repositions in one go.
 - **Rename a source** — double-click its name; the id never changes.
 - **Select** — each group header has a select-all box, so grouped sources join bulk
-  work exactly like loose ones.
+  work exactly like loose ones. A row itself is selected by its checkbox (the row body
+  no longer toggles, so double-click stays free for renaming).
 
 With a selection made, the bulk bar can test, flip read-only, move into a group, or
 delete (two-step confirmation).
