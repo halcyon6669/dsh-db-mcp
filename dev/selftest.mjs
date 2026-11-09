@@ -88,6 +88,13 @@ try {
   check('the same endpoint is not saved twice', twin.status === 409, twin.body.error)
   check('the duplicate error names the existing row', twin.body.existingId === 'chinook', twin.body.existingId)
 
+  // The identity a save compares is host + port + database + user, so a second
+  // account on the same server is a different source while the same account is not.
+  const identity = host.__test && host.__test.sourceIdentity
+  const account = (user) => identity('mysql', { host: '10.1.2.3', port: 3306, database: 'shop', user }, user)
+  check('identity treats the same account as one endpoint', account('demo') === account('demo'))
+  check('identity separates two accounts on one server', account('demo') !== account('reporter'))
+
   const scan = await call('GET', '/dbeaver/scan')
   const all = (scan.body.sources || []).flatMap((source) => source.connections)
   check('dbeaver scan finds the sample connection', all.some((entry) => entry.kind === 'sqlite'), `${all.length} connection(s)`)
