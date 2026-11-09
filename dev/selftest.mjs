@@ -23,6 +23,7 @@ await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
 const base = `http://127.0.0.1:${server.address().port}`
 
 const results = []
+const sqliteFile = join(process.env.APPDATA || '', 'DBeaverData', 'workspace6', '.metadata', 'sample-database-sqlite-1', 'Chinook.db')
 function check(name, condition, detail) {
   results.push({ name, ok: Boolean(condition), detail })
   console.log(`${condition ? 'ok  ' : 'FAIL'} ${name}${detail ? ` — ${detail}` : ''}`)
@@ -325,6 +326,45 @@ try {
   )
   const unknownGroup = await call('POST', '/groups/delete', { name: 'nope' })
   check('deleting an unknown group is a 404', unknownGroup.status === 404, unknownGroup.body.error)
+
+  const first = await call('POST', '/datasources/save', {
+    id: 'order-a',
+    name: 'Order A',
+    kind: 'sqlite',
+    config: { file: sqliteFile },
+    readOnly: true,
+  })
+  await call('POST', '/datasources/save', {
+    id: 'order-b',
+    name: 'Order B',
+    kind: 'sqlite',
+    config: { file: sqliteFile },
+    readOnly: true,
+  })
+  const before = await call('GET', '/datasources')
+  const beforeOrder = before.body.datasources.map((item) => item.id)
+  const reordered = await call('POST', '/datasources/reorder', { ids: [...beforeOrder].reverse() })
+  const afterOrder = reordered.body.datasources.map((item) => item.id)
+  check(
+    'reorder stores the requested order',
+    reordered.status === 200 && afterOrder[0] === beforeOrder[beforeOrder.length - 1],
+    `${beforeOrder.join(',')} -> ${afterOrder.join(',')}`,
+  )
+  check(
+    'reorder keeps every source',
+    afterOrder.length === beforeOrder.length && beforeOrder.every((id) => afterOrder.includes(id)),
+    afterOrder.join(','),
+  )
+  const partial = await call('POST', '/datasources/reorder', { ids: [afterOrder[0]] })
+  check(
+    'reorder keeps the sources it was not told about',
+    partial.status === 200 && partial.body.datasources.length === afterOrder.length,
+    String(partial.body.datasources.length),
+  )
+  const emptyReorder = await call('POST', '/datasources/reorder', { ids: [] })
+  check('reorder needs at least one id', emptyReorder.status === 400, emptyReorder.body.error)
+  await call('POST', '/datasources/delete', { id: 'order-a' })
+  await call('POST', '/datasources/delete', { id: first.body.id ? 'order-b' : 'order-b' })
 } finally {
   await new Promise((resolve) => server.close(resolve))
   const failed = results.filter((entry) => !entry.ok)

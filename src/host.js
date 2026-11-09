@@ -1229,6 +1229,30 @@ export function createHost(options = {}) {
     }
   }
 
+  /** Reorder the registry so the list keeps the order the user dragged it into. */
+  async function reorderDatasources(payload) {
+    const ids = Array.isArray(payload.ids) ? payload.ids.map((id) => trimmed(id)).filter(Boolean) : []
+    if (ids.length === 0) return { status: 400, body: { ok: false, error: 'ids must be a non-empty array' } }
+
+    const registry = await readRegistry()
+    if (registry.error) return { status: 500, body: { ok: false, error: registry.error } }
+    const byId = new Map(registry.datasources.map((item) => [item.id, item]))
+    const ordered = []
+    for (const id of ids) {
+      const item = byId.get(id)
+      if (!item) continue
+      ordered.push(item)
+      byId.delete(id)
+    }
+    for (const item of byId.values()) ordered.push(item)
+    await writeRegistry(ordered, registry.groups)
+    const { secrets } = await readSecrets()
+    return {
+      status: 200,
+      body: { ok: true, datasources: ordered.map((item) => publicProfile(item, secrets)) },
+    }
+  }
+
   /**
    * User-created groups. A group is just a name shared by some sources, so
    * creating one writes an empty group, renaming rewrites the members and
@@ -1586,6 +1610,10 @@ export function createHost(options = {}) {
       }
       if (route === '/groups/delete') {
         const result = await deleteGroup(payload)
+        return sendJson(response, result.status, result.body)
+      }
+      if (route === '/datasources/reorder') {
+        const result = await reorderDatasources(payload)
         return sendJson(response, result.status, result.body)
       }
       if (route === '/dbeaver/import') {

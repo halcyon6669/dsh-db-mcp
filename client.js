@@ -1268,25 +1268,31 @@ window.__ModuleLoader__.load({
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        width: 18px;
+        width: 14px;
         height: 18px;
-        flex: 0 0 18px;
+        flex: 0 0 14px;
         padding: 0;
         border: none;
-        border-radius: 5px;
+        border-radius: 4px;
         background: transparent;
         color: var(--dsw-alias-label-secondary);
-        font-family: inherit;
-        font-size: 12px;
-        line-height: 1;
         cursor: pointer;
-        transition: transform 120ms ease, color 120ms ease;
+      }
+      .dbmcp-fold::before {
+        content: '';
+        display: block;
+        width: 0;
+        height: 0;
+        border-style: solid;
+        border-width: 4.5px 0 4.5px 6.5px;
+        border-color: transparent transparent transparent currentColor;
+        transition: transform 130ms ease;
       }
       .dbmcp-fold:hover {
         color: var(--dsw-alias-label-primary);
       }
-      .dbmcp-fold.is-folded {
-        transform: rotate(-90deg);
+      .dbmcp-fold.is-open::before {
+        transform: rotate(90deg);
       }
       .dbmcp-card-actions {
         display: flex;
@@ -1322,6 +1328,9 @@ window.__ModuleLoader__.load({
       }
       .dbmcp-item.is-dragging {
         opacity: 0.55;
+      }
+      .dbmcp-item.is-drop-before {
+        box-shadow: 0 -2px 0 0 var(--dsw-alias-brand-primary);
       }
       .dbmcp-item.is-taken {
         opacity: 0.6;
@@ -2960,6 +2969,7 @@ function groupTables(tables) {
       const [pendingGroupDelete, setPendingGroupDelete] = React.useState(null)
       const [draggingId, setDraggingId] = React.useState(null)
       const [dragOverGroup, setDragOverGroup] = React.useState(null)
+      const [dropBefore, setDropBefore] = React.useState(null)
       const [renamingSource, setRenamingSource] = React.useState(null)
       const [query, setQuery] = React.useState('')
       const [filter, setFilter] = React.useState('all')
@@ -3286,6 +3296,25 @@ function groupTables(tables) {
         }
       }
 
+      /** Dropping a row onto another row: adopt its group, then sit right above it. */
+      const dropOnRow = async (draggedId, target) => {
+        const dragged = sources.find((item) => item.id === draggedId)
+        if (!dragged || dragged.id === target.id) return
+        try {
+          if (String(dragged.group || '').trim() !== String(target.group || '').trim()) {
+            await apiPost('/datasources/bulk', { action: 'group', ids: [draggedId], group: String(target.group || '').trim() })
+          }
+          const ids = sources.map((item) => item.id).filter((id) => id !== draggedId)
+          const at = ids.indexOf(target.id)
+          ids.splice(at < 0 ? ids.length : at, 0, draggedId)
+          await apiPost('/datasources/reorder', { ids })
+          setDraggingId(null)
+          load()
+        } catch (error) {
+          reportError(error)
+        }
+      }
+
       const toggleGroup = (items) => {
         const ids = items.map((item) => item.id)
         const allChecked = ids.length > 0 && ids.every((id) => selected.includes(id))
@@ -3316,8 +3345,23 @@ function groupTables(tables) {
               'dbmcp-item' +
               (checked ? ' is-selected' : '') +
               (draggingId === source.id ? ' is-dragging' : '') +
+              (dropBefore === source.id ? ' is-drop-before' : '') +
               (failed ? ' is-failed' : ''),
             key: source.id,
+            onDragOver: (event) => {
+              if (!draggingId || draggingId === source.id) return
+              event.preventDefault()
+              event.stopPropagation()
+              if (dropBefore !== source.id) setDropBefore(source.id)
+            },
+            onDragLeave: () => setDropBefore((prev) => (prev === source.id ? null : prev)),
+            onDrop: (event) => {
+              event.preventDefault()
+              event.stopPropagation()
+              setDropBefore(null)
+              if (!draggingId || draggingId === source.id) return
+              void dropOnRow(draggingId, source)
+            },
           },
           h(
             'div',
@@ -3532,17 +3576,6 @@ function groupTables(tables) {
           h(
             'header',
             { className: 'dbmcp-group-head' },
-            h(
-              'button',
-              {
-                type: 'button',
-                className: 'dbmcp-fold' + (folded ? ' is-folded' : ''),
-                'aria-expanded': !folded,
-                title: folded ? t('sources.failedExpand') : t('sources.failedCollapse'),
-                onClick: () => toggleFolded(name),
-              },
-              '⌄',
-            ),
             h('input', {
               type: 'checkbox',
               className: 'dbmcp-group-pick',
@@ -3550,6 +3583,14 @@ function groupTables(tables) {
               onChange: () => toggleGroup(items),
               title: t('group.selectAll'),
               'aria-label': t('group.selectAll'),
+            }),
+            h('button', {
+              type: 'button',
+              className: 'dbmcp-fold' + (folded ? '' : ' is-open'),
+              'aria-expanded': !folded,
+              'aria-label': name || t('group.unassigned'),
+              title: folded ? t('sources.failedExpand') : t('sources.failedCollapse'),
+              onClick: () => toggleFolded(name),
             }),
             renaming
               ? h(
@@ -3647,7 +3688,9 @@ function groupTables(tables) {
           if (!buckets.has(key)) buckets.set(key, [])
           buckets.get(key).push(source)
         }
-        const order = groupNames.filter((name) => (buckets.get(name) || []).length > 0)
+        /* An empty group still earns its section: it is the drop target for "put this here". */
+        const narrowing = filter !== 'all' || query.trim() !== ''
+        const order = groupNames.filter((name) => !narrowing || (buckets.get(name) || []).length > 0)
         const loose = buckets.get('') || []
         if (loose.length > 0) order.push('')
         if (order.length === 1 && !order[0]) {
