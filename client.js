@@ -1059,6 +1059,50 @@ window.__ModuleLoader__.load({
         font-size: 12px;
         min-height: 24px;
       }
+      .dbmcp-status-row.is-filters {
+        gap: 12px;
+      }
+      .dbmcp-stats {
+        display: inline-flex;
+        align-items: center;
+        gap: 14px;
+        padding: 4px 14px;
+        border: 1px solid var(--dsw-alias-border-l1);
+        border-radius: 999px;
+        color: var(--dsw-alias-label-secondary);
+        white-space: nowrap;
+      }
+      .dbmcp-stat {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .dbmcp-stat::before {
+        content: none;
+      }
+      .dbmcp-stat.is-ok::before,
+      .dbmcp-stat.is-error::before {
+        content: '';
+        width: 6px;
+        height: 6px;
+        flex: 0 0 6px;
+        border-radius: 50%;
+        background: currentColor;
+      }
+      .dbmcp-stat.is-ok {
+        color: var(--dsw-alias-state-success-primary);
+      }
+      .dbmcp-stat.is-error {
+        color: var(--dsw-alias-state-error-primary);
+      }
+      .dbmcp-stat-sep {
+        width: 1px;
+        height: 11px;
+        background: var(--dsw-alias-border-l2);
+      }
+      .dbmcp-status-spacer {
+        flex: 1 1 auto;
+      }
       .dbmcp-status-label {
         font-weight: 600;
         color: var(--dsw-alias-label-primary);
@@ -1092,7 +1136,6 @@ window.__ModuleLoader__.load({
         align-items: center;
         gap: 10px;
         flex-wrap: wrap;
-        margin-left: 10px;
       }
       .dbmcp-chip-icon {
         font-size: 12px;
@@ -2770,23 +2813,34 @@ function groupTables(tables) {
         { className: 'dbmcp-status-row' },
         h('span', { className: 'dbmcp-dot ' + (mcpReady ? 'is-ok' : 'is-error') }),
         h('span', { className: 'dbmcp-status-label' }, mcpReady ? t('status.mcpOk') : t('status.mcpDown')),
-        h('span', { className: 'dbmcp-status-sep' }),
-        h('span', { className: 'dbmcp-hint' }, t('status.total').replace('{n}', String(sources.length))),
-        failed > 0
-          ? h('span', { className: 'dbmcp-status-dot is-ok' }, t('status.healthy').replace('{n}', String(healthy)))
-          : h('span', { className: 'dbmcp-status-dot is-ok' }, t('status.healthy').replace('{n}', String(healthy))),
-        failed > 0
-          ? h(
-              'span',
-              { className: 'dbmcp-status-dot is-error' },
-              t('status.failing').replace('{n}', String(failed)),
-              ' ',
-              t('status.failingNames').replace(
-                '{names}',
-                failedSources.map((source) => source.name || source.id).join(', '),
-              ),
-            )
-          : null,
+        h(
+          'span',
+          { className: 'dbmcp-stats' },
+          h('span', { className: 'dbmcp-stat' }, t('status.total').replace('{n}', String(sources.length))),
+          h('span', { className: 'dbmcp-stat-sep' }),
+          h(
+            'span',
+            { className: 'dbmcp-stat is-ok' },
+            t('status.healthy').replace('{n}', String(healthy)),
+          ),
+          failed > 0 ? h('span', { className: 'dbmcp-stat-sep' }) : null,
+          failed > 0
+            ? h(
+                'span',
+                { className: 'dbmcp-stat is-error' },
+                t('status.failing').replace('{n}', String(failed)),
+                ' ',
+                t('status.failingNames').replace(
+                  '{names}',
+                  failedSources.map((source) => source.name || source.id).join(', '),
+                ),
+              )
+            : null,
+        ),
+      ),
+      h(
+        'div',
+        { className: 'dbmcp-status-row is-filters' },
         h(
           'div',
           { className: 'dbmcp-chips' },
@@ -2805,13 +2859,14 @@ function groupTables(tables) {
             ),
           ),
         ),
+        h('span', { className: 'dbmcp-status-spacer' }),
+        h('div', { className: 'dbmcp-status-search' }, h(TextInput, {
+          value: query,
+          onChange: setQuery,
+          placeholder: t('sources.searchPlaceholder'),
+          title: t('sources.searchPlaceholder'),
+        })),
       ),
-      h('div', { className: 'dbmcp-status-search' }, h(TextInput, {
-        value: query,
-        onChange: setQuery,
-        placeholder: t('sources.searchPlaceholder'),
-        title: t('sources.searchPlaceholder'),
-      })),
     )
   }
 

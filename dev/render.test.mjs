@@ -321,6 +321,10 @@ if (stripTree) {
   check('strip: the failure chip is flagged', /is-warn/.test(String(chips[3].props.className)))
   const labelsText = texts(stripTree)
   check('strip: reports the failure count', labelsText.includes('status.failing'), labelsText.join('|'))
+  // Totals, healthy and failing live inside one outlined pill, not three loose spans.
+  const stats = collect(stripTree, (node) => node.props.className === 'dbmcp-stats')
+  const statParts = stats.length === 1 ? collect(stats[0], (node) => /dbmcp-stat( |$)/.test(String(node.props.className)) && !/sep/.test(String(node.props.className))) : []
+  check('strip: the three counters share one pill', statParts.length === 3, `stats=${stats.length} parts=${statParts.length}`)
   check('strip: search box present', collect(stripTree, (node) => node.type === 'input').length === 1)
   // The masthead already carries the version, so the strip must not repeat it.
   const versionPill = collect(stripTree, (node) => node.props.className === 'dbmcp-pill')
