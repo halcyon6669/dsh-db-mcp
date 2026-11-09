@@ -660,6 +660,7 @@ window.__ModuleLoader__.load({
         color: var(--dsw-alias-label-secondary);
         font-variant-numeric: tabular-nums;
         font-size: 12px;
+        white-space: nowrap;
       }
       .dbmcp-audit-tool {
         font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -1465,14 +1466,19 @@ window.__ModuleLoader__.load({
 
     function parseTns(text) {
       const config = baseConfig('oracle')
-      const host = /\(\s*HOST\s*=\s*([^)]+)\)/i.exec(text)
-      const port = /\(\s*PORT\s*=\s*([^)]+)\)/i.exec(text)
-      const service = /\(\s*SERVICE_NAME\s*=\s*([^)]+)\)/i.exec(text)
-      const sid = /\(\s*SID\s*=\s*([^)]+)\)/i.exec(text)
-      config.host = host ? host[1].trim() : 'localhost'
-      config.port = port ? port[1].trim() : '1521'
-      config.serviceName = service ? service[1].trim() : ''
-      config.sid = sid ? sid[1].trim() : ''
+      /**
+       * `DESCRIPTION_LIST` wraps `ADDRESS_LIST` wraps `ADDRESS`, so the values are
+       * found by scanning for the named parameter instead of matching a shape.
+       * Quotes are optional in TNS, and `PORT` may sit next to its `HOST`.
+       */
+      const param = (name) => {
+        const match = new RegExp(`\\(\\s*${name}\\s*=\\s*([^()]+?)\\s*\\)`, 'i').exec(text)
+        return match ? stripQuotes(match[1].trim()) : ''
+      }
+      config.host = param('HOST') || 'localhost'
+      config.port = param('PORT') || '1521'
+      config.serviceName = param('SERVICE_NAME')
+      config.sid = param('SID')
       if (!config.serviceName && !config.sid) return { ok: false, code: 'tns' }
       return { ok: true, kind: 'oracle', config, password: '', name: config.serviceName || config.sid }
     }
@@ -1523,7 +1529,10 @@ window.__ModuleLoader__.load({
         const rest = raw.slice(5)
         const restLower = rest.toLowerCase()
         if (restLower.startsWith('sqlite:')) return parseSqliteFile(rest.slice('sqlite:'.length))
-        if (restLower.startsWith('oracle:thin:@')) return parseOracleThin(rest.slice('oracle:thin:@'.length))
+        if (restLower.startsWith('oracle:thin:@')) {
+          const body = rest.slice('oracle:thin:@'.length)
+          return /^\s*\(/.test(body) ? parseTns(body) : parseOracleThin(body)
+        }
         if (restLower.startsWith('postgresql://')) return fromUrl('postgres', rest.slice('postgresql:'.length))
         if (restLower.startsWith('opengauss://')) return fromUrl('gauss', rest.slice('opengauss:'.length))
         if (restLower.startsWith('gaussdb://')) return fromUrl('gauss', rest.slice('gaussdb:'.length))
@@ -1544,6 +1553,7 @@ window.__ModuleLoader__.load({
         return { ok: false, code: 'scheme' }
       }
 
+      if (/^@?\s*\(/.test(raw)) return parseTns(raw)
       if (raw.startsWith('@') || /^[\w.-]+:\d{2,5}[:/]/.test(raw)) return parseOracleThin(raw)
       if (!raw.includes('://') && /\.(db|sqlite3?|db3)$/i.test(raw)) return parseSqliteFile(raw)
       if (/^([a-z]:[\\/]|\\\\|\/)/i.test(raw)) return parseSqliteFile(raw)
@@ -1582,25 +1592,28 @@ window.__ModuleLoader__.load({
 
     /**
      * The audit log keeps UTC ISO stamps so the file stays comparable across
-     * machines; the panel shows them on the viewer's clock instead.
+     * machines; the panel shows them on the viewer's clock instead. Rows can span
+     * days and weeks, so the date travels with the time.
      */
     function localClock(value) {
-      const at = Date.parse(String(value || ''))
-      if (!Number.isFinite(at)) return String(value || '').slice(11, 19)
-      const date = new Date(at)
-      return [date.getHours(), date.getMinutes(), date.getSeconds()]
-        .map((part) => String(part).padStart(2, '0'))
-        .join(':')
-    }
-
-    /** Full local timestamp, used as the hover title of an audit row. */
-    function localStamp(value) {
-      const at = Date.parse(String(value || ''))
-      if (!Number.isFinite(at)) return String(value || '')
+      const text = String(value || '')
+      const at = Date.parse(text)
+      if (!Number.isFinite(at)) {
+        // A stamp we cannot parse is still worth showing: an ISO string keeps its
+        // date and time, anything else is printed as it came.
+        return text.length >= 19 ? text.slice(0, 19).replace('T', ' ') : text
+      }
       const date = new Date(at)
       const pad = (part) => String(part).padStart(2, '0')
       const day = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
-      return `${day} ${localClock(value)} ${zoneLabel()}`
+      return `${day} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+    }
+
+    /** Full local timestamp with the zone, used as the hover title of an audit row. */
+    function localStamp(value) {
+      const at = Date.parse(String(value || ''))
+      if (!Number.isFinite(at)) return String(value || '')
+      return `${localClock(value)} ${zoneLabel()}`
     }
 
     function pythonLabel(t, python) {
@@ -3341,6 +3354,8 @@ window.__ModuleLoader__.load({
         groupTables,
         tableMatches,
         connectionMatches,
+        localClock,
+        localStamp,
         Breadcrumbs,
         MainPanel,
       },

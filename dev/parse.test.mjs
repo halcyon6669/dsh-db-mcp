@@ -137,6 +137,28 @@ expectParse(
   { ok: true, kind: 'oracle', config: { host: 'tns-host', port: '1522', serviceName: 'svc1' }, name: 'svc1' },
 )
 
+// DBeaver stores RAC/load-balanced services as a nested DESCRIPTION_LIST; the
+// values sit three levels deep, so a shape-matching expression misses them.
+const oracleList =
+  'jdbc:oracle:thin:@(DESCRIPTION_LIST=(LOAD_BALANCE=ON)(FAILOVER=ON)' +
+  '(DESCRIPTION=(ENABLE=BROKEN)(CONNECT_TIMEOUT=3)(TRANSPORT_CONNECT_TIMEOUT=2)(RETRY_COUNT=2)' +
+  '(ADDRESS_LIST=(LOAD_BALANCE=ON)(FAILOVER=ON)' +
+  '(ADDRESS=(PROTOCOL=TCP)(HOST=10.0.0.9)(PORT=1521)))' +
+  '(CONNECT_DATA=(SERVICE_NAME=ORCLPDB1))))'
+
+expectParse('oracle jdbc DESCRIPTION_LIST', oracleList, {
+  ok: true,
+  kind: 'oracle',
+  config: { host: '10.0.0.9', port: '1521', serviceName: 'ORCLPDB1' },
+  name: 'ORCLPDB1',
+})
+
+expectParse(
+  'oracle bare DESCRIPTION_LIST',
+  '(DESCRIPTION_LIST=(DESCRIPTION=(ADDRESS=(PROTOCOL=TCP)(HOST=rac1)(PORT=1522))(CONNECT_DATA=(SID=RACDB))))',
+  { ok: true, kind: 'oracle', config: { host: 'rac1', port: '1522', sid: 'RACDB' }, name: 'RACDB' },
+)
+
 expectParse('jdbc sqlite path', 'jdbc:sqlite:C:\\data\\app.db', {
   ok: true,
   kind: 'sqlite',

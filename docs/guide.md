@@ -83,6 +83,7 @@ oracle://system:oracle@localhost:1521/XEPDB1
 jdbc:oracle:thin:@//ora:1521/ORCLPDB1        # service name
 jdbc:oracle:thin:@ora:1521:ORCL              # SID
 (DESCRIPTION=(ADDRESS=(HOST=tns-host)(PORT=1522))(CONNECT_DATA=(SERVICE_NAME=svc1)))
+jdbc:oracle:thin:@(DESCRIPTION_LIST=(DESCRIPTION=(ADDRESS_LIST=(ADDRESS=(PROTOCOL=TCP)(HOST=rac-1)(PORT=1521)))(CONNECT_DATA=(SERVICE_NAME=ORCLPDB1))))
 jdbc:opengauss://h1:30100,h2:30100,h3:30100/demo?targetServerType=master
 jdbc:sqlite:C:\data\app.db
 sqlite:///C:/data/chinook.db
@@ -191,9 +192,10 @@ time, tool, source, duration, row count, the SQL truncated to 2000 characters, a
 the error when it failed. Result rows are never logged. The file rotates to
 `audit.1.jsonl` at 512 KiB and logging can be switched off with `auditLog: false`.
 
-The panel shows the last dozen entries **on your own clock**; the file keeps UTC so
-it stays comparable across machines. Each stamp carries the full local timestamp in
-its tooltip.
+The panel shows the last dozen entries **on your own clock**, date included, so a
+call from yesterday is not mistaken for one from an hour ago; the file keeps UTC so
+it stays comparable across machines. Each stamp carries the same instant with its
+zone in the tooltip.
 
 ## Runtime layout
 

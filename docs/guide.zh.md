@@ -61,6 +61,7 @@ oracle://system:oracle@localhost:1521/XEPDB1
 jdbc:oracle:thin:@//ora:1521/ORCLPDB1        # 服务名
 jdbc:oracle:thin:@ora:1521:ORCL              # SID
 (DESCRIPTION=(ADDRESS=(HOST=tns-host)(PORT=1522))(CONNECT_DATA=(SERVICE_NAME=svc1)))
+jdbc:oracle:thin:@(DESCRIPTION_LIST=(DESCRIPTION=(ADDRESS_LIST=(ADDRESS=(PROTOCOL=TCP)(HOST=rac-1)(PORT=1521)))(CONNECT_DATA=(SERVICE_NAME=ORCLPDB1))))
 jdbc:opengauss://h1:30100,h2:30100,h3:30100/demo?targetServerType=master
 jdbc:sqlite:C:\data\app.db
 sqlite:///C:/data/chinook.db
@@ -124,7 +125,7 @@ Python 服务在启动时读取全局开关，开关一动 Host 就重启它。�
 
 每次 MCP 工具调用都会往 `<runtime>/logs/audit.jsonl`（0600）追加一行 JSON：时间、工具、数据源、耗时、行数、截断到 2000 字符的 SQL，以及失败时的错误。结果行本身从不记录。文件到 512 KiB 会轮转为 `audit.1.jsonl`，日志可用 `auditLog: false` 关闭。
 
-面板按 **你本机的时钟** 显示最近十几次记录；文件里保存的是 UTC，以便跨机器比较。每条记录的时间戳在悬停时会显示完整的本地时间。
+面板按 **你本机的时钟** 显示最近十几次记录，**带日期**，昨天和一小时前的调用不会混在一起；文件里保存的是 UTC，以便跨机器比较。悬停时显示同一时刻与时区。
 
 ## 运行时目录
 

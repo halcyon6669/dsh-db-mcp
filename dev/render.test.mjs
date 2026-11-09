@@ -210,6 +210,7 @@ check(
 )
 
 const { Breadcrumbs } = mod.__test
+const { localClock, localStamp } = mod.__test
 const crumbs = render('breadcrumbs', () =>
   Breadcrumbs({ t, trail: [{ label: 'panel.title', onSelect: noop }, { label: 'form.new' }] }),
 )
@@ -231,6 +232,13 @@ const readText = renderResult({ ok: true, sql: 'select 1 as n', columns: ['n'], 
 check('renderer: select keeps the table shape', readText.startsWith('n\n') && readText.endsWith('(1 row(s), 1ms)'), readText)
 const ddlText = renderResult({ ok: true, sql: 'insert into t values (1)', columns: [], rows: [], rowCount: 0, elapsedMs: 2 })
 check('renderer: a write without a rowcount still renders as a result set', ddlText.includes('(0 row(s), 2ms)'), ddlText)
+
+// The audit card may hold entries from earlier days, so a bare clock is not enough.
+const clock = localClock('2026-11-09T11:29:38.782Z')
+check('audit clock carries the date', /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(clock), clock)
+const stamp = localStamp('2026-11-09T11:29:38.782Z')
+check('audit stamp appends the zone', /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} UTC[+-]\d{2}:\d{2}$/.test(stamp), stamp)
+check('audit clock survives a malformed stamp', localClock('not-a-date') === 'not-a-date', localClock('not-a-date'))
 
 const total = passed + failures.length
 if (failures.length > 0) {

@@ -154,6 +154,27 @@ try {
   const oracleSid = host.__test.parseOracleUrl('jdbc:oracle:thin:@ora.example.com:1521:ORCL')
   check('oracle thin SID url still parses', oracleSid?.sid === 'ORCL' && oracleSid.serviceName === '', JSON.stringify(oracleSid))
 
+  // DBeaver writes RAC services with ADDRESS_LIST inside DESCRIPTION_LIST; the
+  // importer must still find the host, port and service.
+  const nested = host.__test.mapDBeaverConnection({
+    name: 'ora-rac',
+    provider: 'oracle',
+    driver: 'oracle_thin',
+    configuration: {
+      configurationType: 'URL',
+      url:
+        'jdbc:oracle:thin:@(DESCRIPTION_LIST=(LOAD_BALANCE=ON)(FAILOVER=ON)' +
+        '(DESCRIPTION=(ENABLE=BROKEN)(CONNECT_TIMEOUT=3)(RETRY_COUNT=2)' +
+        '(ADDRESS_LIST=(LOAD_BALANCE=ON)(FAILOVER=ON)(ADDRESS=(PROTOCOL=TCP)(HOST=rac-1)(PORT=1521)))' +
+        '(CONNECT_DATA=(SERVICE_NAME=ORCLPDB1))))',
+    },
+  })
+  check(
+    'DBeaver oracle ADDRESS_LIST maps to a source',
+    nested.ok && nested.kind === 'oracle' && nested.config.host === 'rac-1' && nested.config.serviceName === 'ORCLPDB1',
+    JSON.stringify(nested),
+  )
+
   const importable = all.find((entry) => entry.importable && entry.kind === 'sqlite')
   if (importable) {
     // `chinook` already points at the same file and account, so the scan must
