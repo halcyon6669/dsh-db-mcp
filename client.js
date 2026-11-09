@@ -1483,7 +1483,9 @@ window.__ModuleLoader__.load({
         display: flex;
         flex-direction: column;
         gap: 20px;
-        max-width: 900px;
+        width: 100%;
+        max-width: none;
+        box-sizing: border-box;
         font-size: 13px;
       }
       .dbmcp-form-section {
@@ -1499,10 +1501,10 @@ window.__ModuleLoader__.load({
         align-items: start;
       }
       .dbmcp-form-section.is-two {
-        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        grid-template-columns: repeat(2, minmax(0, 1fr));
       }
       .dbmcp-form-section.is-three {
-        grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+        grid-template-columns: repeat(3, minmax(0, 1fr));
       }
       .dbmcp-form-cell {
         display: flex;
@@ -4185,6 +4187,12 @@ function groupTables(tables) {
             ),
           ),
         )
+      }
+
+      /* Sub-views get the same full-width column the list uses: a bare Card in
+         the panel's flex row would shrink to the intrinsic width of its inputs. */
+      if (view.mode === 'create' || view.mode === 'edit' || view.mode === 'schema' || view.mode === 'import') {
+        body = h('div', { className: 'dbmcp-grid is-single' }, body)
       }
 
       return h(
