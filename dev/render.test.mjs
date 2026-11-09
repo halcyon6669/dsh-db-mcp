@@ -277,6 +277,18 @@ check('audit clock survives a malformed stamp', localClock('not-a-date') === 'no
 // The list strip classifies rows by their last stored probe, so the classifier
 // has to treat "never probed" and "probe ok" very differently from a failure.
 const { kindBadge, probeFailed, sourceMatches, probeReport, reportTarget } = mod.__test
+const { sectionOrder } = mod.__test
+const looseRow = [{ id: 'sq', name: 'Chinook', kind: 'sqlite', group: '' }]
+const groupedRow = [{ id: 'pg', name: 'pg', kind: 'postgres', group: 'docker' }]
+check('sections: the ungrouped filter still finds its rows', sectionOrder(['docker'], looseRow, true).join('|') === '')
+check(
+  'sections: a filtered group list drops empty groups',
+  sectionOrder(['docker', 'staging'], groupedRow, true).join('|') === 'docker',
+)
+check(
+  'sections: the whole list keeps every group plus ungrouped',
+  sectionOrder(['docker'], groupedRow, false).join('|') === 'docker|',
+)
 check('status: a failed probe is a failure', probeFailed({ lastProbe: { ok: false } }) === true)
 check('status: a healthy probe is not a failure', probeFailed({ lastProbe: { ok: true } }) === false)
 check('status: an untested source is not a failure', probeFailed({}) === false)

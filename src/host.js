@@ -1417,7 +1417,10 @@ export function createHost(options = {}) {
     }
 
     const { secrets } = await readSecrets()
-    const secret = profile.id ? secrets[profile.id] : null
+    // An inline probe has no registry entry, so the password typed into the form
+    // is the only one available; a saved source keeps using its stored secret.
+    const supplied = typeof payload.password === 'string' ? payload.password : ''
+    const secret = profile.id ? secrets[profile.id] : supplied ? { password: supplied } : null
     const result = await testProfile(profile, secret, probeOptions)
     const probe = {
       ok: result.ok,

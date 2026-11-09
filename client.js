@@ -696,22 +696,22 @@ window.__ModuleLoader__.load({
         border: 1px solid var(--dsw-alias-border-l1);
         border-radius: 12px;
         background: var(--dsw-alias-bg-layer-1);
-        padding: 16px 18px 18px;
+        padding: 8px 12px 10px;
         min-width: 0;
       }
       .dbmcp-audit-list {
         display: flex;
         flex-direction: column;
-        gap: 8px;
+        gap: 3px;
       }
       .dbmcp-audit {
         display: flex;
         flex-wrap: wrap;
         align-items: center;
-        gap: 8px;
-        padding: 10px 12px;
+        gap: 6px;
+        padding: 3px 8px;
         border: 1px solid var(--dsw-alias-border-l1);
-        border-radius: 10px;
+        border-radius: 8px;
         background: var(--dsw-alias-bg-layer-1);
         font-size: 13px;
         min-width: 0;
@@ -871,7 +871,7 @@ window.__ModuleLoader__.load({
       .dbmcp-schema-tablegrid th,
       .dbmcp-schema-tablegrid td {
         text-align: left;
-        padding: 8px 10px;
+        padding: 4px 8px;
         border-bottom: 1px solid var(--dsw-alias-border-l1);
         vertical-align: top;
       }
@@ -896,7 +896,7 @@ window.__ModuleLoader__.load({
         align-items: center;
         justify-content: space-between;
         gap: 10px;
-        margin-bottom: 12px;
+        margin-bottom: 6px;
       }
       .dbmcp-card-title {
         margin: 0;
@@ -928,7 +928,7 @@ window.__ModuleLoader__.load({
         line-height: 1.5;
       }
       .dbmcp-rows > * {
-        padding: 7px 0;
+        padding: 2px 0;
         border-bottom: 1px solid var(--dsw-alias-border-l1);
         min-width: 0;
       }
@@ -974,7 +974,7 @@ window.__ModuleLoader__.load({
       .dbmcp-list {
         display: flex;
         flex-direction: column;
-        gap: 8px;
+        gap: 3px;
         margin: 0;
         padding: 0;
         list-style: none;
@@ -982,11 +982,11 @@ window.__ModuleLoader__.load({
       .dbmcp-item {
         display: flex;
         flex-direction: column;
-        gap: 8px;
+        gap: 4px;
         border: 1px solid var(--dsw-alias-border-l1);
         border-radius: 10px;
         background: var(--dsw-alias-bg-layer-2);
-        padding: 10px 12px;
+        padding: 5px 8px;
         font-size: 13px;
       }
       .dbmcp-item-row {
@@ -1100,9 +1100,9 @@ window.__ModuleLoader__.load({
       .dbmcp-status {
         display: flex;
         flex-direction: column;
-        gap: 8px;
-        margin-bottom: 14px;
-        padding: 10px 12px;
+        gap: 4px;
+        margin-bottom: 6px;
+        padding: 5px 10px;
         border: 1px solid var(--dsw-alias-border-l1);
         border-radius: 10px;
         background: var(--dsw-alias-bg-layer-1);
@@ -1110,7 +1110,7 @@ window.__ModuleLoader__.load({
       .dbmcp-status-row {
         display: flex;
         align-items: center;
-        gap: 10px;
+        gap: 6px;
         flex-wrap: wrap;
         font-size: 12px;
         min-height: 24px;
@@ -1259,12 +1259,12 @@ window.__ModuleLoader__.load({
       .dbmcp-groups {
         display: flex;
         flex-direction: column;
-        gap: 16px;
+        gap: 4px;
       }
       .dbmcp-group {
         display: flex;
         flex-direction: column;
-        gap: 8px;
+        gap: 3px;
       }
       .dbmcp-group-head {
         display: flex;
@@ -1286,7 +1286,7 @@ window.__ModuleLoader__.load({
         align-items: center;
         gap: 8px;
         flex-wrap: wrap;
-        margin-bottom: 14px;
+        margin-bottom: 6px;
       }
       .dbmcp-list-head .dbmcp-card-title {
         margin-right: 4px;
@@ -1394,8 +1394,8 @@ window.__ModuleLoader__.load({
         align-items: center;
         flex-wrap: wrap;
         gap: 8px;
-        margin-bottom: 12px;
-        padding: 8px 10px;
+        margin-bottom: 6px;
+        padding: 4px 8px;
         border: 1px solid var(--dsw-alias-brand-primary);
         border-radius: 10px;
         background: var(--dsw-alias-bg-layer-1);
@@ -1504,7 +1504,7 @@ window.__ModuleLoader__.load({
       .dbmcp-form.is-page {
         display: flex;
         flex-direction: column;
-        gap: 20px;
+        gap: 8px;
         width: 100%;
         max-width: none;
         box-sizing: border-box;
@@ -2758,6 +2758,19 @@ const sourceMatches = (source, needle) => {
   return hay.includes(text)
 }
 
+/**
+ * Section order for the list. "Ungrouped" is a bucket like any other, but it is
+ * not a declared group, so it has to be added here — otherwise filtering on it
+ * renders nothing.
+ */
+function sectionOrder(groupNames, sources, narrowing) {
+  const names = groupNames.slice()
+  const loose = sources.some((source) => !String(source.group || '').trim())
+  if (loose) names.push('')
+  if (!narrowing) return names.indexOf('') === -1 ? [...names, ''] : names
+  return names.filter((name) => sources.some((source) => String(source.group || '').trim() === name))
+}
+
 function groupTables(tables) {
       const buckets = new Map()
       for (const table of tables || []) {
@@ -3975,11 +3988,8 @@ function groupTables(tables) {
         }
         /* An empty group still earns its section: it is the drop target for "put this here". */
         const narrowing = filter !== 'all' || query.trim() !== ''
-        const order = groupNames.filter((name) => !narrowing || (buckets.get(name) || []).length > 0)
+        const order = sectionOrder(groupNames, visibleSources, narrowing)
         const loose = buckets.get('') || []
-        /* "Ungrouped" is always on offer while the list is whole, so a row can be
-           dragged back out of a group into it. */
-        if (!narrowing) order.push('')
         /* A single unnamed bucket with rows in it needs no heading. */
         if (order.length === 1 && !order[0] && loose.length > 0) {
           return h('ul', { className: 'dbmcp-list' }, loose.map(renderItem))
@@ -4348,6 +4358,7 @@ function groupTables(tables) {
         reportTarget,
         StatusStrip,
         sourceMatches,
+        sectionOrder,
       },
       apply(ctx) {
         localeService = ctx.locale
