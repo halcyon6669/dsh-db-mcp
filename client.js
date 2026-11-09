@@ -2837,6 +2837,13 @@ function groupTables(tables) {
               )
             : null,
         ),
+        h('span', { className: 'dbmcp-status-spacer' }),
+        h('div', { className: 'dbmcp-status-search' }, h(TextInput, {
+          value: query,
+          onChange: setQuery,
+          placeholder: t('sources.searchPlaceholder'),
+          title: t('sources.searchPlaceholder'),
+        })),
       ),
       h(
         'div',
@@ -2859,13 +2866,6 @@ function groupTables(tables) {
             ),
           ),
         ),
-        h('span', { className: 'dbmcp-status-spacer' }),
-        h('div', { className: 'dbmcp-status-search' }, h(TextInput, {
-          value: query,
-          onChange: setQuery,
-          placeholder: t('sources.searchPlaceholder'),
-          title: t('sources.searchPlaceholder'),
-        })),
       ),
     )
   }
