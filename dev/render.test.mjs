@@ -57,6 +57,18 @@ function collect(tree, predicate) {
   return found
 }
 
+/** Every string child in the tree — walk() only visits objects, so text needs its own pass. */
+function texts(tree) {
+  const found = []
+  walk(tree, (node) => {
+    for (const child of node.children || []) {
+      if (typeof child === 'string') found.push(child)
+      else if (Array.isArray(child)) for (const item of child) if (typeof item === 'string') found.push(item)
+    }
+  })
+  return found
+}
+
 let passed = 0
 const failures = []
 function check(name, condition, extra) {
@@ -183,7 +195,7 @@ if (schemaView) {
   )
   check('schema view: no page-level back button (breadcrumb owns navigation)', backButton.length === 0, `got ${backButton.length}`)
   // The card header already names the source, so the view must not repeat it.
-  const repeated = collect(schemaView, (node) => typeof node === 'string' && node.includes('schema.title'))
+  const repeated = texts(schemaView).filter((text) => text.includes('schema.title'))
   check('schema view: the title appears once, in the card header', repeated.length === 0, `got ${repeated.length}`)
 }
 
@@ -254,6 +266,58 @@ check('audit clock carries the date', /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.te
 const stamp = localStamp('2026-11-09T11:29:38.782Z')
 check('audit stamp appends the zone', /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} UTC[+-]\d{2}:\d{2}$/.test(stamp), stamp)
 check('audit clock survives a malformed stamp', localClock('not-a-date') === 'not-a-date', localClock('not-a-date'))
+
+// The list strip classifies rows by their last stored probe, so the classifier
+// has to treat "never probed" and "probe ok" very differently from a failure.
+const { kindBadge, probeFailed, sourceMatches } = mod.__test
+check('status: a failed probe is a failure', probeFailed({ lastProbe: { ok: false } }) === true)
+check('status: a healthy probe is not a failure', probeFailed({ lastProbe: { ok: true } }) === false)
+check('status: an untested source is not a failure', probeFailed({}) === false)
+const pgBadge = kindBadge('postgres')
+check('status: engine badge keeps its brand colour', pgBadge.label === 'PG' && pgBadge.color === '#336791', JSON.stringify(pgBadge))
+const oddBadge = kindBadge('duckdb')
+check('status: unknown engines still get a badge', oddBadge.label === 'DU' && typeof oddBadge.color === 'string', JSON.stringify(oddBadge))
+const sample = { name: 'mysql', id: 'mysql', kind: 'mysql', target: '127.0.0.1:3306 / demo', group: 'docker', lastProbe: { ok: false, message: 'WinError 10061' } }
+check('status: search matches the name', sourceMatches(sample, 'mys') === true)
+check('status: search matches the target', sourceMatches(sample, '3306') === true)
+check('status: search matches the probe message', sourceMatches(sample, '10061') === true)
+check('status: search drops non-matches', sourceMatches(sample, 'oracle') === false)
+check('status: an empty search keeps everything', sourceMatches(sample, '   ') === true)
+
+const { StatusStrip } = mod.__test
+const stripTree = render('status strip', () =>
+  StatusStrip({
+    t,
+    data: { mcp: { phase: 'ready' }, plugin: { version: '0.7.5' } },
+    sources: [
+      { id: 'pg', name: 'PostgreSQL demo', kind: 'postgres', group: 'docker', lastProbe: { ok: true } },
+      { id: 'my', name: 'mysql', kind: 'mysql', group: 'docker', lastProbe: { ok: false, message: 'WinError 10061' } },
+      { id: 'sq', name: 'Chinook', kind: 'sqlite', group: '', lastProbe: { ok: true } },
+    ],
+    failedSources: [{ id: 'my', name: 'mysql' }],
+    groupNames: ['docker'],
+    filter: 'all',
+    setFilter: noop,
+    query: '',
+    setQuery: noop,
+  }),
+)
+if (stripTree) {
+  const chips = collect(stripTree, (node) => node.type === 'button' && String(node.props.className).startsWith('dbmcp-chip'))
+  const labels = chips.map((chip) => String(chip.children[0]))
+  check('strip: one chip per group plus all and failures', labels.join('|') === 'filter.all|docker|group.unassigned|filter.failed', labels.join('|'))
+  check(
+    'strip: chips carry counts',
+    chips.map((chip) => String(chip.children[1].children[0])).join(',') === '3,2,1,1',
+    chips.map((chip) => String(chip.children[1].children[0])).join(','),
+  )
+  check('strip: the failure chip is flagged', /is-warn/.test(String(chips[3].props.className)))
+  const labelsText = texts(stripTree)
+  check('strip: reports the failure count', labelsText.includes('status.failing'), labelsText.join('|'))
+  check('strip: search box present', collect(stripTree, (node) => node.type === 'input').length === 1)
+  const versionPill = collect(stripTree, (node) => node.props.className === 'dbmcp-pill')
+  check('strip: version pill', versionPill.length === 1 && String(versionPill[0].children[0]) === '0.7.5')
+}
 
 const total = passed + failures.length
 if (failures.length > 0) {

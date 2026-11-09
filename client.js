@@ -234,6 +234,21 @@ window.__ModuleLoader__.load({
         'schema.noMatch': 'No table matches this filter.',
         'schema.defaultSchema': 'default schema',
         'schema.readonlyNote': 'Read-only view: this page never runs SQL.',
+        'status.mcpOk': 'MCP server healthy',
+        'status.mcpDown': 'MCP server down',
+        'status.total': 'Total {n}',
+        'status.healthy': '{n} healthy',
+        'status.failing': '{n} failing',
+        'status.failingNames': '({names})',
+        'filter.all': 'All',
+        'filter.failed': 'Only failures',
+        'sources.searchPlaceholder': 'Search data sources…',
+        'sources.noMatch': 'No data source matches this filter.',
+        'sources.failedLine': 'Connection failed: {message}',
+        'sources.failedExpand': '(click to expand)',
+        'sources.failedCollapse': '(click to collapse)',
+        'sources.detail': 'Error details',
+        'action.diagnose': 'Diagnose',
       },
       zh: {
         'panel.title': '数据库',
@@ -420,6 +435,21 @@ window.__ModuleLoader__.load({
         'schema.noMatch': '没有匹配的表。',
         'schema.defaultSchema': '默认模式',
         'schema.readonlyNote': '只读视图：这个页面不会执行任何 SQL。',
+        'status.mcpOk': 'MCP 服务正常',
+        'status.mcpDown': 'MCP 服务未就绪',
+        'status.total': '总连接 {n}',
+        'status.healthy': '{n} 正常',
+        'status.failing': '{n} 异常',
+        'status.failingNames': '({names})',
+        'filter.all': '全部',
+        'filter.failed': '仅看异常',
+        'sources.searchPlaceholder': '搜索数据源…',
+        'sources.noMatch': '没有符合条件的数据源。',
+        'sources.failedLine': '连接失败：{message}',
+        'sources.failedExpand': '（点击展开详情）',
+        'sources.failedCollapse': '（点击收起详情）',
+        'sources.detail': '错误详情',
+        'action.diagnose': '诊断报错',
       },
     }
 
@@ -901,14 +931,180 @@ window.__ModuleLoader__.load({
       }
       .dbmcp-item {
         display: flex;
-        align-items: flex-start;
-        justify-content: space-between;
-        gap: 12px;
+        flex-direction: column;
+        gap: 8px;
         border: 1px solid var(--dsw-alias-border-l1);
         border-radius: 10px;
         background: var(--dsw-alias-bg-layer-2);
         padding: 10px 12px;
         font-size: 13px;
+      }
+      .dbmcp-item-row {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 10px;
+      }
+      .dbmcp-grip {
+        color: var(--dsw-alias-label-secondary);
+        opacity: 0.55;
+        font-size: 11px;
+        line-height: 20px;
+        letter-spacing: -2px;
+        cursor: grab;
+        user-select: none;
+      }
+      .dbmcp-kind-badge {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 26px;
+        height: 26px;
+        flex: 0 0 26px;
+        border-radius: 7px;
+        color: #fff;
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.02em;
+        text-transform: uppercase;
+      }
+      .dbmcp-item.is-failed {
+        border-color: var(--dsw-alias-state-error-primary);
+        border-left-width: 3px;
+        background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 8%, var(--dsw-alias-bg-layer-2));
+      }
+      .dbmcp-item-failure {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+        cursor: pointer;
+        color: var(--dsw-alias-state-error-primary);
+      }
+      .dbmcp-fail-dot {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 16px;
+        height: 16px;
+        flex: 0 0 16px;
+        border-radius: 50%;
+        background: var(--dsw-alias-state-error-primary);
+        color: var(--dsw-alias-bg-base);
+        font-size: 11px;
+        font-weight: 700;
+      }
+      .dbmcp-fail-text {
+        flex: 1 1 260px;
+        min-width: 0;
+        font-size: 12px;
+        overflow-wrap: anywhere;
+      }
+      .dbmcp-fail-detail {
+        border-radius: 8px;
+        border: 1px solid var(--dsw-alias-border-l1);
+        background: var(--dsw-alias-bg-layer-1);
+        padding: 8px 10px;
+      }
+      .dbmcp-fail-detail-head {
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--dsw-alias-label-secondary);
+        margin-bottom: 4px;
+      }
+      .dbmcp-fail-detail pre {
+        margin: 0;
+        font-size: 11px;
+        line-height: 1.5;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        color: var(--dsw-alias-label-primary);
+      }
+      .dbmcp-status {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        margin-bottom: 14px;
+        padding: 10px 12px;
+        border: 1px solid var(--dsw-alias-border-l1);
+        border-radius: 10px;
+        background: var(--dsw-alias-bg-layer-1);
+      }
+      .dbmcp-status-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+        font-size: 12px;
+      }
+      .dbmcp-status-label {
+        font-weight: 600;
+        color: var(--dsw-alias-label-primary);
+      }
+      .dbmcp-status-sep {
+        width: 1px;
+        height: 12px;
+        background: var(--dsw-alias-border-l2);
+      }
+      .dbmcp-status-dot {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        color: var(--dsw-alias-label-secondary);
+      }
+      .dbmcp-status-dot::before {
+        content: '';
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: currentColor;
+      }
+      .dbmcp-status-dot.is-ok {
+        color: var(--dsw-alias-state-success-primary);
+      }
+      .dbmcp-status-dot.is-error {
+        color: var(--dsw-alias-state-error-primary);
+      }
+      .dbmcp-chips {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-wrap: wrap;
+      }
+      .dbmcp-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        border: 1px solid transparent;
+        border-radius: 999px;
+        background: var(--dsw-alias-bg-layer-2);
+        color: var(--dsw-alias-label-secondary);
+        font-family: inherit;
+        font-size: 12px;
+        padding: 3px 10px;
+        cursor: pointer;
+      }
+      .dbmcp-chip:hover {
+        color: var(--dsw-alias-label-primary);
+      }
+      .dbmcp-chip.is-active {
+        background: var(--dsw-alias-label-primary);
+        border-color: var(--dsw-alias-label-primary);
+        color: var(--dsw-alias-bg-base);
+      }
+      .dbmcp-chip.is-warn {
+        color: var(--dsw-alias-state-error-primary);
+      }
+      .dbmcp-chip-count {
+        opacity: 0.75;
+      }
+      .dbmcp-status-search {
+        margin-left: auto;
+        flex: 0 1 240px;
+        min-width: 160px;
+      }
+      .dbmcp-status-search .dbmcp-input {
+        width: 100%;
       }
       .dbmcp-item.is-selected {
         border-color: var(--dsw-alias-brand-primary);
@@ -2040,7 +2236,36 @@ window.__ModuleLoader__.load({
     }
 
     /** Tables grouped by schema; the group order is stable and alphabetical. */
-    function groupTables(tables) {
+    /** Brand colours keep the four engines readable without an icon font. */
+const KIND_BADGE = {
+  postgres: { label: 'PG', color: '#336791' },
+  gauss: { label: 'GS', color: '#00a3a3' },
+  mysql: { label: 'MY', color: '#00758f' },
+  oracle: { label: 'OR', color: '#c74634' },
+  sqlite: { label: 'SQ', color: '#003b5c' },
+}
+
+const kindBadge = (kind) => {
+  const key = String(kind || '').trim().toLowerCase()
+  if (KIND_BADGE[key]) return KIND_BADGE[key]
+  const label = key ? key.slice(0, 2).toUpperCase() : '?'
+  return { label, color: 'var(--dsw-alias-label-secondary)' }
+}
+
+/** A stored probe that ended in failure is what the red row is about. */
+const probeFailed = (source) => Boolean(source && source.lastProbe && source.lastProbe.ok === false)
+
+const sourceMatches = (source, needle) => {
+  const text = String(needle || '').trim().toLowerCase()
+  if (!text) return true
+  const hay = [source.name, source.id, source.kind, source.target, source.group, source.lastProbe && source.lastProbe.message]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase()
+  return hay.includes(text)
+}
+
+function groupTables(tables) {
       const buckets = new Map()
       for (const table of tables || []) {
         const key = table.schema || ''
@@ -2452,7 +2677,75 @@ window.__ModuleLoader__.load({
       return h('nav', { className: 'dbmcp-crumbs', 'aria-label': t('panel.title') }, items)
     }
 
-    function MainPanel() {
+    /** Quiet strip above the list: bridge health, totals, filters and search. */
+  function StatusStrip(props) {
+    const { t, data, sources, failedSources, groupNames, filter, setFilter, query, setQuery } = props
+    if (!data) return null
+    const mcpReady = Boolean(data.mcp && data.mcp.phase === 'ready')
+    const failed = failedSources.length
+    const healthy = Math.max(sources.length - failed, 0)
+    const chips = [{ id: 'all', label: t('filter.all'), count: sources.length }]
+    for (const name of groupNames) {
+      const count = sources.filter((source) => String(source.group || '').trim() === name).length
+      chips.push({ id: 'group:' + name, label: name, count })
+    }
+    const loose = sources.filter((source) => !String(source.group || '').trim()).length
+    if (loose > 0) chips.push({ id: 'group:', label: t('group.unassigned'), count: loose })
+    if (failed > 0) chips.push({ id: 'failed', label: t('filter.failed'), count: failed, warn: true })
+    return h(
+      'div',
+      { className: 'dbmcp-status' },
+      h(
+        'div',
+        { className: 'dbmcp-status-row' },
+        h('span', { className: 'dbmcp-dot ' + (mcpReady ? 'is-ok' : 'is-error') }),
+        h('span', { className: 'dbmcp-status-label' }, mcpReady ? t('status.mcpOk') : t('status.mcpDown')),
+        h('span', { className: 'dbmcp-pill' }, data.plugin.version),
+        h('span', { className: 'dbmcp-status-sep' }),
+        h('span', { className: 'dbmcp-hint' }, t('status.total').replace('{n}', String(sources.length))),
+        failed > 0
+          ? h('span', { className: 'dbmcp-status-dot is-ok' }, t('status.healthy').replace('{n}', String(healthy)))
+          : h('span', { className: 'dbmcp-status-dot is-ok' }, t('status.healthy').replace('{n}', String(healthy))),
+        failed > 0
+          ? h(
+              'span',
+              { className: 'dbmcp-status-dot is-error' },
+              t('status.failing').replace('{n}', String(failed)),
+              ' ',
+              t('status.failingNames').replace(
+                '{names}',
+                failedSources.map((source) => source.name || source.id).join(', '),
+              ),
+            )
+          : null,
+      ),
+      h(
+        'div',
+        { className: 'dbmcp-chips' },
+        chips.map((chip) =>
+          h(
+            'button',
+            {
+              key: chip.id,
+              type: 'button',
+              className: 'dbmcp-chip' + (filter === chip.id ? ' is-active' : '') + (chip.warn ? ' is-warn' : ''),
+              onClick: () => setFilter(filter === chip.id ? 'all' : chip.id),
+            },
+            chip.label,
+            h('span', { className: 'dbmcp-chip-count' }, String(chip.count)),
+          ),
+        ),
+        h('div', { className: 'dbmcp-status-search' }, h(TextInput, {
+          value: query,
+          onChange: setQuery,
+          placeholder: t('sources.searchPlaceholder'),
+          title: t('sources.searchPlaceholder'),
+        })),
+      ),
+    )
+  }
+
+  function MainPanel() {
       const service = useLocale()
       const t = React.useMemo(() => (service ? service.bind(NS) : (key) => key), [service])
       const [state, setState] = React.useState({ status: 'loading', data: null, error: null })
@@ -2471,6 +2764,9 @@ window.__ModuleLoader__.load({
       const [draggingId, setDraggingId] = React.useState(null)
       const [dragOverGroup, setDragOverGroup] = React.useState(null)
       const [renamingSource, setRenamingSource] = React.useState(null)
+      const [query, setQuery] = React.useState('')
+      const [filter, setFilter] = React.useState('all')
+      const [expandedFail, setExpandedFail] = React.useState(null)
 
       /** Switching a tab only swaps the card below; the chrome never moves. */
       const selectTab = (id) => {
@@ -2766,16 +3062,32 @@ window.__ModuleLoader__.load({
         setSelected((prev) => (allChecked ? prev.filter((id) => !ids.includes(id)) : [...new Set([...prev, ...ids])]))
       }
 
+      /** Everything the strip and the list need to know about health. */
+      const failedSources = sources.filter(probeFailed)
+
+      const visibleSources = sources.filter((source) => {
+        if (filter === 'failed' && !probeFailed(source)) return false
+        if (filter.indexOf('group:') === 0 && String(source.group || '').trim() !== filter.slice(6)) return false
+        return sourceMatches(source, query)
+      })
+
       const renderItem = (source) => {
         const probeInfo = source.lastProbe
+        const failed = probeFailed(source)
         const checked = selected.includes(source.id)
+        const badge = kindBadge(source.kind)
+        const expanded = expandedFail === source.id
+        const toggleDetail = () => setExpandedFail(expanded ? null : source.id)
         return h(
           'li',
           {
-            className: 'dbmcp-item' + (checked ? ' is-selected' : '') + (draggingId === source.id ? ' is-dragging' : ''),
+            className:
+              'dbmcp-item' +
+              (checked ? ' is-selected' : '') +
+              (draggingId === source.id ? ' is-dragging' : '') +
+              (failed ? ' is-failed' : ''),
             key: source.id,
             draggable: true,
-            title: t('group.dragHint'),
             onDragStart: (event) => {
               setDraggingId(source.id)
               try {
@@ -2788,109 +3100,149 @@ window.__ModuleLoader__.load({
             onDragEnd: () => setDraggingId(null),
           },
           h(
-            'label',
-            { className: 'dbmcp-item-pick', title: source.name || source.id },
-            h('input', {
-              type: 'checkbox',
-              checked,
-              onChange: () => toggleSelected(source.id),
-              'aria-label': source.name || source.id,
-            }),
-          ),
-          h(
             'div',
-            { className: 'dbmcp-item-main' },
-            renamingSource && renamingSource.id === source.id
-              ? h(
-                  'form',
-                  {
-                    className: 'dbmcp-item-rename',
-                    onClick: (event) => event.stopPropagation(),
-                    onSubmit: (event) => {
-                      event.preventDefault()
-                      void renameSource()
-                    },
-                  },
-                  h(TextInput, {
-                    value: renamingSource.name,
-                    onChange: (value) => setRenamingSource({ id: source.id, name: value }),
-                    autoFocus: true,
-                    onKeyDown: (event) => {
-                      if (event.key === 'Escape') setRenamingSource(null)
-                    },
-                  }),
-                  h('button', { type: 'submit', className: 'dbmcp-btn is-small is-primary' }, t('group.save')),
-                  h(
-                    'button',
-                    { type: 'button', className: 'dbmcp-btn is-small', onClick: () => setRenamingSource(null) },
-                    t('group.cancel'),
-                  ),
-                )
-              : h(
-                  'div',
-                  { className: 'dbmcp-item-name' },
-                  h(
-                    'span',
-                    {
-                      className: 'is-renamable',
-                      title: t('group.renameHint'),
-                      onDoubleClick: (event) => {
-                        event.stopPropagation()
-                        setRenamingSource({ id: source.id, name: source.name || source.id })
-                      },
-                    },
-                    source.name || source.id,
-                  ),
-                  h('span', { className: 'dbmcp-pill' }, source.kind),
-                  source.isDefault ? h('span', { className: 'dbmcp-pill' }, t('sources.default')) : null,
-                  h(
-                    'button',
-                    {
-                      type: 'button',
-                      className: 'dbmcp-pill is-toggle ' + (source.readOnly === false ? 'is-open' : 'is-locked'),
-                      title: source.readOnly === false ? t('action.lockSource') : t('action.unlockSource'),
-                      'aria-pressed': source.readOnly === false,
-                      onClick: (event) => {
-                        event.stopPropagation()
-                        void toggleReadOnly(source)
-                      },
-                    },
-                    source.readOnly === false ? t('sources.readwrite') : t('sources.readonly'),
-                  ),
-                ),
-            h('div', { className: 'dbmcp-item-target' }, [source.target, source.id].filter(Boolean).join(' · ')),
+            { className: 'dbmcp-item-row' },
+            h('span', { className: 'dbmcp-grip', title: t('group.dragHint'), 'aria-hidden': 'true' }, '⋮⋮'),
+            h(
+              'label',
+              { className: 'dbmcp-item-pick', title: source.name || source.id },
+              h('input', {
+                type: 'checkbox',
+                checked,
+                onChange: () => toggleSelected(source.id),
+                'aria-label': source.name || source.id,
+              }),
+            ),
+            h('span', { className: 'dbmcp-kind-badge', style: { background: badge.color }, title: source.kind }, badge.label),
             h(
               'div',
-              { className: 'dbmcp-probe ' + (probeInfo ? (probeInfo.ok ? 'is-ok' : 'is-error') : '') },
-              probeInfo
-                ? `${probeInfo.ok ? '●' : '○'} ${probeInfo.message}`
-                : t('sources.neverProbed'),
+              { className: 'dbmcp-item-main' },
+              renamingSource && renamingSource.id === source.id
+                ? h(
+                    'form',
+                    {
+                      className: 'dbmcp-item-rename',
+                      onClick: (event) => event.stopPropagation(),
+                      onSubmit: (event) => {
+                        event.preventDefault()
+                        void renameSource()
+                      },
+                    },
+                    h(TextInput, {
+                      value: renamingSource.name,
+                      onChange: (value) => setRenamingSource({ id: source.id, name: value }),
+                      autoFocus: true,
+                      onKeyDown: (event) => {
+                        if (event.key === 'Escape') setRenamingSource(null)
+                      },
+                    }),
+                    h('button', { type: 'submit', className: 'dbmcp-btn is-small is-primary' }, t('group.save')),
+                    h(
+                      'button',
+                      { type: 'button', className: 'dbmcp-btn is-small', onClick: () => setRenamingSource(null) },
+                      t('group.cancel'),
+                    ),
+                  )
+                : h(
+                    'div',
+                    { className: 'dbmcp-item-name' },
+                    h(
+                      'span',
+                      {
+                        className: 'is-renamable',
+                        title: t('group.renameHint'),
+                        onDoubleClick: (event) => {
+                          event.stopPropagation()
+                          setRenamingSource({ id: source.id, name: source.name || source.id })
+                        },
+                      },
+                      source.name || source.id,
+                    ),
+                    h('span', { className: 'dbmcp-pill' }, source.kind),
+                    source.isDefault ? h('span', { className: 'dbmcp-pill' }, t('sources.default')) : null,
+                    h(
+                      'button',
+                      {
+                        type: 'button',
+                        className: 'dbmcp-pill is-toggle ' + (source.readOnly === false ? 'is-open' : 'is-locked'),
+                        title: source.readOnly === false ? t('action.lockSource') : t('action.unlockSource'),
+                        'aria-pressed': source.readOnly === false,
+                        onClick: (event) => {
+                          event.stopPropagation()
+                          void toggleReadOnly(source)
+                        },
+                      },
+                      source.readOnly === false ? t('sources.readwrite') : t('sources.readonly'),
+                    ),
+                  ),
+              h('div', { className: 'dbmcp-item-target' }, [source.target, source.id].filter(Boolean).join(' · ')),
+              failed
+                ? null
+                : h(
+                    'div',
+                    { className: 'dbmcp-probe ' + (probeInfo ? (probeInfo.ok ? 'is-ok' : 'is-error') : '') },
+                    probeInfo ? '● ' + probeInfo.message : t('sources.neverProbed'),
+                  ),
+            ),
+            h(
+              'div',
+              { className: 'dbmcp-item-actions', onClick: (event) => event.stopPropagation() },
+              h(
+                'button',
+                { type: 'button', className: 'dbmcp-btn is-small', disabled: probing === source.id, onClick: () => probe(source) },
+                probing === source.id ? t('action.testing') : t('action.test'),
+              ),
+              h('button', { type: 'button', className: 'dbmcp-btn is-small', onClick: () => setView({ mode: 'schema', source }) }, t('action.schema')),
+              h('button', { type: 'button', className: 'dbmcp-btn is-small', onClick: () => setView({ mode: 'edit', source }) }, t('action.edit')),
+              source.isDefault
+                ? null
+                : h('button', { type: 'button', className: 'dbmcp-btn is-small', onClick: () => makeDefault(source) }, t('action.makeDefault')),
+              h(
+                'button',
+                {
+                  type: 'button',
+                  className: 'dbmcp-btn is-small is-danger',
+                  onClick: () => remove(source),
+                  onBlur: () => setPendingDelete((prev) => (prev === source.id ? null : prev)),
+                },
+                pendingDelete === source.id ? t('action.deleteConfirm') : t('action.delete'),
+              ),
             ),
           ),
-          h(
-            'div',
-            { className: 'dbmcp-item-actions', onClick: (event) => event.stopPropagation() },
-            h(
-              'button',
-              { type: 'button', className: 'dbmcp-btn is-small', disabled: probing === source.id, onClick: () => probe(source) },
-              probing === source.id ? t('action.testing') : t('action.test'),
-            ),
-            h('button', { type: 'button', className: 'dbmcp-btn is-small', onClick: () => setView({ mode: 'schema', source }) }, t('action.schema')),
-            h('button', { type: 'button', className: 'dbmcp-btn is-small', onClick: () => setView({ mode: 'edit', source }) }, t('action.edit')),
-            source.isDefault
-              ? null
-              : h('button', { type: 'button', className: 'dbmcp-btn is-small', onClick: () => makeDefault(source) }, t('action.makeDefault')),
-            h(
-              'button',
-              {
-                type: 'button',
-                className: 'dbmcp-btn is-small is-danger',
-                onClick: () => remove(source),
-                onBlur: () => setPendingDelete((prev) => (prev === source.id ? null : prev)),
-              },
-              pendingDelete === source.id ? t('action.deleteConfirm') : t('action.delete'),
-            ),
-          ),
+          failed
+            ? h(
+                'div',
+                { className: 'dbmcp-item-failure', onClick: toggleDetail },
+                h('span', { className: 'dbmcp-fail-dot', 'aria-hidden': 'true' }, '!'),
+                h(
+                  'span',
+                  { className: 'dbmcp-fail-text' },
+                  fmt(t('sources.failedLine'), { message: (probeInfo && probeInfo.message) || t('state.failed') }),
+                ),
+                h('span', { className: 'dbmcp-hint' }, expanded ? t('sources.failedCollapse') : t('sources.failedExpand')),
+                h(
+                  'button',
+                  {
+                    type: 'button',
+                    className: 'dbmcp-btn is-small',
+                    onClick: (event) => {
+                      event.stopPropagation()
+                      toggleDetail()
+                    },
+                  },
+                  t('action.diagnose'),
+                ),
+              )
+            : null,
+          failed && expanded
+            ? h(
+                'div',
+                { className: 'dbmcp-fail-detail' },
+                h('div', { className: 'dbmcp-fail-detail-head' }, t('sources.detail')),
+                h('pre', null, (probeInfo && probeInfo.message) || t('state.failed')),
+                probeInfo && probeInfo.at ? h('div', { className: 'dbmcp-hint' }, localStamp(probeInfo.at)) : null,
+              )
+            : null,
         )
       }
 
@@ -3017,17 +3369,21 @@ window.__ModuleLoader__.load({
             h('p', null, t('sources.empty.body')),
           )
         }
+        if (visibleSources.length === 0) {
+          return h('div', { className: 'dbmcp-empty' }, h('strong', null, t('sources.noMatch')))
+        }
         const buckets = new Map()
         for (const name of groupNames) buckets.set(name, [])
-        for (const source of sources) {
+        for (const source of visibleSources) {
           const key = String(source.group || '').trim()
           if (!buckets.has(key)) buckets.set(key, [])
           buckets.get(key).push(source)
         }
-        const order = groupNames.slice()
-        if (buckets.has('')) order.push('')
+        const order = groupNames.filter((name) => (buckets.get(name) || []).length > 0)
+        const loose = buckets.get('') || []
+        if (loose.length > 0) order.push('')
         if (order.length === 1 && !order[0]) {
-          return h('ul', { className: 'dbmcp-list' }, buckets.get('').map(renderItem))
+          return h('ul', { className: 'dbmcp-list' }, loose.map(renderItem))
         }
         return h(
           'div',
@@ -3035,7 +3391,6 @@ window.__ModuleLoader__.load({
           order.map((name) => renderGroup(name, buckets.get(name) || [])),
         )
       }
-
 
       const renderBulk = () => {
         if (selected.length === 0) return null
@@ -3088,6 +3443,9 @@ window.__ModuleLoader__.load({
           ),
         )
       }
+
+      const renderStatus = () =>
+        h(StatusStrip, { t, data, sources, failedSources, groupNames, filter, setFilter, query, setQuery })
 
       let body
       if (state.status === 'loading') {
@@ -3164,6 +3522,29 @@ window.__ModuleLoader__.load({
                   title: t('tab.list'),
                   aside: t('sources.count').replace('{n}', String(sources.length)),
                   actions: [
+                    selected.length > 0
+                      ? h(
+                          'span',
+                          { key: 'selected', className: 'dbmcp-hint' },
+                          t('bulk.selected').replace('{n}', String(selected.length)),
+                        )
+                      : null,
+                    selected.length > 0
+                      ? h(
+                          'button',
+                          {
+                            key: 'bulk-delete',
+                            type: 'button',
+                            className: 'dbmcp-btn is-small is-danger',
+                            disabled: busy,
+                            onClick: () => bulkDelete(),
+                            onBlur: () => setPendingBulkDelete(false),
+                          },
+                          pendingBulkDelete
+                            ? t('bulk.deleteConfirm').replace('{n}', String(selected.length))
+                            : t('bulk.delete'),
+                        )
+                      : null,
                     h('button', { key: 'refresh', type: 'button', className: 'dbmcp-btn is-small', disabled: busy, onClick: load }, t('action.refresh')),
                     h(
                       'button',
@@ -3195,6 +3576,7 @@ window.__ModuleLoader__.load({
                     ),
                   ],
                 },
+                renderStatus(),
                 renderGroupCreate(),
                 renderBulk(),
                 renderList(),
@@ -3391,6 +3773,10 @@ window.__ModuleLoader__.load({
         TextInput,
         Breadcrumbs,
         MainPanel,
+        kindBadge,
+        probeFailed,
+        StatusStrip,
+        sourceMatches,
       },
       apply(ctx) {
         localeService = ctx.locale

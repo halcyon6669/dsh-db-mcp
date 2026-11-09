@@ -14,6 +14,9 @@
   ],
   "license": "Apache-2.0",
   "author": "dsh-db-mcp contributors",
+  "engines": {
+    "dsh": ">=0.2.0-rc.2"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/halcyon6669/dsh-db-mcp.git"
