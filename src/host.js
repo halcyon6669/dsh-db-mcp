@@ -143,7 +143,9 @@ function describeTarget(kind, config) {
   const cfg = cleanRecord(config)
   if (kind === 'sqlite') return trimmed(cfg.file)
   const database = trimmed(cfg.database) || trimmed(cfg.serviceName) || trimmed(cfg.sid)
-  return [endpointLabel(cfg), database].filter(Boolean).join(' / ')
+  const endpoint = endpointLabel(cfg)
+  if (endpoint && database) return `${endpoint}/${database}`
+  return endpoint || database
 }
 
 /**

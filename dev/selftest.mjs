@@ -112,6 +112,20 @@ try {
     JSON.stringify(pgUrl),
   )
 
+  const pgTarget = await call('POST', '/datasources/save', {
+    id: 'target-check',
+    name: 'Target check',
+    kind: 'postgres',
+    config: { host: '127.0.0.1', port: 5432, database: 'appdb', user: 'demo' },
+    readOnly: true,
+  })
+  check(
+    'target reads host:port/database without padding',
+    pgTarget.body.datasource?.target === '127.0.0.1:5432/appdb',
+    JSON.stringify(pgTarget.body.datasource?.target),
+  )
+  await call('POST', '/datasources/delete', { id: 'target-check' })
+
   // openGauss lists every cluster node in the authority and hangs options off a
   // query string; falling back to the postgres parser must not lose them.
   const gaussUrl = host.__test.parseJdbcUrl(

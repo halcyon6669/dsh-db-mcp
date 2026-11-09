@@ -2426,7 +2426,7 @@ async function copyText(text) {
 /** A stored probe that ended in failure is what the red row is about. */
 const probeFailed = (source) => Boolean(source && source.lastProbe && source.lastProbe.ok === false)
 
-/** `host:port / database` is how the list renders it; a pasted report reads better as `host:port/database`. */
+/** Older registries still carry `host:port / database`; a pasted report wants no padding. */
 const reportTarget = (source) => {
   const raw = String((source && source.target) || '').trim()
   if (!raw) return '-'
