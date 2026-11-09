@@ -964,29 +964,59 @@ window.__ModuleLoader__.load({
         gap: 10px;
       }
       .dbmcp-grip {
-        color: var(--dsw-alias-label-secondary);
-        opacity: 0.55;
-        font-size: 11px;
-        line-height: 20px;
-        letter-spacing: -2px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 18px;
+        height: 26px;
+        flex: 0 0 18px;
+        padding: 0;
+        border: none;
+        background: transparent;
         cursor: grab;
         user-select: none;
+        border-radius: 4px;
+      }
+      .dbmcp-grip-dot {
+        display: block;
+        width: 3px;
+        height: 3px;
+        border-radius: 50%;
+        background: currentColor;
+        color: var(--dsw-alias-label-secondary);
+        opacity: 0.45;
+      }
+      .dbmcp-grip {
+        display: grid;
+        grid-template-columns: repeat(2, 3px);
+        grid-template-rows: repeat(3, 3px);
+        gap: 3px;
+        justify-content: center;
+        align-content: center;
+      }
+      .dbmcp-grip:hover .dbmcp-grip-dot {
+        opacity: 0.85;
+      }
+      .dbmcp-grip:active {
+        cursor: grabbing;
       }
       .dbmcp-kind-badge {
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        width: 32px;
-        height: 32px;
-        flex: 0 0 32px;
+        width: 30px;
+        height: 30px;
+        flex: 0 0 30px;
         border-radius: 9px;
         border: 1px solid var(--dsw-alias-border-l1);
         background: var(--dsw-alias-bg-layer-2);
         color: var(--dsw-alias-label-primary);
-        font-size: 15px;
+        font-size: 10px;
         font-weight: 700;
         line-height: 1;
-        letter-spacing: -0.01em;
+        letter-spacing: 0.02em;
+        text-transform: uppercase;
+        overflow: hidden;
       }
       .dbmcp-item.is-failed {
         border-color: var(--dsw-alias-state-error-primary);
@@ -1301,10 +1331,10 @@ window.__ModuleLoader__.load({
         opacity: 0.6;
       }
       .dbmcp-item {
-        cursor: grab;
+        cursor: default;
       }
       .dbmcp-item.is-selected {
-        cursor: grab;
+        cursor: default;
       }
       .dbmcp-group-create {
         display: flex;
@@ -2351,18 +2381,18 @@ window.__ModuleLoader__.load({
     /** Tables grouped by schema; the group order is stable and alphabetical. */
     /** Brand colours keep the four engines readable without an icon font. */
 const KIND_BADGE = {
-  postgres: { label: 'PG', glyph: '🐘', color: '#336791' },
-  gauss: { label: 'GS', glyph: 'GS', color: '#00a3a3' },
-  mysql: { label: 'MY', glyph: '🐬', color: '#00758f' },
-  oracle: { label: 'OR', glyph: 'O', color: '#c74634' },
-  sqlite: { label: 'SQ', glyph: '🪶', color: '#003b5c' },
+  postgres: { label: 'PG', color: '#336791' },
+  gauss: { label: 'GS', color: '#00a3a3' },
+  mysql: { label: 'MY', color: '#00758f' },
+  oracle: { label: 'OR', color: '#c74634' },
+  sqlite: { label: 'SQ', color: '#003b5c' },
 }
 
 const kindBadge = (kind) => {
   const key = String(kind || '').trim().toLowerCase()
   if (KIND_BADGE[key]) return KIND_BADGE[key]
   const label = key ? key.slice(0, 2).toUpperCase() : '?'
-  return { label, glyph: label, color: 'var(--dsw-alias-label-secondary)' }
+  return { label, color: 'var(--dsw-alias-label-secondary)' }
 }
 
 /** A stored probe that ended in failure is what the red row is about. */
@@ -3217,22 +3247,31 @@ function groupTables(tables) {
               (draggingId === source.id ? ' is-dragging' : '') +
               (failed ? ' is-failed' : ''),
             key: source.id,
-            draggable: true,
-            onDragStart: (event) => {
-              setDraggingId(source.id)
-              try {
-                event.dataTransfer.setData('text/plain', source.id)
-                event.dataTransfer.effectAllowed = 'move'
-              } catch (error) {
-                /* some shells hand out a read-only dataTransfer; draggingId still carries the id */
-              }
-            },
-            onDragEnd: () => setDraggingId(null),
           },
           h(
             'div',
             { className: 'dbmcp-item-row' },
-            h('span', { className: 'dbmcp-grip', title: t('group.dragHint'), 'aria-hidden': 'true' }, '⋮⋮'),
+            h(
+              'span',
+              {
+                className: 'dbmcp-grip',
+                title: t('group.dragHint'),
+                draggable: true,
+                onDragStart: (event) => {
+                  setDraggingId(source.id)
+                  try {
+                    event.dataTransfer.setData('text/plain', source.id)
+                    event.dataTransfer.effectAllowed = 'move'
+                    const row = event.currentTarget.closest('.dbmcp-item')
+                    if (row) event.dataTransfer.setDragImage(row, 16, 16)
+                  } catch (error) {
+                    /* some shells hand out a read-only dataTransfer; draggingId still carries the id */
+                  }
+                },
+                onDragEnd: () => setDraggingId(null),
+              },
+              [0, 1, 2, 3, 4, 5].map((dot) => h('i', { key: dot, className: 'dbmcp-grip-dot' })),
+            ),
             h(
               'label',
               { className: 'dbmcp-item-pick', title: source.name || source.id },
@@ -3254,7 +3293,7 @@ function groupTables(tables) {
                 },
                 title: source.kind,
               },
-              badge.glyph || badge.label,
+              badge.label,
             ),
             h(
               'div',

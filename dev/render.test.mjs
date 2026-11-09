@@ -275,7 +275,6 @@ check('status: a healthy probe is not a failure', probeFailed({ lastProbe: { ok:
 check('status: an untested source is not a failure', probeFailed({}) === false)
 const pgBadge = kindBadge('postgres')
 check('status: engine badge keeps its brand colour', pgBadge.label === 'PG' && pgBadge.color === '#336791', JSON.stringify(pgBadge))
-check('status: engine badge carries a glyph', pgBadge.glyph === '🐘', JSON.stringify(pgBadge))
 const oddBadge = kindBadge('duckdb')
 check('status: unknown engines still get a badge', oddBadge.label === 'DU' && typeof oddBadge.color === 'string', JSON.stringify(oddBadge))
 const sample = { name: 'mysql', id: 'mysql', kind: 'mysql', target: '127.0.0.1:3306 / demo', group: 'docker', lastProbe: { ok: false, message: 'WinError 10061' } }
