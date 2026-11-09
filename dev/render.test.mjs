@@ -322,8 +322,9 @@ if (stripTree) {
   const labelsText = texts(stripTree)
   check('strip: reports the failure count', labelsText.includes('status.failing'), labelsText.join('|'))
   check('strip: search box present', collect(stripTree, (node) => node.type === 'input').length === 1)
+  // The masthead already carries the version, so the strip must not repeat it.
   const versionPill = collect(stripTree, (node) => node.props.className === 'dbmcp-pill')
-  check('strip: version pill', versionPill.length === 1 && String(versionPill[0].children[0]) === '0.7.5')
+  check('strip: no repeated version pill', versionPill.length === 0, `got ${versionPill.length}`)
 }
 
 const total = passed + failures.length

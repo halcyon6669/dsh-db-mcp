@@ -1044,7 +1044,7 @@ window.__ModuleLoader__.load({
       .dbmcp-status {
         display: flex;
         flex-direction: column;
-        gap: 10px;
+        gap: 8px;
         margin-bottom: 14px;
         padding: 10px 12px;
         border: 1px solid var(--dsw-alias-border-l1);
@@ -1054,9 +1054,10 @@ window.__ModuleLoader__.load({
       .dbmcp-status-row {
         display: flex;
         align-items: center;
-        gap: 8px;
+        gap: 10px;
         flex-wrap: wrap;
         font-size: 12px;
+        min-height: 24px;
       }
       .dbmcp-status-label {
         font-weight: 600;
@@ -1089,29 +1090,31 @@ window.__ModuleLoader__.load({
       .dbmcp-chips {
         display: flex;
         align-items: center;
-        gap: 6px;
+        gap: 10px;
         flex-wrap: wrap;
-        margin-left: 6px;
+        margin-left: 10px;
       }
       .dbmcp-chip-icon {
-        font-size: 11px;
+        font-size: 12px;
         line-height: 1;
       }
       .dbmcp-chip {
         display: inline-flex;
         align-items: center;
-        gap: 6px;
-        border: 1px solid transparent;
+        gap: 8px;
+        border: 1px solid var(--dsw-alias-border-l1);
         border-radius: 999px;
-        background: var(--dsw-alias-bg-layer-2);
+        background: transparent;
         color: var(--dsw-alias-label-secondary);
         font-family: inherit;
         font-size: 12px;
-        padding: 3px 10px;
+        padding: 4px 13px;
         cursor: pointer;
+        transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
       }
       .dbmcp-chip:hover {
         color: var(--dsw-alias-label-primary);
+        border-color: var(--dsw-alias-label-secondary);
       }
       .dbmcp-chip.is-active {
         background: var(--dsw-alias-label-primary);
@@ -1120,12 +1123,19 @@ window.__ModuleLoader__.load({
       }
       .dbmcp-chip.is-warn {
         color: var(--dsw-alias-state-error-primary);
+        border-color: color-mix(in srgb, var(--dsw-alias-state-error-primary) 35%, transparent);
+      }
+      .dbmcp-chip.is-warn.is-active {
+        background: var(--dsw-alias-state-error-primary);
+        border-color: var(--dsw-alias-state-error-primary);
+        color: var(--dsw-alias-bg-base);
       }
       .dbmcp-chip-count {
-        opacity: 0.75;
+        opacity: 0.7;
       }
       .dbmcp-status-search {
-        flex: 0 0 300px;
+        flex: 0 0 auto;
+        width: 300px;
         max-width: 100%;
       }
       .dbmcp-status-search .dbmcp-input {
@@ -2760,7 +2770,6 @@ function groupTables(tables) {
         { className: 'dbmcp-status-row' },
         h('span', { className: 'dbmcp-dot ' + (mcpReady ? 'is-ok' : 'is-error') }),
         h('span', { className: 'dbmcp-status-label' }, mcpReady ? t('status.mcpOk') : t('status.mcpDown')),
-        h('span', { className: 'dbmcp-pill' }, data.plugin.version),
         h('span', { className: 'dbmcp-status-sep' }),
         h('span', { className: 'dbmcp-hint' }, t('status.total').replace('{n}', String(sources.length))),
         failed > 0
