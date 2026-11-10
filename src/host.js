@@ -33,7 +33,7 @@ const { createBridge } = await import(new URL(`./tools.js?v=${GENERATION}`, impo
 
 const API_PREFIX = '/plugins/db-mcp/api'
 const PLUGIN_NAME = 'dsh-db-mcp'
-const PLUGIN_VERSION = '0.9.1'
+const PLUGIN_VERSION = '0.9.2'
 const SCHEMA_VERSION = 1
 const REGISTRY_FILE = 'datasources.json'
 const SECRETS_FILE = 'secrets.json'
@@ -1056,7 +1056,7 @@ export function createHost(options = {}) {
       const script = [
         'import importlib.metadata as m',
         'out = []',
-        "for name in ['mcp', 'psycopg', 'PyMySQL', 'oracledb']:",
+        "for name in ['mcp', 'psycopg', 'py-opengauss', 'PyMySQL', 'oracledb']:",
         '    try:',
         "        out.append(name + '=' + m.version(name))",
         '    except Exception:',
