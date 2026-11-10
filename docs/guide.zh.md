@@ -178,8 +178,35 @@ $DSH_HOME/db-mcp/
   sessions.json      # 按会话的数据源限制，0600
   logs/mcp.log       # 脱敏日志
   logs/audit.jsonl   # 每次 MCP 工具调用一行，512 KiB 轮转
-  .venv/             # 插件内 venv：mcp、psycopg、PyMySQL、oracledb
+  .venv/             # 插件内 venv：mcp、psycopg、py-opengauss、PyMySQL、oracledb
 ```
+
+### 手工安装 Python 依赖
+
+*运行时诊断* 卡片里的 **安装 / 修复依赖** 按钮执行的就是下面两步。如果 Host
+访问不了包索引（比如代理只配在了你自己的终端里），或者你想看完整的 `pip`
+输出而不是最后几行，就自己跑这两条命令。
+
+```bat
+REM cmd.exe —— venv 只需建一次，之后重复执行 pip 安装
+python -m venv %USERPROFILE%\.dsh\db-mcp\.venv
+%USERPROFILE%\.dsh\db-mcp\.venv\Scripts\python.exe -m pip install --disable-pip-version-check -r %USERPROFILE%\.dsh\profiles\desktop\node_modules\dsh-db-mcp\server\requirements.txt
+```
+
+```powershell
+# PowerShell —— 同样两步
+python -m venv "$env:USERPROFILE\.dsh\db-mcp\.venv"
+& "$env:USERPROFILE\.dsh\db-mcp\.venv\Scripts\python.exe" -m pip install --disable-pip-version-check -r "$env:USERPROFILE\.dsh\profiles\desktop\node_modules\dsh-db-mcp\server\requirements.txt"
+```
+
+第一行每台机器只需要跑一次；升级之后值得重跑的是 `pip install` 那行。装在
+`web` profile 下就把路径里的 `desktop` 换成 `web`。如果你是用
+`dsh plugin add <源码目录>` 链接的开发版本，包目录就是那个源码目录，把 `-r`
+指向 `<源码目录>\server\requirements.txt` 即可 —— venv 仍然在
+`$DSH_HOME\db-mcp` 下。
+
+装完在同一张卡片点 **重启 MCP**（按钮会自动重启），依赖行应显示五个版本号、
+没有 `missing`。
 
 ## 用 Docker 起测试库
 

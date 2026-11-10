@@ -288,8 +288,36 @@ $DSH_HOME/db-mcp/
   sessions.json      # per-conversation source limits, 0600
   logs/mcp.log       # masked log
   logs/audit.jsonl   # one line per MCP tool call, rotates at 512 KiB
-  .venv/             # plugin-local venv: mcp, psycopg, PyMySQL, oracledb
+  .venv/             # plugin-local venv: mcp, psycopg, py-opengauss, PyMySQL, oracledb
 ```
+
+### Installing the Python dependencies by hand
+
+**Install / repair dependencies** in the *Runtime* card runs exactly two
+commands. Run them yourself when the Host cannot reach the package index
+(a proxy only your shell knows), or when you want the full `pip` output instead
+of the last few lines.
+
+```bat
+REM cmd.exe — create the venv once, then install / repair
+python -m venv %USERPROFILE%\.dsh\db-mcp\.venv
+%USERPROFILE%\.dsh\db-mcp\.venv\Scripts\python.exe -m pip install --disable-pip-version-check -r %USERPROFILE%\.dsh\profiles\desktop\node_modules\dsh-db-mcp\server\requirements.txt
+```
+
+```powershell
+# PowerShell — same two steps
+python -m venv "$env:USERPROFILE\.dsh\db-mcp\.venv"
+& "$env:USERPROFILE\.dsh\db-mcp\.venv\Scripts\python.exe" -m pip install --disable-pip-version-check -r "$env:USERPROFILE\.dsh\profiles\desktop\node_modules\dsh-db-mcp\server\requirements.txt"
+```
+
+Only the first line is once-per-machine; the `pip install` line is the one worth
+re-running after an upgrade. Swap `desktop` for `web` if you installed into the
+web profile. If you linked a source checkout with `dsh plugin add <path>`, the
+package lives in that directory instead, so point `-r` at
+`<path>\server\requirements.txt` — the venv stays under `$DSH_HOME\db-mcp`.
+
+When it finishes, press **Restart MCP** in the same card (the button does this
+for you) and the dependency line should read five versions with no `missing`.
 
 ## Test databases in Docker
 
