@@ -9,6 +9,20 @@
 
 **零配置。** 不需要改 DSH 里的任何文件，也不用手工抄一遍连接信息——直接把 DBeaver 里已有的连接导进来，然后开口问就行。
 
+## 界面截图
+
+**数据源列表。** 顶部是健康概览，数据源按你的分组排列，带引擎徽标；探测失败的那条就地把完整报错摊开，旁边一键复制。
+
+![数据源列表](https://raw.githubusercontent.com/halcyon6669/dsh-db-mcp/main/asset/1.png)
+
+**一条连接串，一张表单。** 粘 DSN、JDBC URL 或 Oracle TNS 描述符，其余字段自动填好；保存前可以先用*测试*真登录一次。
+
+![新建数据源](https://raw.githubusercontent.com/halcyon6669/dsh-db-mcp/main/asset/2.png)
+
+**从 DBeaver 导入。** 已经登记过的连接会被标出来，同一个地址不会被重复添加。
+
+![从 DBeaver 导入](https://raw.githubusercontent.com/halcyon6669/dsh-db-mcp/main/asset/3.png)
+
 ## 三个方面都不用配
 
 - **不用改 DSH 文件。** bundle 的 patch 只插入一行 Loader 记录；插件自己用 stdio 拉起 Python MCP 服务，并把工具注册到 Host 的 `tools` 服务上——不需要 `dsh-mcp-client` 那一行，也不用编辑 JSON、导环境变量。

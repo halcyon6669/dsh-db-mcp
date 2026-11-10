@@ -12,6 +12,24 @@ every registered source as `mcp__db__*` tools.
 **Zero configuration.** There is nothing to edit in DSH and no connection to type
 twice: import the connections DBeaver already knows, then just ask.
 
+## Screenshots
+
+**The source list.** A health strip across the top, sources grouped the way you
+grouped them, engine badges, and a failed probe stays inline with its full error
+and a copy button.
+
+![Data source list](https://raw.githubusercontent.com/halcyon6669/dsh-db-mcp/main/asset/1.png)
+
+**One string, one form.** Paste a DSN, a JDBC URL or an Oracle TNS descriptor and
+the form fills itself; *Test* logs in before you save.
+
+![New data source](https://raw.githubusercontent.com/halcyon6669/dsh-db-mcp/main/asset/2.png)
+
+**Import from DBeaver.** Connections you already registered are marked, so the
+same endpoint cannot be added twice.
+
+![Import from DBeaver](https://raw.githubusercontent.com/halcyon6669/dsh-db-mcp/main/asset/3.png)
+
 ## Zero configuration, in three senses
 
 - **No DSH files.** The bundle patch inserts one Loader row. The plugin starts its
