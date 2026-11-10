@@ -217,6 +217,33 @@ check(
 const svcUrl = canonicalUrl({ kind: 'oracle', config: { host: 'ora', port: '1521', serviceName: 'XEPDB1', user: 'system' } })
 check('canonicalUrl uses the service form', svcUrl === 'oracle://system@ora:1521/XEPDB1', svcUrl)
 
+// A password may contain the characters a URL parser treats as separators; the
+// connection-string box has to keep them instead of cutting the string there.
+const hashPassword = parseConnectionText('mysql://demo:pa#ss@127.0.0.1:3306/demo')
+check(
+  'password keeps a literal #',
+  hashPassword.ok && hashPassword.password === 'pa#ss' && hashPassword.config.database === 'demo',
+  JSON.stringify(hashPassword),
+)
+const encodedHash = parseConnectionText('jdbc:opengauss://gaussdb:Gauss%23Db2026@127.0.0.1:15432/postgres')
+check(
+  'password decodes a percent-escaped #',
+  encodedHash.ok && encodedHash.password === 'Gauss#Db2026' && encodedHash.config.port === '15432',
+  JSON.stringify(encodedHash),
+)
+const queryPassword = parseConnectionText('postgres://u:p?ss/word@db:5432/app')
+check(
+  'password keeps ? and /',
+  queryPassword.ok && queryPassword.password === 'p?ss/word' && queryPassword.config.host === 'db',
+  JSON.stringify(queryPassword),
+)
+const clusterHash = parseConnectionText('opengauss://demo:pa#ss@h1:30100,h2:30100/appdb')
+check(
+  'cluster nodes survive a password with #',
+  clusterHash.ok && clusterHash.config.hosts.length === 2 && clusterHash.config.database === 'appdb',
+  JSON.stringify(clusterHash),
+)
+
 const total = passed + failures.length
 if (failures.length > 0) {
   console.log(`parse.test: ${passed}/${total} passed`)

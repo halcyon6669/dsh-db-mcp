@@ -33,7 +33,7 @@ const { createBridge } = await import(new URL(`./tools.js?v=${GENERATION}`, impo
 
 const API_PREFIX = '/plugins/db-mcp/api'
 const PLUGIN_NAME = 'dsh-db-mcp'
-const PLUGIN_VERSION = '0.9.0'
+const PLUGIN_VERSION = '0.9.1'
 const SCHEMA_VERSION = 1
 const REGISTRY_FILE = 'datasources.json'
 const SECRETS_FILE = 'secrets.json'
@@ -631,9 +631,14 @@ function parseJdbcUrl(url) {
 
 function mapDBeaverConnection(connection) {
   const cfg = cleanRecord(connection && connection.configuration)
-  const kind = mapDBeaverProvider(connection && connection.provider, connection && connection.driver)
-  if (!kind) return { ok: false, reason: `unsupported provider: ${(connection && connection.provider) || 'unknown'}` }
   const fromUrl = parseJdbcUrl(cfg.url)
+  // DBeaver labels an openGauss/GaussDB connection `generic` when it was added
+  // through a JDBC URL and driver jar, so the URL scheme is the last clue.
+  const kind =
+    mapDBeaverProvider(connection && connection.provider, connection && connection.driver) ||
+    mapDBeaverProvider('', fromUrl && fromUrl.scheme) ||
+    null
+  if (!kind) return { ok: false, reason: `unsupported provider: ${(connection && connection.provider) || 'unknown'}` }
   // With configurationType=URL the URL is what DBeaver actually connects with,
   // so its values win over the (possibly stale) form fields.
   const preferUrl = /^url$/i.test(trimmed(cfg.configurationType))

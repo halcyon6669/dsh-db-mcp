@@ -255,9 +255,8 @@ window.__ModuleLoader__.load({
         'sources.searchPlaceholder': 'Search data sources…',
         'sources.noMatch': 'No data source matches this filter.',
         'sources.failedLine': 'Connection failed: {message}',
-        'sources.failedExpand': '(click to expand)',
-        'sources.failedCollapse': '(click to collapse)',
-        'sources.detail': 'Error details',
+        'group.expand': 'Expand this group',
+        'group.collapse': 'Collapse this group',
         'action.copyError': 'Copy',
         'action.copied': 'Copied',
         'action.copyErrorHint': 'Copy the whole failure report',
@@ -468,9 +467,8 @@ window.__ModuleLoader__.load({
         'sources.searchPlaceholder': '搜索数据源…',
         'sources.noMatch': '没有符合条件的数据源。',
         'sources.failedLine': '连接失败：{message}',
-        'sources.failedExpand': '（点击展开详情）',
-        'sources.failedCollapse': '（点击收起详情）',
-        'sources.detail': '错误详情',
+        'group.expand': '展开该分组',
+        'group.collapse': '折叠该分组',
         'action.copyError': '复制',
         'action.copied': '已复制',
         'action.copyErrorHint': '复制完整报错信息',
@@ -1156,7 +1154,6 @@ window.__ModuleLoader__.load({
         align-items: center;
         gap: 8px;
         flex-wrap: wrap;
-        cursor: pointer;
         color: var(--dsw-alias-state-error-primary);
       }
       .dbmcp-fail-tri {
@@ -1164,40 +1161,11 @@ window.__ModuleLoader__.load({
         font-size: 13px;
         line-height: 1;
       }
-      .dbmcp-fail-caret {
-        flex: 0 0 auto;
-        font-size: 12px;
-        line-height: 1;
-        transition: transform 120ms ease;
-      }
-      .dbmcp-fail-caret.is-open {
-        transform: rotate(180deg);
-      }
       .dbmcp-fail-text {
         flex: 1 1 260px;
         min-width: 0;
         font-size: 12px;
         overflow-wrap: anywhere;
-      }
-      .dbmcp-fail-detail {
-        border-radius: 8px;
-        border: 1px solid var(--dsw-alias-border-l1);
-        background: var(--dsw-alias-bg-layer-1);
-        padding: 8px 10px;
-      }
-      .dbmcp-fail-detail-head {
-        font-size: 11px;
-        font-weight: 600;
-        color: var(--dsw-alias-label-secondary);
-        margin-bottom: 4px;
-      }
-      .dbmcp-fail-detail pre {
-        margin: 0;
-        font-size: 11px;
-        line-height: 1.5;
-        white-space: pre-wrap;
-        overflow-wrap: anywhere;
-        color: var(--dsw-alias-label-primary);
       }
       .dbmcp-status {
         display: flex;
@@ -2081,42 +2049,45 @@ window.__ModuleLoader__.load({
     }
 
     function fromUrl(kind, body) {
-      const source = body.startsWith('//') ? body : '//' + body
-      // `new URL` rejects a comma-separated authority, so the cluster list is
-      // peeled off first and only the first node is handed to the URL parser.
-      const cluster = /^\/\/([^/?#]+)/.exec(source)
-      const authorityText = cluster ? cluster[1] : ''
-      const at = authorityText.lastIndexOf('@')
-      const hostList = at >= 0 ? authorityText.slice(at + 1) : authorityText
-      const single = hostList.includes(',') ? hostList.split(',')[0] : hostList
-      const normalized = cluster
-        ? `//${at >= 0 ? authorityText.slice(0, at + 1) : ''}${single}${source.slice(cluster[0].length)}`
-        : source
-      let url
-      try {
-        url = new URL('db:' + normalized)
-      } catch (error) {
-        return { ok: false, code: 'url' }
+      // `new URL` reads `#` and `?` inside a password as fragment and query
+      // markers, and rejects a comma-separated node list, so the string is
+      // split by hand: credentials up to the last `@`, then the node list up to
+      // the first `/`, then the path, then the query.
+      let rest = body.startsWith('//') ? body.slice(2) : body
+      const infoAt = rest.lastIndexOf('@')
+      let info = ''
+      if (infoAt >= 0) {
+        info = rest.slice(0, infoAt)
+        rest = rest.slice(infoAt + 1)
       }
-      const query = parseQueryString(url.search)
-      const database = decodePart(url.pathname.replace(/^\/+/, ''))
+      const slash = rest.indexOf('/')
+      const authority = slash >= 0 ? rest.slice(0, slash) : rest
+      const tail = slash >= 0 ? rest.slice(slash) : ''
+      const mark = tail.indexOf('?')
+      const path = mark >= 0 ? tail.slice(0, mark) : tail
+      const query = parseQueryString(mark >= 0 ? tail.slice(mark) : '')
+      const database = decodePart(path.replace(/^\/+/, ''))
+
+      const nodes = authority
+        .split(',')
+        .map((piece) => /^(\[[^\]]+\]|[^:]+)(?::(\d+))?$/.exec(piece.trim()))
+        .filter(Boolean)
+        .map((match) => ({
+          host: match[1].replace(/^\[|\]$/g, ''),
+          port: match[2] ? Number(match[2]) : null,
+        }))
+      if (!nodes.length) return { ok: false, code: 'url' }
+
       const config = baseConfig(kind)
-      // openGauss lists every node before the path (`h1:1,h2:2`); the URL parser
-      // keeps the first one, so split the original authority for the rest.
-      config.host = url.hostname || 'localhost'
-      config.port = url.port || DEFAULT_PORTS[kind] || ''
-      if (cluster && hostList.includes(',')) {
-        const nodes = hostList
-          .split(',')
-          .map((piece) => /^([^:]+)(?::(\d+))?$/.exec(piece.trim()))
-          .filter(Boolean)
-          .map((match) => ({ host: match[1], port: match[2] ? Number(match[2]) : Number(config.port) || null }))
-        if (nodes.length > 1) {
-          config.hosts = nodes
-          config.host = nodes.map((node) => node.host).join(',')
-        }
+      config.host = nodes[0].host
+      // Form fields hold strings; the node list keeps numbers for the driver.
+      config.port = nodes[0].port ? String(nodes[0].port) : DEFAULT_PORTS[kind] || ''
+      if (nodes.length > 1) {
+        config.hosts = nodes.map((node) => ({ host: node.host, port: node.port || Number(config.port) || null }))
+        config.host = nodes.map((node) => node.host).join(',')
       }
-      config.user = decodePart(url.username) || query.user || query.username || ''
+      const colon = info.indexOf(':')
+      config.user = decodePart(colon >= 0 ? info.slice(0, colon) : info) || query.user || query.username || ''
       if (kind === 'oracle') {
         config.serviceName = database || query.servicename || query.service || ''
         config.sid = query.sid || ''
@@ -2128,7 +2099,8 @@ window.__ModuleLoader__.load({
       if (query.schema || query.currentschema || query.searchpath) {
         config.schema = query.schema || query.currentschema || query.searchpath
       }
-      const password = decodePart(url.password)
+      // The password stays raw here; `canonicalUrl` never renders it back.
+      const password = colon >= 0 ? decodePart(info.slice(colon + 1)) : ''
       const name = kind === 'oracle' ? config.serviceName || config.sid : config.database || config.host
       return { ok: true, kind, config, password, name: name || kind }
     }
@@ -3433,7 +3405,6 @@ function groupTables(tables) {
       const [renamingSource, setRenamingSource] = React.useState(null)
       const [query, setQuery] = React.useState('')
       const [filter, setFilter] = React.useState('all')
-      const [expandedFail, setExpandedFail] = React.useState(null)
       const [copiedId, setCopiedId] = React.useState(null)
       const [copiedChip, setCopiedChip] = React.useState(null)
       const [collapsed, setCollapsed] = React.useState([])
@@ -3796,8 +3767,6 @@ function groupTables(tables) {
         const failed = probeFailed(source)
         const checked = selected.includes(source.id)
         const badge = kindBadge(source.kind)
-        const expanded = expandedFail === source.id
-        const toggleDetail = () => setExpandedFail(expanded ? null : source.id)
         return h(
           'li',
           {
@@ -3975,15 +3944,13 @@ function groupTables(tables) {
           failed
             ? h(
                 'div',
-                { className: 'dbmcp-item-failure', onClick: toggleDetail },
+                { className: 'dbmcp-item-failure' },
                 h('span', { className: 'dbmcp-fail-tri', 'aria-hidden': 'true' }, '⚠'),
                 h(
                   'span',
                   { className: 'dbmcp-fail-text' },
                   fmt(t('sources.failedLine'), { message: (probeInfo && probeInfo.message) || t('state.failed') }),
                 ),
-                h('span', { className: 'dbmcp-hint' }, expanded ? t('sources.failedCollapse') : t('sources.failedExpand')),
-                h('span', { className: 'dbmcp-fail-caret' + (expanded ? ' is-open' : ''), 'aria-hidden': 'true' }, '⌄'),
                 h(
                   'button',
                   {
@@ -3997,15 +3964,6 @@ function groupTables(tables) {
                   },
                   copiedId === source.id ? t('action.copied') : t('action.copyError'),
                 ),
-              )
-            : null,
-          failed && expanded
-            ? h(
-                'div',
-                { className: 'dbmcp-fail-detail' },
-                h('div', { className: 'dbmcp-fail-detail-head' }, t('sources.detail')),
-                h('pre', null, (probeInfo && probeInfo.message) || t('state.failed')),
-                probeInfo && probeInfo.at ? h('div', { className: 'dbmcp-hint' }, localStamp(probeInfo.at)) : null,
               )
             : null,
         )
@@ -4056,7 +4014,7 @@ function groupTables(tables) {
               className: 'dbmcp-fold' + (folded ? '' : ' is-open'),
               'aria-expanded': !folded,
               'aria-label': name || t('group.unassigned'),
-              title: folded ? t('sources.failedExpand') : t('sources.failedCollapse'),
+              title: folded ? t('group.expand') : t('group.collapse'),
               onClick: () => toggleFolded(name),
             }),
             renaming

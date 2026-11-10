@@ -121,14 +121,16 @@ C:\data\app.db
 ```
 
 A password found inside the URL is sent once and then only stored; it is never
-echoed back. `id` is immutable once created — rename the *display name* instead
-(double-click the name on a row).
+echoed back. URL separators inside a password are fine too: `#`, `?` and `/`
+survive, and `#` works both literally and as `%23`. `id` is immutable once
+created — rename the *display name* instead (double-click the name on a row).
 
 openGauss and GaussDB are their own kind: their SHA256 authentication is outside
 what libpq negotiates, so the server talks to them with the pure-Python
 `py_opengauss` driver (installed with the other Python dependencies) and falls
 back to psycopg only for clusters that still use md5. Paste the cluster URL and
-every node is kept, in order — the panel shows `h1 +2:30100`.
+every node is kept, in order — the panel shows `h1 +2:30100`. The structure page
+leaves out the `BIN$…` tables a cluster keeps in its recycle bin.
 
 ## Importing from DBeaver
 
@@ -139,12 +141,15 @@ decrypted with DBeaver's built-in key (AES-128-CBC, zero IV, 16-byte prefix — 
 [Tatsh/dbeaver-creds](https://github.com/Tatsh/dbeaver-creds)). Ticked entries are
 copied into the registry, their passwords into `secrets.json`.
 
-Two details make real DBeaver workspaces work:
+A few details make real DBeaver workspaces work:
 
 - Connections created through the driver dialog often carry only a JDBC URL
   (`configurationType: URL`) with no `database` field and no `user`. The importer
   parses the URL for whatever the form fields omit and takes the user from the
   decrypted credentials.
+- openGauss/GaussDB entries added with a driver jar are filed as `generic` in
+  `data-sources.json`; the importer recognises them from the `jdbc:opengauss:` /
+  `jdbc:gaussdb:` scheme instead of reporting `unsupported provider: generic`.
 - A connection already configured is not offered twice. Sources are identified by
   kind + host + port + database/service/SID + user (SQLite by file path); a match
   comes back as `alreadyImported`, the checkbox is disabled and the row says

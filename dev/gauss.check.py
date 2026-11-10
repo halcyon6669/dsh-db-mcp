@@ -37,6 +37,20 @@ def run() -> None:
     cursor = engines._GaussCursor.__new__(engines._GaussCursor)
     print("ok   cursor class is importable")
 
+    # openGauss binds `$1, $2 …`; the module's metadata SQL uses `%s`, and the
+    # cursor rewrites it only when the count matches the values it was handed.
+    rewrite = engines._GaussCursor._rewrite
+    check("one placeholder becomes $1", rewrite("where a = %s", 1) == "where a = $1")
+    check(
+        "two placeholders become $1 and $2",
+        rewrite("where a = %s and b = %s", 2) == "where a = $1 and b = $2",
+    )
+    check("a query without values is left alone", rewrite("select 1", 0) == "select 1")
+    check(
+        "a mismatched count is left for the server to report",
+        rewrite("where a = %s and b = %s", 1) == "where a = %s and b = %s",
+    )
+
 
 if __name__ == "__main__":
     run()

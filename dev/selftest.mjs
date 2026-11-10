@@ -168,6 +168,22 @@ try {
   check('dbeaver opengauss entry maps', gaussEntry.ok === true && gaussEntry.kind === 'gauss', String(gaussEntry.reason))
   check('dbeaver opengauss keeps both nodes', gaussEntry.config?.hosts?.length === 2, JSON.stringify(gaussEntry.config?.hosts))
 
+  // DBeaver files a driver-jar connection as `generic`; the URL is the only hint
+  // that it is openGauss, and that is what used to fail with "unsupported provider".
+  const genericGauss = host.__test.mapDBeaverConnection({
+    provider: 'generic',
+    driver: '',
+    configuration: {
+      url: 'jdbc:gaussdb://gauss_user:Gauss%23Db2026@db.example.com:15432/postgres',
+      configurationType: 'URL',
+    },
+  })
+  check(
+    'dbeaver generic entry maps by url scheme',
+    genericGauss.ok === true && genericGauss.kind === 'gauss' && genericGauss.config?.port === 15432,
+    JSON.stringify(genericGauss),
+  )
+
   const oracleList = host.__test.parseOracleUrl(
     'jdbc:oracle:thin:@(DESCRIPTION_LIST=(LOAD_BALANCE=ON)(FAILOVER=ON)' +
       '(DESCRIPTION=(ADDRESS=(PROTOCOL=TCP)(HOST=ora-1.example.com)(PORT=1522))' +

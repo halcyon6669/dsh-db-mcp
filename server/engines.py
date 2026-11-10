@@ -279,8 +279,12 @@ class _GaussCursor:
 
     py_opengauss 1.3.x ships its DB-API module with a TabError, so
     `connection.cursor()` does not exist on the connection `open()` returns. What
-    does work is `connection.prepare(sql)(*params)`, and that keeps `%s` as the
-    placeholder style the rest of this module already emits — no rewriting of SQL.
+    does work is `connection.prepare(sql)(*params)`.
+
+    `prepare` sends the statement to the server as written, and the server only
+    binds `$1, $2 …`, so the `%s` placeholders the rest of this module emits are
+    rewritten here. A statement whose `%s` count does not match the parameters is
+    passed through untouched, because that shape is not ours to guess at.
     """
 
     def __init__(self, connection):
@@ -290,9 +294,22 @@ class _GaussCursor:
         self.description = None
         self.rowcount = -1
 
+    @staticmethod
+    def _rewrite(sql: str, count: int) -> str:
+        if count <= 0:
+            return sql
+        parts = sql.split("%s")
+        if len(parts) - 1 != count:
+            return sql
+        out = parts[0]
+        for index, piece in enumerate(parts[1:], start=1):
+            out += f"${index}" + piece
+        return out
+
     def execute(self, sql: str, params=()):
-        statement = self._connection.prepare(sql)
-        result = statement(*(params or ()))
+        values = tuple(params or ())
+        statement = self._connection.prepare(self._rewrite(sql, len(values)))
+        result = statement(*values)
         names = list(getattr(statement, "column_names", None) or [])
         self._rows = list(result or [])
         self._index = 0
@@ -583,6 +600,9 @@ def list_tables(profile: dict, connection, schema: str | None, limit: int = 500)
             raise DbError("user_error", f"unsupported datasource kind: {kind}")
     finally:
         cursor.close()
+    # openGauss/Oracle keep dropped tables in a recycle bin under `BIN$…` names;
+    # they are not part of the schema a user browses.
+    rows = [item for item in rows if not str(item[0]).startswith("BIN$")]
     truncated = len(rows) > limit
     return {
         "schema": effective,

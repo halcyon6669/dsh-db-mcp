@@ -79,17 +79,18 @@ C:\data\app.db
 /var/lib/app.sqlite3
 ```
 
-连接串里带的密码只发送一次，之后仅保存，永远不会回显。`id` 创建后不可修改——要改的是 *显示名称*（双击行上的名字）。
+连接串里带的密码只发送一次，之后仅保存，永远不会回显。密码里出现 `#`、`?`、`/` 这些 URL 分隔符也没问题：`#` 可以直接写，也可以写成 `%23`，两种都会按原样保存。`id` 创建后不可修改——要改的是 *显示名称*（双击行上的名字）。
 
-openGauss 与 GaussDB 是独立的类型：它们的 SHA256 认证不在 libpq 的协商范围内，所以服务端用纯 Python 的 `py_opengauss` 驱动连接（随其它 Python 依赖一起安装），只在仍用 md5 的集群上回落到 psycopg。粘贴集群 URL 时每个节点都会按顺序保留——面板上显示为 `h1 +2:30100`。
+openGauss 与 GaussDB 是独立的类型：它们的 SHA256 认证不在 libpq 的协商范围内，所以服务端用纯 Python 的 `py_opengauss` 驱动连接（随其它 Python 依赖一起安装），只在仍用 md5 的集群上回落到 psycopg。粘贴集群 URL 时每个节点都会按顺序保留——面板上显示为 `h1 +2:30100`。结构页里不会列出回收站里的 `BIN$…` 残留表。
 
 ## 从 DBeaver 导入
 
 导入器会在 `%APPDATA%\DBeaverData\workspace*\General\.dbeaver\` 下找 `data-sources.json`，同时兼容 `General` 布局与 Linux/macOS 布局。同目录存在 `credentials-config.json` 时，会用 DBeaver 内置密钥解密（AES-128-CBC、零 IV、前 16 字节前缀——参考 [Tatsh/dbeaver-creds](https://github.com/Tatsh/dbeaver-creds)）。勾选的连接被复制进注册表，口令写入 `secrets.json`。
 
-三个细节让真实的 DBeaver 工作区可用：
+几个细节让真实的 DBeaver 工作区可用：
 
 - 通过驱动对话框创建的连接常常只有一条 JDBC URL（`configurationType: URL`），既没有 `database` 字段也没有 `user`。导入器会从 URL 里解析表单缺失的部分，用户名则取自解密后的凭据。
+- openGauss / GaussDB 的驱动类连接在 DBeaver 里常被记成 `generic`（provider 是 generic、驱动是 jar），此时按 URL 的 scheme（`jdbc:opengauss:` / `jdbc:gaussdb:`）识别类型，不再报 `unsupported provider: generic`。
 - 已经配置过的连接不会重复出现。数据源按 类型 + 主机 + 端口 + 库名/服务名/SID + 用户 识别（SQLite 用文件路径）；命中时返回 `alreadyImported`，复选框被禁用，行上写着 *已作为 … 添加*；即使绕过界面直接调用导入接口，也只会进 `skipped`。
 - 列表带过滤框（按名称、主机或用户），操作栏固定在视图顶部，工作区再长 **导入所选** 也一直在手边。
 
