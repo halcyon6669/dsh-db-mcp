@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "数据库",
-    "description": "通过 Python MCP 服务向 AI 暴露数据库，并在这里管理数据源连接。"
+    "description": "从 DBeaver 一键导入（含已存口令），让 AI 直接查询你的数据库 —— 默认只读、逐次审计。"
   }
 }

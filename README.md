@@ -5,30 +5,25 @@
 
 English | [中文](README.zh.md)
 
-A [DSH](https://github.com/deepseek-ai/deepseek-harness) plugin that hands your
-databases to the agent. It adds a **Database** panel to the sidebar and publishes
-every registered source as `mcp__db__*` tools.
-
-**Zero configuration.** There is nothing to edit in DSH and no connection to type
-twice: import the connections DBeaver already knows, then just ask.
+A [DSH](https://github.com/deepseek-ai/deepseek-harness) plugin that turns the
+database connections you already have into tools the agent can use.
+**Import from DBeaver, tick the boxes, ask a question** — no connection string to
+retype, no DSH file to edit, no Python to install.
 
 ## Screenshots
+
+**Import from DBeaver.** The importer reads `data-sources.json` from your DBeaver
+workspace and decrypts `credentials-config.json` with DBeaver's own key, so host,
+port, database, user and the saved password all arrive together. Connections you
+already registered are marked, so the same endpoint is never added twice.
+
+![Import from DBeaver](https://raw.githubusercontent.com/halcyon6669/dsh-db-mcp/main/asset/3.png)
 
 **The source list.** A health strip across the top, sources grouped the way you
 grouped them, engine badges, and a failed probe stays inline with its full error
 and a copy button.
 
 ![Data source list](https://raw.githubusercontent.com/halcyon6669/dsh-db-mcp/main/asset/1.png)
-
-**One string, one form.** Paste a DSN, a JDBC URL or an Oracle TNS descriptor and
-the form fills itself; *Test* logs in before you save.
-
-![New data source](https://raw.githubusercontent.com/halcyon6669/dsh-db-mcp/main/asset/2.png)
-
-**Import from DBeaver.** Connections you already registered are marked, so the
-same endpoint cannot be added twice.
-
-![Import from DBeaver](https://raw.githubusercontent.com/halcyon6669/dsh-db-mcp/main/asset/3.png)
 
 ## Zero configuration, in three senses
 

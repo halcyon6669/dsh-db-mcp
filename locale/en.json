@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Database",
-    "description": "Data-source management for databases exposed to the agent through a Python MCP server."
+    "description": "Import the DBeaver connections you already have (saved passwords included) and let the agent query them - read-only by default, every call audited."
   }
 }

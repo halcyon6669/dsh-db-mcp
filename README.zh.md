@@ -5,23 +5,17 @@
 
 [English](README.md) | 中文
 
-一个 [DSH](https://github.com/deepseek-ai/deepseek-harness) 插件，把数据库交给智能体：侧栏多出一个**数据库**面板，登记过的每个数据源都会变成 `mcp__db__*` 工具。
-
-**零配置。** 不需要改 DSH 里的任何文件，也不用手工抄一遍连接信息——直接把 DBeaver 里已有的连接导进来，然后开口问就行。
+一个 [DSH](https://github.com/deepseek-ai/deepseek-harness) 插件，把你已有的数据库连接直接变成智能体能用的工具。**从 DBeaver 导入、勾选、提问**——连接串不用重打，DSH 文件不用改，Python 也不用自己装。
 
 ## 界面截图
+
+**从 DBeaver 导入。** 导入器读取 DBeaver 工作区的 `data-sources.json`，再用 DBeaver 自带的密钥解密 `credentials-config.json`，主机、端口、库名、用户、已存口令一次到位；已经登记过的连接会被标出来，同一个地址不会重复添加。
+
+![从 DBeaver 导入](https://raw.githubusercontent.com/halcyon6669/dsh-db-mcp/main/asset/3.png)
 
 **数据源列表。** 顶部是健康概览，数据源按你的分组排列，带引擎徽标；探测失败的那条就地把完整报错摊开，旁边一键复制。
 
 ![数据源列表](https://raw.githubusercontent.com/halcyon6669/dsh-db-mcp/main/asset/1.png)
-
-**一条连接串，一张表单。** 粘 DSN、JDBC URL 或 Oracle TNS 描述符，其余字段自动填好；保存前可以先用*测试*真登录一次。
-
-![新建数据源](https://raw.githubusercontent.com/halcyon6669/dsh-db-mcp/main/asset/2.png)
-
-**从 DBeaver 导入。** 已经登记过的连接会被标出来，同一个地址不会被重复添加。
-
-![从 DBeaver 导入](https://raw.githubusercontent.com/halcyon6669/dsh-db-mcp/main/asset/3.png)
 
 ## 三个方面都不用配
 
