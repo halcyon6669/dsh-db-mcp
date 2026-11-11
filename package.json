@@ -1,6 +1,6 @@
 {
   "name": "dsh-db-mcp",
-  "version": "0.9.3",
+  "version": "0.9.4",
   "description": "DSH plugin: import the connections DBeaver already knows (saved passwords included), then let the agent query SQLite, PostgreSQL, MySQL, Oracle and openGauss through nine MCP tools - read-only by default, every call audited.",
   "keywords": [
     "dsh",
