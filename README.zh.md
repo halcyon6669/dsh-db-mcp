@@ -7,7 +7,15 @@
 
 [English](README.md) | 中文
 
-一个 [DSH](https://github.com/deepseek-ai/deepseek-harness) 插件，把你已有的数据库连接直接变成智能体能用的工具。**从 DBeaver 导入、勾选、提问**——连接串不用重打，DSH 文件不用改，Python 也不用自己装。
+一个 [DSH](https://github.com/deepseek-ai/deepseek-harness) 插件，把你的数据库直接交给智能体。连接只需登记一次，之后直接提问——它在对话里调用 MCP 工具查库，再把答案带回来。
+
+**最省事的那条路，就是你原本已经走过的那条：** 把 DBeaver 里已有的连接导进来，连保存过的口令一起，一个字都不用重打。
+
+## 三件你不用做的事
+
+- **不用重打连接串。** 导入器读取 DBeaver 工作区的 `data-sources.json`，再用 DBeaver 自带的密钥解密 `credentials-config.json`——主机、端口、库名、用户**和已存口令**一次到位。勾选、导入，结束。已经登记过的地址会被标出来，同一个连接不会重复添加。
+- **不用配置 DSH。** bundle 只插入一行 Loader 记录；插件自己拉起 Python MCP 服务、自己注册工具——不需要 `dsh-mcp-client` 那一行，不用手改 JSON，不用导环境变量。
+- **不用手工装 Python。** 面板会自己找解释器、建 venv、装驱动包，入口在 **运行时诊断 → 安装 / 修复依赖**。
 
 ## 一张图看懂
 
@@ -17,7 +25,7 @@
 
 ## 界面截图
 
-**从 DBeaver 导入。** 导入器读取 DBeaver 工作区的 `data-sources.json`，再用 DBeaver 自带的密钥解密 `credentials-config.json`，主机、端口、库名、用户、已存口令一次到位；已经登记过的连接会被标出来，同一个地址不会重复添加。
+**从 DBeaver 导入。** 工作区里的每条连接都会列出它解析出的主机、库名和用户；已经登记过的那条会直接说明，而不是再让你添加一遍。
 
 ![从 DBeaver 导入](https://raw.githubusercontent.com/halcyon6669/dsh-db-mcp/main/asset/3.png)
 
@@ -25,11 +33,27 @@
 
 ![数据源列表](https://raw.githubusercontent.com/halcyon6669/dsh-db-mcp/main/asset/1.png)
 
-## 三个方面都不用配
+## 一份数据源，所有 DSH 通用
 
-- **不用改 DSH 文件。** bundle 的 patch 只插入一行 Loader 记录；插件自己用 stdio 拉起 Python MCP 服务，并把工具注册到 Host 的 `tools` 服务上——不需要 `dsh-mcp-client` 那一行，也不用编辑 JSON、导环境变量。
-- **不用填数据源。** 导入器读取 DBeaver 工作区的 `data-sources.json`，再用 DBeaver 自带的密钥解密 `credentials-config.json`，主机、端口、库名、用户、已存口令一次到位。勾一个框就是全部配置工作。
-- **不用准备 Python。** 面板会自己找解释器、建 venv、装四个驱动包，入口在 **运行时诊断 → 安装 / 修复依赖**。
+注册表放在 `~/.dsh/db-mcp/`（`datasources.json` + `secrets.json`，权限 `0600`），不属于某个 profile。所以：
+
+- **桌面端、Web 端装哪个都行，也可以都装**——读的是同一份文件，一处导入，处处可见。
+- **同时开多个 DSH 窗口也没问题。** 每个实例起自己的 Python 服务，第一个占住 HTTP 端口，后面的自动顺延到下一个空闲端口，不会因为端口冲突起不来。
+- **升级、重装都不用重配。** 数据源、分组、设置、审计日志都保留，只有插件代码被替换。
+
+## 同一个服务，也给你的其它 agent 用
+
+面板把同一个 MCP 服务以 streamable HTTP 暴露出来。**接入其它客户端** 标签会显示地址（`http://127.0.0.1:8765/dsh-db-mcp`），并支持一键写入：
+
+| 客户端 | 写入形式 |
+| ------ | -------- |
+| VS Code / VS Code Insiders | `mcp.json` 里的 HTTP 条目 |
+| Cursor | `~/.cursor/mcp.json` 里的 HTTP 条目 |
+| Claude Code | `~/.claude.json` 里的 HTTP 条目 |
+| Claude Desktop | `claude_desktop_config.json` 里的 stdio 条目 |
+| Codex CLI | `~/.codex/config.toml` 里的 `[mcp_servers.dsh-db-mcp]` |
+
+JetBrains AI 或任何支持 MCP 的客户端，把这个地址填进去同样能用。数据源与只读规则是共享的；审计日志与会话级限制只存在于 DSH 内。详见[使用指南](docs/guide.zh.md#接入其它客户端)。
 
 ## 运行
 
@@ -49,7 +73,7 @@ dsh plugin --profile web add dsh-db-mcp       # Web 端
 
 如果某条连接在 DBeaver 里没保存口令，卡片会显示**无密码**；打开该数据源补一次即可——口令只写进 `secrets.json`，不会再回到页面上。
 
-想从零开始也行：**新建数据源**里粘一条连接串（`postgresql://user:pw@host:5432/db`、JDBC URL、Oracle TNS 描述符或 `.db` 路径），表单会自动填好。
+想从零开始也行：**新建数据源**里粘一条连接串（`postgresql://user:pw@host:5432/db`、JDBC URL、Oracle TNS 描述符或 `.db` 路径），表单会自动填好；保存旁边的**测试**按钮会先真的登录一次，再让你保存。
 
 ## 智能体拿到的工具
 
@@ -65,9 +89,7 @@ dsh plugin --profile web add dsh-db-mcp       # Web 端
 | `mcp__db__test_connection` | 真实登录 + `select 1`，回报服务器/用户/schema |
 | `mcp__db__session_scope` | 把本会话限制在部分数据源，或解除限制 |
 
-`datasource` 在所有工具里都是可选的，省略时回落到标着 `isDefault` 的那条（没有就取注册表里的第一条）。查询发生在**对话里**，面板只负责管理连接，不是 SQL 控制台。
-
-同一个服务也能给别的 agent 用：**接入其它客户端** 标签会显示地址（`http://127.0.0.1:8765/dsh-db-mcp`），并可一键写入 VS Code、Cursor、Claude Code、Claude Desktop 或 Codex 的配置，详见[使用指南](docs/guide.zh.md#接入其它客户端)。
+`datasource` 在所有工具里都是可选的，省略时回落到标着 `isDefault` 的那条（没有就取注册表里的第一条）。查询发生在**对话里**，面板只负责管理连接，不是 SQL 控制台。**工具**标签可以把用不上的那几个关掉——少点干扰，模型上下文里的工具列表也更短。
 
 ## 安全
 

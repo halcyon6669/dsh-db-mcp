@@ -7,10 +7,25 @@
 
 English | [中文](README.zh.md)
 
-A [DSH](https://github.com/deepseek-ai/deepseek-harness) plugin that turns the
-database connections you already have into tools the agent can use.
-**Import from DBeaver, tick the boxes, ask a question** — no connection string to
-retype, no DSH file to edit, no Python to install.
+A [DSH](https://github.com/deepseek-ai/deepseek-harness) plugin that hands your
+databases to the agent. Register a connection once, then just ask — the agent
+queries it through MCP tools and answers in the conversation.
+
+**The fastest path is the one you already walked:** import the connections DBeaver
+already knows, saved passwords included, and skip typing anything.
+
+## Three things you do not have to do
+
+- **Do not retype connections.** The importer reads your DBeaver workspace
+  (`data-sources.json`) and decrypts `credentials-config.json` with DBeaver's own
+  key, so host, port, database, user **and the saved password** arrive together.
+  Tick the boxes, click import, done. Existing endpoints are marked, so the same
+  connection is never added twice.
+- **Do not configure DSH.** The bundle inserts one Loader row. The plugin starts its
+  own Python MCP server and registers the tools itself — no `dsh-mcp-client` row, no
+  JSON to edit, no environment variable to export.
+- **Do not install Python by hand.** The panel finds an interpreter, creates the venv
+  and installs the driver packages from **Runtime → Install / repair dependencies**.
 
 ## How it works, on one page
 
@@ -21,10 +36,9 @@ source exists.
 
 ## Screenshots
 
-**Import from DBeaver.** The importer reads `data-sources.json` from your DBeaver
-workspace and decrypts `credentials-config.json` with DBeaver's own key, so host,
-port, database, user and the saved password all arrive together. Connections you
-already registered are marked, so the same endpoint is never added twice.
+**Import from DBeaver.** Every connection in the workspace is listed with the host,
+database and user it resolved to; ones you already registered say so instead of
+offering a duplicate.
 
 ![Import from DBeaver](https://raw.githubusercontent.com/halcyon6669/dsh-db-mcp/main/asset/3.png)
 
@@ -34,18 +48,37 @@ and a copy button.
 
 ![Data source list](https://raw.githubusercontent.com/halcyon6669/dsh-db-mcp/main/asset/1.png)
 
-## Zero configuration, in three senses
+## One set of sources, every DSH you run
 
-- **No DSH files.** The bundle patch inserts one Loader row. The plugin starts its
-  own Python MCP server over stdio and registers the tools on the host `tools`
-  service — no `dsh-mcp-client` row, no JSON to hand-edit, no env var to export.
-- **No data source to fill in.** The importer reads `data-sources.json` from the
-  DBeaver workspace and decrypts `credentials-config.json` with DBeaver's own key,
-  so host, port, database, user and saved password arrive together. Ticking a box
-  is the whole setup step.
-- **No Python to prepare.** The panel finds an interpreter, creates the venv and
-  installs the four driver packages from **Runtime → Install / repair
-  dependencies**.
+The registry lives in `~/.dsh/db-mcp/` (`datasources.json` + `secrets.json`, mode
+`0600`), not inside a profile. So:
+
+- **Install it in the desktop app, the web UI, or both** — they read the same file,
+  so a source imported once shows up everywhere.
+- **Run several DSH windows at the same time.** Each instance starts its own Python
+  service; the first takes the HTTP port and the next ones step to the following
+  free port automatically, so nothing refuses to start.
+- **Upgrade or reinstall without redoing the setup.** Sources, groups, settings and
+  the audit log survive; only the plugin code is replaced.
+
+## The same server, for your other agents
+
+The panel publishes the identical MCP server over streamable HTTP. The **Connect**
+tab shows the address (`http://127.0.0.1:8765/dsh-db-mcp`) and writes the entry for
+you with one click:
+
+| Client | Written as |
+| ------ | ---------- |
+| VS Code / VS Code Insiders | HTTP entry in `mcp.json` |
+| Cursor | HTTP entry in `~/.cursor/mcp.json` |
+| Claude Code | HTTP entry in `~/.claude.json` |
+| Claude Desktop | stdio entry in `claude_desktop_config.json` |
+| Codex CLI | `[mcp_servers.dsh-db-mcp]` in `~/.codex/config.toml` |
+
+Point JetBrains AI or anything else that speaks MCP at the same URL and it works
+too. Data sources and the read-only rules are shared; the audit log and the
+conversation-level limit stay inside DSH. See
+[the guide](docs/guide.md#connect-another-agent).
 
 ## Run
 
@@ -69,7 +102,8 @@ once and type it — it goes to `secrets.json` and never comes back to the page.
 
 Prefer to start from scratch? **New data source** takes one connection string
 (`postgresql://user:pw@host:5432/db`, a JDBC URL, an Oracle TNS descriptor or a
-`.db` path) and fills the form from it.
+`.db` path) and fills the form from it. A **Test** button next to **Save** logs in
+for real before you commit the source.
 
 ## What the agent gets
 
@@ -88,11 +122,8 @@ Prefer to start from scratch? **New data source** takes one connection string
 `datasource` is optional on all of them: omitted, the plugin falls back to the source
 flagged `isDefault` (or the first one in the registry).
 Queries run **in the conversation**; the panel is for managing connections, not a
-SQL console.
-
-The same server also answers other agents. The **Connect** tab shows the address
-(`http://127.0.0.1:8765/dsh-db-mcp`) and writes the entry for VS Code, Cursor, Claude Code,
-Claude Desktop or Codex with one click; see [the guide](docs/guide.md#connect-another-agent).
+SQL console. The **Tools** tab can hide the ones you never use — fewer distractions,
+smaller tool list in the model's context.
 
 ## Safety
 
