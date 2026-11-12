@@ -24,8 +24,9 @@ already knows, saved passwords included, and skip typing anything.
 - **Do not configure DSH.** The bundle inserts one Loader row. The plugin starts its
   own Python MCP server and registers the tools itself — no `dsh-mcp-client` row, no
   JSON to edit, no environment variable to export.
-- **Do not install Python by hand.** The panel finds an interpreter, creates the venv
-  and installs the driver packages from **Runtime → Install / repair dependencies**.
+- **Do not prepare a Python environment.** No venv to create, no `pip install` to
+  run by hand: the panel finds an interpreter, builds `.venv` and installs the driver
+  packages from **Runtime → Install / repair dependencies**.
 
 ## How it works, on one page
 
@@ -79,6 +80,16 @@ Point JetBrains AI or anything else that speaks MCP at the same URL and it works
 too. Data sources and the read-only rules are shared; the audit log and the
 conversation-level limit stay inside DSH. See
 [the guide](docs/guide.md#connect-another-agent).
+
+## Requirements
+
+| | Needs |
+| --- | --- |
+| DSH | `>= 0.2.0-rc.2` (declared in `engines.dsh`) |
+| Node.js | the runtime DSH itself ships (24.x). The plugin only uses `node:sqlite` — available from **22.5** — for the in-process SQLite probe; if it is missing, the Python driver covers SQLite and the panel says so |
+| Python | **3.10 or newer** for the bundled server (`mcp`, `psycopg`, `oracledb` and `pydantic` all require 3.10+; tested on 3.13). The panel creates the venv; you only need an interpreter on `PATH` or set `pythonPath` in the plugin config |
+| Database drivers | installed by the panel into that venv: `mcp`, `psycopg[binary]`, `py-opengauss`, `PyMySQL`, `oracledb`. SQLite needs nothing extra |
+| OS | Windows, macOS or Linux. Venv paths (`.venv/Scripts/python.exe` vs `.venv/bin/python`) and the DBeaver workspace location are detected per platform |
 
 ## Run
 

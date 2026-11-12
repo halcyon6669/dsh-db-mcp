@@ -185,6 +185,12 @@ The Python side reads `DB_MCP_RUNTIME`, `DB_MCP_ALLOW_WRITE`, `DB_MCP_MAX_ROWS` 
 
 - DSH `>=0.2.0-rc.2`, declared as `engines.dsh` in `package.json` so the market can
   show the host requirement and refuse an incompatible install.
-- Node 22+ on the Host (the plugin uses `node:sqlite` for the SQLite probe).
-- A Python 3.10+ interpreter for the MCP server, with the four packages from
-  `server/requirements.txt`. `mcp` must stay on 1.x — 2.x renamed `FastMCP`.
+- Node 22.5+ on the Host for the in-process SQLite probe (`node:sqlite`). DSH ships
+  24.x; if the module is missing the probe falls back to the Python driver and the
+  panel reports it instead of failing.
+- A Python 3.10+ interpreter for the MCP server, with the five packages from
+  `server/requirements.txt`. 3.10 is the floor set by `mcp`, `psycopg`, `oracledb`
+  and `pydantic`; the panel's one-click install builds the venv for you.
+  `mcp` must stay on 1.x — 2.x renamed `FastMCP`.
+- Windows, macOS or Linux. The venv layout (`Scripts/python.exe` vs `bin/python`)
+  and the DBeaver workspace path are resolved per platform.

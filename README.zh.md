@@ -15,7 +15,7 @@
 
 - **不用重打连接串。** 导入器读取 DBeaver 工作区的 `data-sources.json`，再用 DBeaver 自带的密钥解密 `credentials-config.json`——主机、端口、库名、用户**和已存口令**一次到位。勾选、导入，结束。已经登记过的地址会被标出来，同一个连接不会重复添加。
 - **不用配置 DSH。** bundle 只插入一行 Loader 记录；插件自己拉起 Python MCP 服务、自己注册工具——不需要 `dsh-mcp-client` 那一行，不用手改 JSON，不用导环境变量。
-- **不用手工装 Python。** 面板会自己找解释器、建 venv、装驱动包，入口在 **运行时诊断 → 安装 / 修复依赖**。
+- **不用手工准备 Python 环境。** 不用自己建 venv、不用手跑 `pip install`：面板会找解释器、建 `.venv`、装驱动包，入口在 **运行时诊断 → 安装 / 修复依赖**。
 
 ## 一张图看懂
 
@@ -54,6 +54,16 @@
 | Codex CLI | `~/.codex/config.toml` 里的 `[mcp_servers.dsh-db-mcp]` |
 
 JetBrains AI 或任何支持 MCP 的客户端，把这个地址填进去同样能用。数据源与只读规则是共享的；审计日志与会话级限制只存在于 DSH 内。详见[使用指南](docs/guide.zh.md#接入其它客户端)。
+
+## 运行要求
+
+| | 要求 |
+| --- | --- |
+| DSH | `>= 0.2.0-rc.2`（写在 `engines.dsh` 里） |
+| Node.js | 用 DSH 自带的运行时（24.x）。插件只在**进程内 SQLite 探测**里用到 `node:sqlite`（需 **22.5+**）；拿不到就改用 Python 驱动，面板会如实说明 |
+| Python | 自带服务需要 **3.10 及以上**（`mcp`、`psycopg`、`oracledb`、`pydantic` 都要求 3.10+；实测 3.13）。venv 由面板创建，你只需要 `PATH` 里有一个解释器，或在插件配置里指定 `pythonPath` |
+| 数据库驱动 | 由面板装进那个 venv：`mcp`、`psycopg[binary]`、`py-opengauss`、`PyMySQL`、`oracledb`。SQLite 不需要额外驱动 |
+| 系统 | Windows / macOS / Linux。venv 路径（`.venv/Scripts/python.exe` 与 `.venv/bin/python`）和 DBeaver 工作区位置都按平台自动探测 |
 
 ## 运行
 
