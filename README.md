@@ -32,7 +32,7 @@ and a copy button.
 Left: what you do in the panel. Right: what happens in the conversation once a
 source exists.
 
-![The path from a DBeaver connection to an answer in chat](https://raw.githubusercontent.com/halcyon6669/dsh-db-mcp/main/asset/usage-guide.png)
+![The path from a DBeaver connection to an answer in chat](https://raw.githubusercontent.com/halcyon6669/dsh-db-mcp/main/asset/usage-guide.en.png)
 
 ## Zero configuration, in three senses
 

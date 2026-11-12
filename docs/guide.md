@@ -11,7 +11,7 @@ file formats see [reference.md](reference.md); for build and release see
 You set connections up on the panel side (left); the conversation does the
 querying (right). The only hand-off is a data source that exists.
 
-![The path from a DBeaver connection to an answer in chat](../asset/usage-guide.png)
+![The path from a DBeaver connection to an answer in chat](../asset/usage-guide.en.png)
 
 ## Install and upgrade
 

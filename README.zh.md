@@ -23,7 +23,7 @@
 
 左边是在面板里要做的事，右边是有数据源之后、在对话里发生的事。
 
-![从 DBeaver 连接到对话里拿到答案](https://raw.githubusercontent.com/halcyon6669/dsh-db-mcp/main/asset/usage-guide.png)
+![从 DBeaver 连接到对话里拿到答案](https://raw.githubusercontent.com/halcyon6669/dsh-db-mcp/main/asset/usage-guide.zh.png)
 
 ## 三个方面都不用配
 

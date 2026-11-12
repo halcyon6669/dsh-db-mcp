@@ -1130,20 +1130,28 @@ window.__ModuleLoader__.load({
         margin: 2px 0 0;
         flex: 0 0 auto;
       }
-      .dbmcp-tool-limit { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px; }
-  .dbmcp-tool-limit .dbmcp-limit {
-    width: 74px;
-    padding: 3px 6px;
-    font-size: 12px;
-    text-align: right;
-    font-variant-numeric: tabular-nums;
-  }
-  .dbmcp-limit-unit { font-size: 12px; color: var(--dsw-alias-label-secondary); }
+          .dbmcp-tool-limit {
+        flex: 0 0 96px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 6px;
+        margin-left: auto;
+      }
+      .dbmcp-tool-limit .dbmcp-limit {
+        width: 72px;
+        padding: 3px 6px;
+        font-size: 12px;
+        text-align: center;
+        font-variant-numeric: tabular-nums;
+      }
+      .dbmcp-limit-unit { font-size: 12px; color: var(--dsw-alias-label-secondary); }
   .dbmcp-tool-main {
         display: flex;
         flex-direction: column;
         gap: 1px;
         min-width: 0;
+        flex: 1 1 auto;
       }
       .dbmcp-tool-name {
         font-family: var(--dbmcp-mono, ui-monospace, SFMono-Regular, Menlo, monospace);

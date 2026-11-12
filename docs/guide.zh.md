@@ -8,7 +8,7 @@
 
 连接在面板这一侧准备好（左），查询在对话那一侧发生（右）；两边唯一的交接物，是一条已经存在的数据源。
 
-![从 DBeaver 连接到对话里拿到答案](../asset/usage-guide.png)
+![从 DBeaver 连接到对话里拿到答案](../asset/usage-guide.zh.png)
 
 ## 安装与升级
 
