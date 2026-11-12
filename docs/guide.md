@@ -6,6 +6,13 @@ Everything the panel can do, in the order you meet it. For the wire protocol and
 file formats see [reference.md](reference.md); for build and release see
 [development.md](development.md).
 
+## The whole path, on one page
+
+You set connections up on the panel side (left); the conversation does the
+querying (right). The only hand-off is a data source that exists.
+
+![The path from a DBeaver connection to an answer in chat](../asset/usage-guide.png)
+
 ## Install and upgrade
 
 `dsh plugin` forwards its arguments to pnpm inside the profile directory, so it

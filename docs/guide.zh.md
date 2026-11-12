@@ -4,6 +4,12 @@
 
 面板能做的事，按你会遇到的顺序排列。协议与文件格式见 [reference.md](reference.md)（英文）；构建与发布见 [development.md](development.md)（英文）。
 
+## 流程总览
+
+连接在面板这一侧准备好（左），查询在对话那一侧发生（右）；两边唯一的交接物，是一条已经存在的数据源。
+
+![从 DBeaver 连接到对话里拿到答案](../asset/usage-guide.png)
+
 ## 安装与升级
 
 `dsh plugin` 会把参数原样转给 profile 目录里的 pnpm，所以 `--profile` 必须写在 pnpm 动词之前：

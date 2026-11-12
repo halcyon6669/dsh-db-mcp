@@ -25,6 +25,13 @@ and a copy button.
 
 ![Data source list](https://raw.githubusercontent.com/halcyon6669/dsh-db-mcp/main/asset/1.png)
 
+## How it works, on one page
+
+Left: what you do in the panel. Right: what happens in the conversation once a
+source exists.
+
+![The path from a DBeaver connection to an answer in chat](https://raw.githubusercontent.com/halcyon6669/dsh-db-mcp/main/asset/usage-guide.png)
+
 ## Zero configuration, in three senses
 
 - **No DSH files.** The bundle patch inserts one Loader row. The plugin starts its

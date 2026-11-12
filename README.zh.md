@@ -17,6 +17,12 @@
 
 ![数据源列表](https://raw.githubusercontent.com/halcyon6669/dsh-db-mcp/main/asset/1.png)
 
+## 一张图看懂
+
+左边是在面板里要做的事，右边是有数据源之后、在对话里发生的事。
+
+![从 DBeaver 连接到对话里拿到答案](https://raw.githubusercontent.com/halcyon6669/dsh-db-mcp/main/asset/usage-guide.png)
+
 ## 三个方面都不用配
 
 - **不用改 DSH 文件。** bundle 的 patch 只插入一行 Loader 记录；插件自己用 stdio 拉起 Python MCP 服务，并把工具注册到 Host 的 `tools` 服务上——不需要 `dsh-mcp-client` 那一行，也不用编辑 JSON、导环境变量。
