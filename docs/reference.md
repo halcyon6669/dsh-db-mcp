@@ -20,6 +20,7 @@ are `GET`; every mutation is `POST` (the same-origin check compares `Origin` wit
 | `GET /http/status` | streamable-HTTP endpoint state: running, host, port, `url` (`http://host:port/dsh-db-mcp`), `sseUrl`, stderr tail |
 | `POST /http/start` · `POST /http/stop` | start (optional `{ port }`) or stop the HTTP endpoint |
 | `GET /clients` | the endpoint URL plus every supported outside client: config file, detected, configured |
+| `GET /tools` | every tool the Python server offers, with its `enabled` state, so the panel can switch them |
 | `POST /clients/configure` | write this server into one client's config (`{ client }`) |
 | `GET /settings` · `POST /settings` | global write switch and audit switch |
 | `GET /scopes` · `POST /scopes` | per-conversation data-source limits (`{ session, datasources }`; an empty list lifts the limit) |
@@ -122,7 +123,10 @@ written atomically via a temporary file plus rename.
 `secrets.json` holds `{ "schemaVersion": 1, "secrets": { "<id>": { "password": "…" } } }`
 and is read only by the Host, never sent to the page.
 
-`settings.json` holds `{ "allowWrite": false, "auditLog": true, "httpEnabled": true, "httpPort": 8765, "updatedAt": "…" }`.
+`settings.json` holds `{ "allowWrite": false, "auditLog": true, "httpEnabled": true, "httpPort": 8765, "disabledTools": [], "updatedAt": "…" }`.
+`disabledTools` lists tool names without the `mcp__db__` prefix (for example `["get_ddl"]`):
+those are left out of the agent's registry, while the Python server keeps serving them over
+stdio and HTTP.
 `allowWrite` counts only when it is exactly `true`; `httpEnabled` defaults to `true`, and
 `httpPort` must fall between 1024 and 65535 (the server moves to the next free port when
 Windows refuses the requested one, and the panel shows the port actually in use).

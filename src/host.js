@@ -958,6 +958,12 @@ export function createHost(options = {}) {
       auditLog: value.auditLog !== false,
       // The HTTP endpoint is on by default: it is what outside MCP clients talk to.
       httpEnabled: value.httpEnabled !== false,
+      disabledTools: Array.isArray(value.disabledTools)
+        ? value.disabledTools
+            .filter((name) => typeof name === 'string' && /^[a-z][a-z0-9_]{0,40}$/.test(name.trim()))
+            .map((name) => name.trim())
+            .slice(0, 32)
+        : [],
       httpPort:
         Number.isInteger(port) && port >= HTTP_PORT_MIN && port <= HTTP_PORT_MAX ? port : HTTP_PORT_DEFAULT,
       updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : null,
@@ -974,6 +980,13 @@ export function createHost(options = {}) {
       allowWrite: patch.allowWrite === undefined ? current.allowWrite : patch.allowWrite === true,
       auditLog: patch.auditLog === undefined ? current.auditLog : patch.auditLog === true,
       httpEnabled: patch.httpEnabled === undefined ? current.httpEnabled : patch.httpEnabled === true,
+      disabledTools:
+        patch.disabledTools === undefined
+          ? current.disabledTools
+          : (Array.isArray(patch.disabledTools) ? patch.disabledTools : [])
+              .filter((name) => typeof name === 'string' && /^[a-z][a-z0-9_]{0,40}$/.test(name.trim()))
+              .map((name) => name.trim())
+              .slice(0, 32),
       httpPort: port,
       updatedAt: isoNow(),
     }
@@ -1827,6 +1840,16 @@ export function createHost(options = {}) {
           return sendJson(response, ...(await inspectSchema(search)))
         }
         if (route === '/settings') return sendJson(response, 200, { ok: true, settings: await readSettings() })
+        if (route === '/tools') {
+          const settingsNow = await readSettings()
+          const listing = bridge.toolCatalog()
+          return sendJson(response, 200, {
+            ok: true,
+            disabled: settingsNow.disabledTools || [],
+            tools: listing.tools,
+            scopeTool: listing.scopeTool,
+          })
+        }
         if (route === '/scopes') {
           const listing = await readScopes()
           return sendJson(response, 200, {
@@ -1901,8 +1924,14 @@ export function createHost(options = {}) {
         const settings = await writeSettings({
           allowWrite: payload.allowWrite,
           auditLog: payload.auditLog,
+          disabledTools: payload.disabledTools,
+          httpEnabled: payload.httpEnabled,
+          httpPort: payload.httpPort,
         })
-        if (payload.allowWrite !== undefined) void bridge.restart().catch(() => {})
+        if (!settings) return sendJson(response, 400, { ok: false, error: 'httpPort must be an integer between 1024 and 65535' })
+        if (payload.allowWrite !== undefined || payload.disabledTools !== undefined) {
+          void bridge.restart().catch(() => {})
+        }
         return sendJson(response, 200, { ok: true, settings })
       }
       if (route === '/scopes') {
@@ -1966,10 +1995,14 @@ export function createHost(options = {}) {
   void ensureMcp()
 
   // Outside clients (VS Code, Cursor, Codex) need a URL rather than stdio, so the
-  // HTTP half starts too unless the user switched it off in settings.
-  void readSettings()
-    .then((settings) => (settings.httpEnabled ? bridge.startHttp({ port: settings.httpPort }) : null))
-    .catch(() => null)
+  // HTTP half starts too unless the user switched it off in settings. It only
+  // starts inside a live plugin: a bare createHost() call (tests, probes) must not
+  // leave a Python child behind that keeps the process alive.
+  if (options.ctx) {
+    void readSettings()
+      .then((settings) => (settings.httpEnabled ? bridge.startHttp({ port: settings.httpPort }) : null))
+      .catch(() => null)
+  }
 
   return {
     version: PLUGIN_VERSION,

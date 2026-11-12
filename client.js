@@ -98,6 +98,11 @@ window.__ModuleLoader__.load({
         'clients.notConfigured': 'not configured yet',
         'clients.noFile': 'not detected',
         'clients.stdioNote': 'Claude Desktop and Codex get a stdio entry (python + this server), so they keep working even when the HTTP endpoint is stopped.',
+        'tools.title': 'Tools the agent sees',
+        'tools.hint': 'Uncheck a tool to take it away from the model; the switch applies on the next restart of the MCP server.',
+        'tools.offCount': '{n} tool(s) switched off.',
+        'tools.on': '{name} is on.',
+        'tools.off': '{name} is off.',
         'sources.count': '{n} configured',
         'sources.empty.title': 'No data source yet',
         'sources.empty.body': 'Add one here, or import the connections DBeaver already keeps on this machine. The agent queries real data through MCP tools, never through this page.',
@@ -330,6 +335,11 @@ window.__ModuleLoader__.load({
         'clients.notConfigured': '尚未配置',
         'clients.noFile': '未检测到',
         'clients.stdioNote': 'Claude Desktop 与 Codex 写入的是 stdio 配置（python + 本服务），所以即使 HTTP 端点停掉它们也能用。',
+        'tools.title': 'AI 可用的工具',
+        'tools.hint': '取消勾选就把这个工具从模型的工具列表里摘掉，下次重启 MCP 服务后生效。',
+        'tools.offCount': '已关闭 {n} 个工具。',
+        'tools.on': '已开启 {name}。',
+        'tools.off': '已关闭 {name}。',
         'sources.count': '已配置 {n} 个',
         'sources.empty.title': '还没有数据源',
         'sources.empty.body': '可以在这里新增，也可以直接导入这台机器上 DBeaver 已有的连接。AI 通过 MCP 工具查询真实数据，不会在这个页面里执行 SQL。',
@@ -1057,6 +1067,63 @@ window.__ModuleLoader__.load({
         font-weight: 500;
       }
       .dbmcp-client-main .dbmcp-hint {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .dbmcp-tools-head {
+        display: flex;
+        align-items: baseline;
+        gap: 10px;
+        margin: 14px 0 6px;
+        flex-wrap: wrap;
+      }
+      .dbmcp-tools-title {
+        margin: 0;
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--dsw-alias-label-primary);
+      }
+      .dbmcp-tools {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+      .dbmcp-tool {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        padding: 5px 8px;
+        border: 1px solid var(--dsw-alias-border-l1);
+        border-radius: 8px;
+        background: var(--dsw-alias-bg-layer-1);
+        cursor: pointer;
+        min-width: 0;
+      }
+      .dbmcp-tool:hover {
+        background: var(--dsw-alias-bg-layer-2);
+      }
+      .dbmcp-tool.is-off {
+        opacity: 0.6;
+      }
+      .dbmcp-tool-pick {
+        margin: 2px 0 0;
+        flex: 0 0 auto;
+      }
+      .dbmcp-tool-main {
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
+        min-width: 0;
+      }
+      .dbmcp-tool-name {
+        font-family: var(--dbmcp-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+        font-size: 12px;
+        color: var(--dsw-alias-label-primary);
+      }
+      .dbmcp-tool-desc {
+        font-size: 12px;
+        color: var(--dsw-alias-label-secondary);
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
@@ -2464,6 +2531,15 @@ window.__ModuleLoader__.load({
       return `${hours}h ${minutes % 60}m`
     }
 
+    /** Tool descriptions run to several paragraphs; a list row shows the first sentence. */
+    function firstLine(value) {
+      const text = String(value || '').replace(/\s+/g, ' ').trim()
+      if (!text) return ''
+      const stop = text.search(/[.!?]\s/)
+      const head = stop > 20 ? text.slice(0, stop + 1) : text
+      return head.length > 140 ? `${head.slice(0, 137)}…` : head
+    }
+
     /** Conversation ids are long uuids; the panel only needs to tell them apart. */
     function shortSession(value) {
       const text = String(value || '')
@@ -3678,6 +3754,7 @@ function groupTables(tables) {
       const [scopes, setScopes] = React.useState(null)
       const [http, setHttp] = React.useState(null)
       const [clients, setClients] = React.useState(null)
+      const [tools, setTools] = React.useState(null)
       const [portDraft, setPortDraft] = React.useState('')
       const [clientBusy, setClientBusy] = React.useState('')
 
@@ -3701,6 +3778,9 @@ function groupTables(tables) {
             .catch(() => {})
           void apiGet('/clients')
             .then((payload) => setClients(payload))
+            .catch(() => {})
+          void apiGet('/tools')
+            .then((payload) => setTools(payload))
             .catch(() => {})
         } catch (error) {
           setState({ status: 'error', data: null, error: String((error && error.message) || error) })
@@ -3928,6 +4008,23 @@ function groupTables(tables) {
           setNotice({ message: `${String((error && error.message) || error)}${hint}`, isError: true })
         } finally {
           setClientBusy('')
+        }
+      }
+
+      /** Publish or withdraw one tool for the agent. */
+      const toggleTool = async (name, on) => {
+        const current = (tools && Array.isArray(tools.disabled) ? tools.disabled : []).filter((item) => item !== name)
+        const next = on ? current : [...current, name]
+        setBusy(true)
+        setNotice(null)
+        try {
+          await apiPost('/settings', { disabledTools: next })
+          setNotice({ message: on ? fmt(t('tools.on'), { name }) : fmt(t('tools.off'), { name }), isError: false })
+          await load()
+        } catch (error) {
+          setNotice({ message: String((error && error.message) || error), isError: true })
+        } finally {
+          setBusy(false)
         }
       }
 
@@ -4565,6 +4662,42 @@ function groupTables(tables) {
             (clients && clients.clients ? clients.clients : []).map(renderClientRow),
           ),
           h('p', { className: 'dbmcp-hint' }, t('clients.stdioNote')),
+          h(
+            'div',
+            { className: 'dbmcp-tools-head' },
+            h('h3', { className: 'dbmcp-tools-title' }, t('tools.title')),
+            h('span', { className: 'dbmcp-hint' }, t('tools.hint')),
+          ),
+          h(
+            'div',
+            { className: 'dbmcp-tools' },
+            (tools && tools.tools ? tools.tools : []).map((tool) =>
+              h(
+                'label',
+                {
+                  key: tool.name,
+                  className: tool.enabled ? 'dbmcp-tool' : 'dbmcp-tool is-off',
+                  title: tool.description || tool.name,
+                },
+                h('input', {
+                  type: 'checkbox',
+                  className: 'dbmcp-tool-pick',
+                  checked: tool.enabled !== false,
+                  disabled: busy,
+                  onChange: (event) => toggleTool(tool.name, event.target.checked),
+                }),
+                h(
+                  'div',
+                  { className: 'dbmcp-tool-main' },
+                  h('code', { className: 'dbmcp-tool-name' }, tool.full || tool.name),
+                  h('span', { className: 'dbmcp-tool-desc' }, firstLine(tool.description)),
+                ),
+              ),
+            ),
+          ),
+          tools && tools.disabled && tools.disabled.length
+            ? h('p', { className: 'dbmcp-hint' }, fmt(t('tools.offCount'), { n: tools.disabled.length }))
+            : null,
         )
 
       let body

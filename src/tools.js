@@ -151,6 +151,10 @@ export function createBridge({
   // must not register its tools into a host that is already being torn down.
   let bootEpoch = 0;
   let state = { phase: 'idle', error: null, tools: [], serverInfo: null, startedAt: null };
+  /** Tool names the user switched off in the panel; kept out of the registry. */
+  let disabledTools = [];
+  /** Everything the Python server advertised, so the panel can list it even when off. */
+  let catalog = [];
   /**
    * The optional HTTP side. DSH itself speaks stdio; other MCP clients (VS Code,
    * Cursor, Codex, Claude Desktop) want a URL, so this keeps one more Python
@@ -326,7 +330,28 @@ export function createBridge({
     }
   }
 
-  function registerTools(tools) {
+  function isOff(name) {
+    return disabledTools.includes(name);
+  }
+
+  /**
+   * What the panel shows: every tool the server offers, its purpose, and whether
+   * it is currently published to the agent.
+   */
+  function toolCatalog() {
+    const tools = catalog.map((tool) => ({
+      name: tool.name,
+      full: `${TOOL_PREFIX}${tool.name}`,
+      description: tool.description || '',
+      parameters: safeParameters(tool.inputSchema),
+      enabled: !isOff(tool.name),
+    }));
+    return { tools, scopeTool: scopeDisposer !== null, disabled: [...disabledTools] };
+  }
+
+  function registerTools(all) {
+    const tools = all.filter((tool) => !isOff(tool.name));
+    catalog = all;
     const service = toolsService();
     if (!service || typeof service.register !== 'function') {
       throw new McpError(
@@ -407,6 +432,9 @@ export function createBridge({
     }
     const current = settings ? await settings().catch(() => ({ allowWrite: false })) : { allowWrite: false };
     const allowWrite = current && current.allowWrite === true;
+    disabledTools = Array.isArray(current && current.disabledTools)
+      ? current.disabledTools.map((name) => String(name || '').trim()).filter(Boolean)
+      : [];
     const candidates = pythonCandidates(config, runtimeDir);
     let lastError = null;
     for (const candidate of candidates) {
@@ -457,7 +485,7 @@ export function createBridge({
       state = {
         phase: 'ready',
         error: null,
-        tools: next.tools.map((tool) => `${TOOL_PREFIX}${tool.name}`),
+        tools: next.tools.filter((tool) => !isOff(tool.name)).map((tool) => `${TOOL_PREFIX}${tool.name}`),
         serverInfo: next.serverInfo,
         startedAt: new Date().toISOString(),
         command: [candidate, entry].join(' '),
@@ -672,5 +700,5 @@ export function createBridge({
     state = { ...state, phase: 'idle', tools: [] };
   }
 
-  return { ensure, restart, dispose, status, call, startHttp, stopHttp, httpStatus };
+  return { ensure, restart, dispose, status, call, startHttp, stopHttp, httpStatus, toolCatalog };
 }

@@ -118,13 +118,23 @@ try {
   check('a session id is required', missing.status === 400 && /conversation id/.test(String(missing.body?.error || '')))
 
   /* ---- HTTP endpoint and outside clients ---- */
+  // The endpoint only auto-starts inside a live plugin, so a bare host reports
+  // its configured port and a null URL until something starts it.
   const http = await get('/http/status')
-  check('the HTTP endpoint reports its state', http.status === 200 && typeof http.body?.url === 'string', JSON.stringify(http.body?.url))
+  const started = await post('/http/start', {})
+  const httpAfter = started.body?.ok === true ? started.body : await get('/http/status')
+  check(
+    'the HTTP endpoint reports its state',
+    http.status === 200 && (http.body?.url === null || typeof http.body?.url === 'string'),
+    JSON.stringify(http.body?.url),
+  )
+  const startedUrl = started.body?.http?.url || httpAfter.body?.url || httpAfter.body?.http?.url
   check(
     'the endpoint URL points at the streamable path',
-    String(http.body?.url || '').endsWith('/dsh-db-mcp'),
-    String(http.body?.url),
+    String(startedUrl || '').endsWith('/dsh-db-mcp'),
+    String(startedUrl),
   )
+  await post('/http/stop', {})
 
   const clients = await get('/clients')
   const ids = (clients.body?.clients || []).map((item) => item.id)

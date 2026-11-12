@@ -189,6 +189,8 @@ Claude Desktop 与 Codex 写的是 stdio 条目，不需要监听端口；另外
 
 有两样东西只属于 DSH、这些客户端拿不到：审计日志（由插件的宿主半边写入）与会话级访问限制（依赖 DSH 的会话 id）。只读限制照旧生效，因为它写在 Python 里。
 
+同一个标签下方还有一张 **AI 可用的工具** 卡片：一个工具一行、带勾选框。取消勾选后插件就不再把它发布给模型，模型完全看不到它；Python 服务本身仍然通过 stdio/HTTP 提供这些工具，所以这个开关收窄的是 DSH 智能体的工具列表，而不是数据库的能力。`mcp__db__session_scope` 不在列表里：关掉它会让已经有范围限制的会话没法再解除限制。
+
 想自己跑服务时，`server/main.py` 支持 `--stdio`（默认）、`--http`、`--sse`、`--host`、`--port`、`--path`（streamable-HTTP 路径，默认 `/dsh-db-mcp`），也认 `DB_MCP_TRANSPORT`、`DB_MCP_HOST`、`DB_MCP_PORT`、`DB_MCP_PATH`。
 
 ## 审计日志
