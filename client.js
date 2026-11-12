@@ -1240,6 +1240,14 @@ window.__ModuleLoader__.load({
         color: var(--dsw-alias-label-primary);
         word-break: break-all;
       }
+      /* A value made of text plus a control needs its own breathing room. */
+      .dbmcp-inline {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 10px;
+        min-width: 0;
+      }
       .dbmcp-dot {
         display: inline-block;
         width: 6px;
@@ -4970,17 +4978,21 @@ function groupTables(tables) {
               h(
                 Row,
                 { label: t('diag.packages') },
-                h('span', { className: 'dbmcp-hint' }, (env && env.packages) || '—'),
                 h(
-                  'button',
-                  {
-                    type: 'button',
-                    className: 'dbmcp-btn is-small',
-                    disabled: installing,
-                    title: t('diag.venvHint'),
-                    onClick: installDeps,
-                  },
-                  installing ? t('action.installing') : t('action.installDeps'),
+                  'span',
+                  { className: 'dbmcp-inline' },
+                  h('span', { className: 'dbmcp-hint' }, (env && env.packages) || '—'),
+                  h(
+                    'button',
+                    {
+                      type: 'button',
+                      className: 'dbmcp-btn is-small',
+                      disabled: installing,
+                      title: t('diag.venvHint'),
+                      onClick: installDeps,
+                    },
+                    installing ? t('action.installing') : t('action.installDeps'),
+                  ),
                 ),
               ),
               data.mcp && data.mcp.phase === 'failed' && /tools`? service/.test(String(data.mcp.error || ''))
