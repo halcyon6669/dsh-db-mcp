@@ -21,7 +21,7 @@ import { createDecipheriv } from 'node:crypto'
 import { chmod, mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { connect as netConnect } from 'node:net'
 
@@ -33,7 +33,7 @@ const { createBridge } = await import(new URL(`./tools.js?v=${GENERATION}`, impo
 
 const API_PREFIX = '/plugins/db-mcp/api'
 const PLUGIN_NAME = 'dsh-db-mcp'
-const PLUGIN_VERSION = '0.9.5'
+const PLUGIN_VERSION = '0.9.6'
 const SCHEMA_VERSION = 1
 const REGISTRY_FILE = 'datasources.json'
 const SECRETS_FILE = 'secrets.json'
@@ -46,6 +46,11 @@ const AUDIT_LIMIT_BYTES = 512 * 1024
 const PYTHON_CACHE_MS = 30_000
 const MAX_BODY_BYTES = 1024 * 1024
 const MAX_SOURCES = 32
+// Entry name other MCP clients see in their own configuration.
+const CLIENT_ENTRY = 'dsh-db-mcp'
+const HTTP_PORT_DEFAULT = 8765
+const HTTP_PORT_MIN = 1024
+const HTTP_PORT_MAX = 65535
 
 const KINDS = ['sqlite', 'postgres', 'gauss', 'mysql', 'oracle']
 const DEFAULT_PORTS = { postgres: 5432, gauss: 5432, mysql: 3306, oracle: 1521 }
@@ -944,21 +949,32 @@ export function createHost(options = {}) {
   async function readSettings() {
     const read = await readJson(settingsFile)
     const value = cleanRecord(read.value)
+    const port = Number(value.httpPort)
     return {
       file: settingsFile,
       error: read.error || null,
       // Writes stay off until somebody deliberately turns them on for a source.
       allowWrite: value.allowWrite === true,
       auditLog: value.auditLog !== false,
+      // The HTTP endpoint is on by default: it is what outside MCP clients talk to.
+      httpEnabled: value.httpEnabled !== false,
+      httpPort:
+        Number.isInteger(port) && port >= HTTP_PORT_MIN && port <= HTTP_PORT_MAX ? port : HTTP_PORT_DEFAULT,
       updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : null,
     }
   }
 
   async function writeSettings(patch) {
     const current = await readSettings()
+    const port = Number(patch.httpPort === undefined ? current.httpPort : patch.httpPort)
+    if (!Number.isInteger(port) || port < HTTP_PORT_MIN || port > HTTP_PORT_MAX) {
+      return null
+    }
     const next = {
       allowWrite: patch.allowWrite === undefined ? current.allowWrite : patch.allowWrite === true,
       auditLog: patch.auditLog === undefined ? current.auditLog : patch.auditLog === true,
+      httpEnabled: patch.httpEnabled === undefined ? current.httpEnabled : patch.httpEnabled === true,
+      httpPort: port,
       updatedAt: isoNow(),
     }
     await writeJsonAtomic(settingsFile, next, 0o600)
@@ -1042,6 +1058,172 @@ export function createHost(options = {}) {
       }
     }
     return { entries: entries.slice(-Math.max(1, Math.min(200, limit))).reverse(), error: null }
+  }
+
+  /** Where the editors and CLI agents keep their own MCP configuration. */
+  function clientTargets() {
+    const appData = process.env.APPDATA || ''
+    const home = homedir()
+    const list = []
+    if (appData) {
+      list.push({ id: 'vscode', label: 'Visual Studio Code', shape: 'vscode', file: join(appData, 'Code', 'User', 'mcp.json') })
+      list.push({
+        id: 'vscode-insiders',
+        label: 'VS Code Insiders',
+        shape: 'vscode',
+        file: join(appData, 'Code - Insiders', 'User', 'mcp.json'),
+      })
+    }
+    list.push({ id: 'cursor', label: 'Cursor', shape: 'mcpServers', file: join(home, '.cursor', 'mcp.json') })
+    list.push({ id: 'claude-code', label: 'Claude Code', shape: 'mcpServers', file: join(home, '.claude.json') })
+    if (appData) {
+      list.push({
+        id: 'claude-desktop',
+        label: 'Claude Desktop',
+        shape: 'mcpServers',
+        file: join(appData, 'Claude', 'claude_desktop_config.json'),
+      })
+    }
+    list.push({ id: 'codex', label: 'Codex CLI', shape: 'toml', file: join(home, '.codex', 'config.toml') })
+    return list
+  }
+
+  async function readLoose(file) {
+    try {
+      return JSON.parse(await readFile(file, 'utf8'))
+    } catch {
+      return null
+    }
+  }
+
+  function httpUrlOf(settings) {
+    const live = bridge.httpStatus()
+    return live.url || `http://127.0.0.1:${settings.httpPort}/mcp`
+  }
+
+  /** Claude Desktop and Codex are happiest with a plain stdio entry. */
+  async function stdioEntry() {
+    const live = bridge.httpStatus()
+    const venvPython = join(dir, '.venv', 'Scripts', 'python.exe')
+    const venvPosix = join(dir, '.venv', 'bin', 'python')
+    const interpreter =
+      live.python ||
+      (existsSync(venvPython) ? venvPython : existsSync(venvPosix) ? venvPosix : (await detectPython(config, pythonCache)))
+    const entry = join(options.packageDir || fileURLToPath(new URL('..', import.meta.url)), 'server', 'main.py')
+    return {
+      command: interpreter || 'python',
+      args: [entry],
+      env: { PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1', DB_MCP_RUNTIME: dir },
+    }
+  }
+
+  /** Drop one `[mcp_servers.<id>]` table (and its sub-tables) from a TOML file. */
+  function dropTomlTable(text, name) {
+    const lines = String(text || '').split('\n')
+    const kept = []
+    let skipping = false
+    for (const line of lines) {
+      const header = /^\s*\[([^\]]+)\]\s*$/.exec(line)
+      if (header) skipping = header[1].trim() === name || header[1].trim().startsWith(`${name}.`)
+      if (!skipping) kept.push(line)
+    }
+    return kept.join('\n').replace(/\n{3,}/g, '\n\n').replace(/\s+$/, '')
+  }
+
+  /**
+   * Tell the panel whether each client is present and already pointed here.
+   * Clients that cannot take an HTTP URL are reported with their stdio command,
+   * so the same card can explain both cases.
+   */
+  async function inspectClients() {
+    const settings = await readSettings()
+    const url = httpUrlOf(settings)
+    const clients = []
+    for (const target of clientTargets()) {
+      const exists = existsSync(target.file)
+      let configured = false
+      let current = null
+      if (target.shape === 'toml') {
+        const text = exists ? await readFile(target.file, 'utf8').catch(() => '') : ''
+        configured = text.includes(`[mcp_servers.${CLIENT_ENTRY}]`) || text.includes(`[mcp_servers.${CLIENT_ENTRY}.`)
+        const found = /\[mcp_servers\.dsh-db-mcp\][\s\S]*?url\s*=\s*"([^"]+)"/.exec(text)
+        current = found ? found[1] : null
+      } else {
+        const parsed = exists ? await readLoose(target.file) : null
+        const section = target.shape === 'vscode' ? parsed && parsed.servers : parsed && parsed.mcpServers
+        const entry = section && section[CLIENT_ENTRY]
+        configured = Boolean(entry)
+        current = (entry && (entry.url || entry.serverUrl)) || null
+      }
+      clients.push({ id: target.id, label: target.label, file: target.file, shape: target.shape, exists, configured, current })
+    }
+    return { ok: true, url, settings, clients }
+  }
+
+  /**
+   * Write one client's config entry. JSON clients get the HTTP endpoint; Claude
+   * Desktop and Codex get a stdio entry so no port has to stay open for them.
+   */
+  async function configureClient(payload) {
+    const id = trimmed(payload.client)
+    const target = clientTargets().find((item) => item.id === id)
+    if (!target) return { status: 404, body: { ok: false, error: `unknown client: ${id || '(empty)'}` } }
+    const settings = await readSettings()
+    const live = bridge.httpStatus()
+    const url = httpUrlOf(settings)
+
+    if (target.shape === 'toml') {
+      const stdio = await stdioEntry()
+      const block = [
+        `[mcp_servers.${CLIENT_ENTRY}]`,
+        `command = ${JSON.stringify(stdio.command)}`,
+        `args = [${stdio.args.map((item) => JSON.stringify(item)).join(', ')}]`,
+        '',
+        `[mcp_servers.${CLIENT_ENTRY}.env]`,
+        ...Object.entries(stdio.env).map(([key, value]) => `${key} = ${JSON.stringify(value)}`),
+      ].join('\n')
+      const existing = existsSync(target.file) ? await readFile(target.file, 'utf8').catch(() => '') : ''
+      const cleaned = dropTomlTable(existing, `mcp_servers.${CLIENT_ENTRY}`)
+      const next = `${cleaned ? `${cleaned}\n\n` : ''}${block}\n`
+      await mkdir(dirname(target.file), { recursive: true }).catch(() => {})
+      await writeFile(target.file, next, 'utf8')
+      return {
+        status: 200,
+        body: { ok: true, client: target.id, label: target.label, file: target.file, transport: 'stdio', command: stdio.command },
+      }
+    }
+
+    if (target.id === 'claude-desktop') {
+      const stdio = await stdioEntry()
+      const parsed = (await readLoose(target.file)) || {}
+      const section = parsed.mcpServers && typeof parsed.mcpServers === 'object' ? parsed.mcpServers : {}
+      section[CLIENT_ENTRY] = { command: stdio.command, args: stdio.args, env: stdio.env }
+      parsed.mcpServers = section
+      await mkdir(dirname(target.file), { recursive: true }).catch(() => {})
+      await writeFile(target.file, `${JSON.stringify(parsed, null, 2)}\n`, 'utf8')
+      return {
+        status: 200,
+        body: { ok: true, client: target.id, label: target.label, file: target.file, transport: 'stdio', command: stdio.command },
+      }
+    }
+
+    if (!live.running) {
+      return {
+        status: 409,
+        body: { ok: false, error: 'the HTTP endpoint is not running', hint: 'start it from the connection card, then configure the client again' },
+      }
+    }
+    const parsed = (await readLoose(target.file)) || {}
+    const sectionName = target.shape === 'vscode' ? 'servers' : 'mcpServers'
+    const section = parsed[sectionName] && typeof parsed[sectionName] === 'object' ? parsed[sectionName] : {}
+    section[CLIENT_ENTRY] = { type: 'http', url }
+    parsed[sectionName] = section
+    await mkdir(dirname(target.file), { recursive: true }).catch(() => {})
+    await writeFile(target.file, `${JSON.stringify(parsed, null, 2)}\n`, 'utf8')
+    return {
+      status: 200,
+      body: { ok: true, client: target.id, label: target.label, file: target.file, transport: 'http', url, entry: section[CLIENT_ENTRY] },
+    }
   }
 
   async function pythonEnv() {
@@ -1137,6 +1319,7 @@ export function createHost(options = {}) {
       datasources: listing.datasources,
       groups: registry.groups || [],
       settings: await readSettings(),
+      http: bridge.httpStatus(),
       mcp: {
         serverName: trimmed(config.mcpServerName) || 'db',
         wired: mcpState.phase === 'ready',
@@ -1659,6 +1842,11 @@ export function createHost(options = {}) {
           return sendJson(response, 200, { ok: listing.error === null, file: auditFile, ...listing })
         }
         if (route === '/python/env' || route === '/python/status') return sendJson(response, 200, { ok: true, ...(await pythonEnv()) })
+        if (route === '/http/status') {
+          const settings = await readSettings()
+          return sendJson(response, 200, { ok: true, settings, ...bridge.httpStatus() })
+        }
+        if (route === '/clients') return sendJson(response, 200, await inspectClients())
         if (route === '/mcp/status') {
           const state = bridge.status()
           return sendJson(response, 200, { ok: state.phase !== 'failed', ...state })
@@ -1731,6 +1919,23 @@ export function createHost(options = {}) {
         const result = await setupPython()
         return sendJson(response, result.status, result.body)
       }
+      if (route === '/http/start') {
+        const current = await readSettings()
+        const port = Number(payload.port) || current.httpPort
+        const saved = await writeSettings({ httpPort: port })
+        if (!saved) return sendJson(response, 400, { ok: false, error: `port must be between ${HTTP_PORT_MIN} and ${HTTP_PORT_MAX}` })
+        const http = await bridge.startHttp({ port: saved.httpPort })
+        const ok = http.running === true
+        return sendJson(response, ok ? 200 : 500, { ok, http, settings: saved })
+      }
+      if (route === '/http/stop') {
+        const http = bridge.stopHttp()
+        return sendJson(response, 200, { ok: true, http })
+      }
+      if (route === '/clients/configure') {
+        const result = await configureClient(payload)
+        return sendJson(response, result.status, result.body)
+      }
       if (route === '/mcp/start' || route === '/mcp/restart') {
         const state = route === '/mcp/start' ? await ensureMcp() : await bridge.restart().catch((error) => ({ ...bridge.status(), phase: 'failed', error: String((error && error.message) || error) }))
         return sendJson(response, state.phase === 'ready' ? 200 : 500, { ok: state.phase === 'ready', ...state })
@@ -1759,6 +1964,12 @@ export function createHost(options = {}) {
   // Publish the MCP tools as soon as the host half mounts, so the agent can use
   // them even if nobody opens the Database panel.
   void ensureMcp()
+
+  // Outside clients (VS Code, Cursor, Codex) need a URL rather than stdio, so the
+  // HTTP half starts too unless the user switched it off in settings.
+  void readSettings()
+    .then((settings) => (settings.httpEnabled ? bridge.startHttp({ port: settings.httpPort }) : null))
+    .catch(() => null)
 
   return {
     version: PLUGIN_VERSION,

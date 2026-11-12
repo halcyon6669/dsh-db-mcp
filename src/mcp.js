@@ -51,7 +51,7 @@ const ENV_ALLOW = [
   'VIRTUAL_ENV',
 ];
 
-function childEnvironment(extra) {
+export function childEnvironment(extra) {
   const env = {};
   for (const key of ENV_ALLOW) {
     const value = process.env[key];

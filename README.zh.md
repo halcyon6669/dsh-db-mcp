@@ -65,6 +65,8 @@ dsh plugin --profile web add dsh-db-mcp       # Web 端
 
 `datasource` 在所有工具里都是可选的，省略时回落到标着 `isDefault` 的那条（没有就取注册表里的第一条）。查询发生在**对话里**，面板只负责管理连接，不是 SQL 控制台。
 
+同一个服务也能给别的 agent 用：**接入其它客户端** 标签会显示地址（`http://127.0.0.1:8765/dsh-db-mcp`），并可一键写入 VS Code、Cursor、Claude Code、Claude Desktop 或 Codex 的配置，详见[使用指南](docs/guide.zh.md#接入其它客户端)。
+
 ## 安全
 
 - **默认只读**，两道互相独立的闸门：全局写开关 + 单源标记，两者都打开才允许写入。

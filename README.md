@@ -88,6 +88,10 @@ flagged `isDefault` (or the first one in the registry).
 Queries run **in the conversation**; the panel is for managing connections, not a
 SQL console.
 
+The same server also answers other agents. The **Connect** tab shows the address
+(`http://127.0.0.1:8765/dsh-db-mcp`) and writes the entry for VS Code, Cursor, Claude Code,
+Claude Desktop or Codex with one click; see [the guide](docs/guide.md#connect-another-agent).
+
 ## Safety
 
 - **Read-only by default**, with two independent gates: a global write switch and a

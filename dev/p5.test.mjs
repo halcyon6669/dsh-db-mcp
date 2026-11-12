@@ -116,6 +116,31 @@ try {
 
   const missing = await post('/scopes', {})
   check('a session id is required', missing.status === 400 && /conversation id/.test(String(missing.body?.error || '')))
+
+  /* ---- HTTP endpoint and outside clients ---- */
+  const http = await get('/http/status')
+  check('the HTTP endpoint reports its state', http.status === 200 && typeof http.body?.url === 'string', JSON.stringify(http.body?.url))
+  check(
+    'the endpoint URL points at the streamable path',
+    String(http.body?.url || '').endsWith('/dsh-db-mcp'),
+    String(http.body?.url),
+  )
+
+  const clients = await get('/clients')
+  const ids = (clients.body?.clients || []).map((item) => item.id)
+  check('the client list covers the supported agents', clients.status === 200 && ids.length === 6, ids.join(','))
+  check(
+    'Claude Code and Codex are both offered',
+    ids.includes('claude-code') && ids.includes('codex'),
+    ids.join(','),
+  )
+  check(
+    'each client knows its config file',
+    (clients.body?.clients || []).every((item) => typeof item.file === 'string' && item.file.length > 0),
+  )
+
+  const unknown = await post('/clients/configure', { client: 'nope' })
+  check('an unknown client is refused', unknown.status === 404 && /unknown client/.test(String(unknown.body?.error || '')))
 } finally {
   await new Promise((resolve) => server.close(resolve))
   await host.dispose?.().catch(() => {})

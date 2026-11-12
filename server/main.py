@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import time
 from typing import Any, Optional
 
@@ -24,6 +25,82 @@ import store
 DEFAULT_MAX_ROWS = int(os.environ.get("DB_MCP_MAX_ROWS") or 200)
 HARD_MAX_ROWS = int(os.environ.get("DB_MCP_MAX_ROWS_HARD") or 2000)
 
+USAGE = """usage: main.py [--stdio | --http | --sse] [--host HOST] [--port PORT] [--path PATH]
+
+  --stdio     speak MCP over stdin/stdout (default; what the DSH plugin spawns)
+  --http      serve streamable HTTP at --path (for VS Code, Cursor, Codex, Claude)
+  --sse       serve the older SSE transport at /sse
+  --host      interface to bind for --http/--sse (default 127.0.0.1)
+  --port      port to bind for --http/--sse (default 8000)
+  --path      streamable-HTTP path (default /dsh-db-mcp)
+
+The same registry is read in every mode, so an HTTP client sees exactly the
+data sources the panel manages. DB_MCP_TRANSPORT, DB_MCP_HOST, DB_MCP_PORT and
+DB_MCP_PATH set the same four options through the environment.
+"""
+
+TRANSPORTS = {"stdio", "sse", "streamable-http"}
+DEFAULT_PATH = "/dsh-db-mcp"
+
+
+def _transport_args(argv: list[str]) -> dict:
+    """Parse the transport flags without pulling in argparse at import time."""
+    options = {
+        "transport": (os.environ.get("DB_MCP_TRANSPORT") or "stdio").strip() or "stdio",
+        "host": os.environ.get("DB_MCP_HOST") or "127.0.0.1",
+        "port": os.environ.get("DB_MCP_PORT") or "8000",
+        "path": os.environ.get("DB_MCP_PATH") or DEFAULT_PATH,
+        "help": False,
+    }
+    index = 0
+    while index < len(argv):
+        arg = argv[index]
+        if arg in ("--help", "-h"):
+            options["help"] = True
+            index += 1
+        elif arg == "--stdio":
+            options["transport"] = "stdio"
+            index += 1
+        elif arg in ("--http", "--streamable-http"):
+            options["transport"] = "streamable-http"
+            index += 1
+        elif arg == "--sse":
+            options["transport"] = "sse"
+            index += 1
+        elif arg in ("--transport", "--host", "--port", "--path"):
+            if index + 1 >= len(argv):
+                raise SystemExit(f"{arg} needs a value\n{USAGE}")
+            options[arg[2:]] = argv[index + 1]
+            index += 2
+        elif arg.startswith("--transport=") or arg.startswith("--host=") or arg.startswith("--port=") or arg.startswith("--path="):
+            name, _, value = arg[2:].partition("=")
+            options[name] = value
+            index += 1
+        else:
+            raise SystemExit(f"unknown argument: {arg}\n{USAGE}")
+    normalised = options["transport"].strip().lower()
+    if normalised == "http":
+        normalised = "streamable-http"
+    if normalised not in TRANSPORTS:
+        raise SystemExit(f"unknown transport: {options['transport']}\n{USAGE}")
+    options["transport"] = normalised
+    try:
+        port = int(options["port"])
+    except (TypeError, ValueError):
+        raise SystemExit(f"port must be a number, got {options['port']!r}\n{USAGE}")
+    if not 1 <= port <= 65535:
+        raise SystemExit(f"port must be between 1 and 65535, got {port}\n{USAGE}")
+    options["port"] = port
+    options["host"] = str(options["host"]).strip() or "127.0.0.1"
+    path = str(options["path"]).strip() or DEFAULT_PATH
+    if not path.startswith("/"):
+        path = "/" + path
+    options["path"] = path
+    return options
+
+
+ARGS = _transport_args(sys.argv[1:])
+
 mcp = FastMCP(
     "db-mcp",
     instructions=(
@@ -33,6 +110,9 @@ mcp = FastMCP(
         "the source is read-only, INSERT/UPDATE/DELETE/DDL only when writes are "
         "enabled. Prefer these tools over guessing table names."
     ),
+    host=ARGS["host"],
+    port=ARGS["port"],
+    streamable_http_path=ARGS["path"],
 )
 
 
@@ -260,7 +340,11 @@ def get_ddl(table: str, datasource: Optional[str] = None, schema: Optional[str] 
 
 
 def main() -> None:
-    mcp.run(transport="stdio")
+    args = _transport_args(sys.argv[1:])
+    if args["help"]:
+        print(USAGE)
+        return
+    mcp.run(transport=args["transport"])
 
 
 if __name__ == "__main__":

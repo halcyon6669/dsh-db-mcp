@@ -168,6 +168,29 @@ Python 服务在启动时读取全局开关，开关一动 Host 就重启它。�
 
 说 *「取消本会话的限制」*（或让工具用 `all: true`）即可解除。没有保存限制的会话仍然能访问全部数据源；*运行时诊断* 标签会列出被限制的会话，一眼可见。这个限制是会话级的便利开关，不是安全边界：运行时目录里的文件对你自己的账号始终可读。
 
+## 接入其它客户端
+
+Python 服务是标准 MCP stdio 服务，DSH 只是它的一个客户端。面板里的 **接入其它客户端** 标签会展示可用的连接地址，并替你把配置写进对方的配置文件。
+
+默认地址是 `http://127.0.0.1:8765/dsh-db-mcp`，随插件启动；端口可在该标签里改，地址带复制按钮。如果 Windows 拒绝首选端口，服务会自动换到下一个可用端口，标签里显示实际地址。
+
+点一次「自动配置」，就会写入对应的配置文件：
+
+| 客户端 | 文件 | 写入内容 |
+| --- | --- | --- |
+| Visual Studio Code | `%APPDATA%\Code\User\mcp.json` | `servers` 下的 HTTP 条目 |
+| VS Code Insiders | `%APPDATA%\Code - Insiders\User\mcp.json` | `servers` 下的 HTTP 条目 |
+| Cursor | `~/.cursor/mcp.json` | `mcpServers` 下的 HTTP 条目 |
+| Claude Code | `~/.claude.json` | `mcpServers` 下的 HTTP 条目 |
+| Claude Desktop | `%APPDATA%\Claude\claude_desktop_config.json` | stdio 条目（python + `server/main.py`） |
+| Codex CLI | `~/.codex/config.toml` | `[mcp_servers.dsh-db-mcp]` stdio 条目 |
+
+Claude Desktop 与 Codex 写的是 stdio 条目，不需要监听端口；另外三个用 HTTP 地址，看到的就是面板管理的同一个进程。所有客户端读同一份 `datasources.json` 与 `secrets.json`，在面板里加的数据源不用在客户端里重填（但要让 MCP 服务重启一次才会读到）。
+
+有两样东西只属于 DSH、这些客户端拿不到：审计日志（由插件的宿主半边写入）与会话级访问限制（依赖 DSH 的会话 id）。只读限制照旧生效，因为它写在 Python 里。
+
+想自己跑服务时，`server/main.py` 支持 `--stdio`（默认）、`--http`、`--sse`、`--host`、`--port`、`--path`（streamable-HTTP 路径，默认 `/dsh-db-mcp`），也认 `DB_MCP_TRANSPORT`、`DB_MCP_HOST`、`DB_MCP_PORT`、`DB_MCP_PATH`。
+
 ## 审计日志
 
 每次 MCP 工具调用都会往 `<runtime>/logs/audit.jsonl`（0600）追加一行 JSON：时间、工具、数据源、耗时、行数、截断到 2000 字符的 SQL，以及失败时的错误。结果行本身从不记录。文件到 512 KiB 会轮转为 `audit.1.jsonl`，日志可用 `auditLog: false` 关闭。

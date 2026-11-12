@@ -19,13 +19,14 @@ window.__ModuleLoader__.load({
 
     const NS = 'db-mcp'
     /** Top-level tabs of the panel. `sources` also hosts the create/edit/import/structure views. */
-    const TABS = [{ id: 'list' }, { id: 'create' }, { id: 'import' }, { id: 'runtime' }, { id: 'audit' }]
+    const TABS = [{ id: 'list' }, { id: 'create' }, { id: 'import' }, { id: 'runtime' }, { id: 'clients' }, { id: 'audit' }]
 
     /** Tab labels stay literal so the i18n check can see every key. */
     function tabLabel(t, id) {
       if (id === 'create') return t('tab.create')
       if (id === 'import') return t('tab.import')
       if (id === 'runtime') return t('tab.runtime')
+      if (id === 'clients') return t('tab.clients')
       if (id === 'audit') return t('tab.audit')
       return t('tab.list')
     }
@@ -35,6 +36,7 @@ window.__ModuleLoader__.load({
       if (mode === 'create' || mode === 'edit') return 'create'
       if (mode === 'import') return 'import'
       if (mode === 'runtime') return 'runtime'
+      if (mode === 'clients') return 'clients'
       if (mode === 'audit') return 'audit'
       return 'list'
     }
@@ -78,6 +80,24 @@ window.__ModuleLoader__.load({
         'notice.importedSkipped': 'Imported {n} data source(s); skipped {m} already configured.',
         'notice.probeOk': '{name}: connection OK ({ms} ms).',
         'notice.mcpReady': 'MCP server is up with {count} tool(s).',
+        'notice.httpOn': 'HTTP endpoint is running; other agents can connect now.',
+        'notice.httpOff': 'HTTP endpoint stopped.',
+        'notice.clientReady': '{name} now points at this server over {transport}.',
+        'clients.title': 'Connect another agent',
+        'clients.hint': 'Point VS Code, Cursor, Claude Code, Claude Desktop or Codex at this MCP server. Everyone shares the same data sources, so nothing has to be typed twice.',
+        'clients.running': 'running',
+        'clients.stopped': 'stopped',
+        'clients.copy': 'Copy',
+        'clients.copied': 'Copied',
+        'clients.port': 'Port',
+        'clients.start': 'Start',
+        'clients.stop': 'Stop',
+        'clients.configure': 'Auto-configure',
+        'clients.working': 'Writing…',
+        'clients.configured': 'configured',
+        'clients.notConfigured': 'not configured yet',
+        'clients.noFile': 'not detected',
+        'clients.stdioNote': 'Claude Desktop and Codex get a stdio entry (python + this server), so they keep working even when the HTTP endpoint is stopped.',
         'sources.count': '{n} configured',
         'sources.empty.title': 'No data source yet',
         'sources.empty.body': 'Add one here, or import the connections DBeaver already keeps on this machine. The agent queries real data through MCP tools, never through this page.',
@@ -193,6 +213,7 @@ window.__ModuleLoader__.load({
         'tab.create': 'New data source',
         'tab.import': 'Import from DBeaver',
         'tab.runtime': 'Runtime',
+        'tab.clients': 'Connect',
         'tab.audit': 'Audit log',
         'header.backToChat': 'Back to chat',
         'form.group': 'Group',
@@ -291,6 +312,24 @@ window.__ModuleLoader__.load({
         'notice.importedSkipped': '已导入 {n} 个数据源，跳过 {m} 个已存在的。',
         'notice.probeOk': '{name}：连接正常（{ms} ms）。',
         'notice.mcpReady': 'MCP 服务已就绪，共 {count} 个工具。',
+        'notice.httpOn': 'HTTP 端点已启动，其它 agent 现在可以接入。',
+        'notice.httpOff': 'HTTP 端点已停止。',
+        'notice.clientReady': '已把 {name} 配置为通过 {transport} 使用本服务。',
+        'clients.title': '接入其它客户端',
+        'clients.hint': '把 VS Code、Cursor、Claude Code、Claude Desktop 或 Codex 指向这个 MCP 服务。它们共用同一份数据源，不用重复填。',
+        'clients.running': '运行中',
+        'clients.stopped': '已停止',
+        'clients.copy': '复制',
+        'clients.copied': '已复制',
+        'clients.port': '端口',
+        'clients.start': '启动',
+        'clients.stop': '停止',
+        'clients.configure': '自动配置',
+        'clients.working': '写入中…',
+        'clients.configured': '已配置',
+        'clients.notConfigured': '尚未配置',
+        'clients.noFile': '未检测到',
+        'clients.stdioNote': 'Claude Desktop 与 Codex 写入的是 stdio 配置（python + 本服务），所以即使 HTTP 端点停掉它们也能用。',
         'sources.count': '已配置 {n} 个',
         'sources.empty.title': '还没有数据源',
         'sources.empty.body': '可以在这里新增，也可以直接导入这台机器上 DBeaver 已有的连接。AI 通过 MCP 工具查询真实数据，不会在这个页面里执行 SQL。',
@@ -405,6 +444,7 @@ window.__ModuleLoader__.load({
         'tab.create': '新建数据源',
         'tab.import': '从 DBeaver 导入',
         'tab.runtime': '运行时诊断',
+        'tab.clients': '接入其它客户端',
         'tab.audit': '审计日志',
         'header.backToChat': '返回会话',
         'form.group': '分组',
@@ -966,6 +1006,60 @@ window.__ModuleLoader__.load({
       .dbmcp-mono {
         font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
         font-size: 12px;
+      }
+      .dbmcp-endpoint {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin: 6px 0 10px;
+      }
+      .dbmcp-endpoint-url {
+        flex: 1 1 240px;
+        min-width: 0;
+        padding: 5px 10px;
+        border: 1px solid var(--dsw-alias-border-l1);
+        border-radius: 8px;
+        background: var(--dsw-alias-bg-layer-1);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 12px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .dbmcp-port {
+        flex: 0 0 92px;
+        width: 92px;
+      }
+      .dbmcp-clients {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      .dbmcp-client {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 5px 8px;
+        border: 1px solid var(--dsw-alias-border-l1);
+        border-radius: 8px;
+        background: var(--dsw-alias-bg-layer-1);
+      }
+      .dbmcp-client-main {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        min-width: 0;
+        flex: 1 1 auto;
+      }
+      .dbmcp-client-name {
+        font-size: 13px;
+        font-weight: 500;
+      }
+      .dbmcp-client-main .dbmcp-hint {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
       .dbmcp-card-head {
         display: flex;
@@ -3555,6 +3649,7 @@ function groupTables(tables) {
       const [query, setQuery] = React.useState('')
       const [filter, setFilter] = React.useState('all')
       const [copiedId, setCopiedId] = React.useState(null)
+      const [copiedEndpoint, setCopiedEndpoint] = React.useState(false)
       const [copiedChip, setCopiedChip] = React.useState(null)
       const [collapsed, setCollapsed] = React.useState([])
 
@@ -3581,6 +3676,10 @@ function groupTables(tables) {
       const [env, setEnv] = React.useState(null)
       const [installing, setInstalling] = React.useState(false)
       const [scopes, setScopes] = React.useState(null)
+      const [http, setHttp] = React.useState(null)
+      const [clients, setClients] = React.useState(null)
+      const [portDraft, setPortDraft] = React.useState('')
+      const [clientBusy, setClientBusy] = React.useState('')
 
       const load = React.useCallback(async () => {
         setBusy(true)
@@ -3596,6 +3695,12 @@ function groupTables(tables) {
             .catch(() => {})
           void apiGet('/scopes')
             .then((payload) => setScopes(payload.sessions || []))
+            .catch(() => {})
+          void apiGet('/http/status')
+            .then((payload) => setHttp(payload))
+            .catch(() => {})
+          void apiGet('/clients')
+            .then((payload) => setClients(payload))
             .catch(() => {})
         } catch (error) {
           setState({ status: 'error', data: null, error: String((error && error.message) || error) })
@@ -3750,8 +3855,19 @@ function groupTables(tables) {
         }
       }
 
-      const toggleWrite = async (next) => {
+      /** Copy the MCP endpoint, ready to paste into another agent's settings. */
+      const copyEndpoint = async (url) => {
+        if (!url) return
         try {
+          await copyText(url)
+          setCopiedEndpoint(true)
+          setTimeout(() => setCopiedEndpoint(false), 1600)
+        } catch (error) {
+          setNotice({ message: String((error && error.message) || error), isError: true })
+        }
+      }
+
+      const toggleWrite = async (next) => {        try {
           const payload = await apiPost('/settings', { allowWrite: next })
           setSettings(payload.settings || { allowWrite: next })
           setNotice({ message: next ? t('notice.writeOn') : t('notice.writeOff'), isError: false })
@@ -3773,6 +3889,45 @@ function groupTables(tables) {
           setNotice({ message: `${t('notice.depsFail')} ${String((error && error.message) || error)}`, isError: true })
         } finally {
           setInstalling(false)
+        }
+      }
+
+      /** Start or stop the HTTP endpoint other agents connect to. */
+      const controlHttp = async (action) => {
+        setBusy(true)
+        try {
+          const port = Number(portDraft || (http && http.port) || (settings && settings.httpPort) || 8765)
+          const payload = await apiPost(`/http/${action}`, action === 'start' ? { port } : {})
+          if (payload && payload.http) setHttp(payload.http)
+          setNotice({
+            message: payload && payload.http && payload.http.running ? t('notice.httpOn') : t('notice.httpOff'),
+            isError: !(payload && payload.ok !== false),
+          })
+          await load()
+        } catch (error) {
+          setNotice({ message: String((error && error.message) || error), isError: true })
+        } finally {
+          setBusy(false)
+        }
+      }
+
+      /** Write this server into one client's own configuration file. */
+      const configureClient = async (client) => {
+        setClientBusy(client.id)
+        setNotice(null)
+        try {
+          const payload = await apiPost('/clients/configure', { client: client.id })
+          setNotice({
+            message: fmt(t('notice.clientReady'), { name: client.label, transport: payload.transport || 'http' }),
+            isError: false,
+          })
+          await load()
+        } catch (error) {
+          const body = (error && error.payload) || {}
+          const hint = body.hint ? ` ${body.hint}` : ''
+          setNotice({ message: `${String((error && error.message) || error)}${hint}`, isError: true })
+        } finally {
+          setClientBusy('')
         }
       }
 
@@ -4332,6 +4487,86 @@ function groupTables(tables) {
       const renderStatus = () =>
         h(StatusStrip, { t, data, sources, failedSources, groupNames, filter, setFilter, query, setQuery })
 
+      /** One row per supported outside client: detected, configured, one click away. */
+      const renderClientRow = (client) =>
+        h(
+          'div',
+          { className: 'dbmcp-client', key: client.id },
+          h(
+            'div',
+            { className: 'dbmcp-client-main' },
+            h('span', { className: 'dbmcp-client-name' }, client.label),
+            h('span', { className: 'dbmcp-hint dbmcp-mono' }, client.file || ''),
+          ),
+          client.configured
+            ? h('span', { className: 'dbmcp-pill is-open' }, t('clients.configured'))
+            : h('span', { className: 'dbmcp-hint' }, client.exists ? t('clients.notConfigured') : t('clients.noFile')),
+          h(
+            'button',
+            {
+              type: 'button',
+              className: 'dbmcp-btn is-small',
+              disabled: clientBusy === client.id,
+              onClick: () => configureClient(client),
+            },
+            clientBusy === client.id ? t('clients.working') : t('clients.configure'),
+          ),
+        )
+
+      /** The HTTP card: the URL to paste, the port, and who is already wired up. */
+      const renderClients = () =>
+        h(
+          Card,
+          {
+            title: t('clients.title'),
+            aside: h(
+              'span',
+              { className: http && http.running ? 'dbmcp-pill is-open' : 'dbmcp-pill' },
+              http && http.running ? t('clients.running') : t('clients.stopped'),
+            ),
+          },
+          h('p', { className: 'dbmcp-hint' }, t('clients.hint')),
+          h(
+            'div',
+            { className: 'dbmcp-endpoint' },
+            h('code', { className: 'dbmcp-endpoint-url' }, (http && http.url) || (clients && clients.url) || '—'),
+            h(
+              'button',
+              {
+                type: 'button',
+                className: 'dbmcp-btn is-small',
+                onClick: () => copyEndpoint((http && http.url) || (clients && clients.url) || ''),
+              },
+              copiedEndpoint ? t('clients.copied') : t('clients.copy'),
+            ),
+            h('input', {
+              className: 'dbmcp-input dbmcp-port',
+              inputMode: 'numeric',
+              placeholder: String((settings && settings.httpPort) || 8765),
+              value: portDraft,
+              'aria-label': t('clients.port'),
+              onChange: (event) => setPortDraft(event.target.value),
+            }),
+            h(
+              'button',
+              {
+                type: 'button',
+                className: 'dbmcp-btn is-small',
+                disabled: busy,
+                onClick: () => controlHttp(http && http.running ? 'stop' : 'start'),
+              },
+              http && http.running ? t('clients.stop') : t('clients.start'),
+            ),
+          ),
+          http && http.error ? h('p', { className: 'dbmcp-hint is-error' }, http.error) : null,
+          h(
+            'div',
+            { className: 'dbmcp-clients' },
+            (clients && clients.clients ? clients.clients : []).map(renderClientRow),
+          ),
+          h('p', { className: 'dbmcp-hint' }, t('clients.stdioNote')),
+        )
+
       let body
       if (state.status === 'loading') {
         body = h('div', { className: 'dbmcp-empty' }, t('loading'))
@@ -4448,7 +4683,7 @@ function groupTables(tables) {
               { className: 'dbmcp-rows' },
               h(Row, { label: t('diag.hostApi') }, h('span', { className: 'dbmcp-dot is-ok' }), t('state.connected')),
               h(Row, { label: t('diag.node') }, (data.host && data.host.node) || '-'),
-              h(Row, { label: t('diag.plugin') }, `${data.plugin.name} ${data.plugin.version} · ${data.plugin.phase}`),
+              h(Row, { label: t('diag.plugin') }, `${data.plugin.name} ${data.plugin.version}`),
               h(Row, { label: t('diag.python') }, pythonLabel(t, data.python)),
               h(Row, { label: t('diag.runtimeDir') }, (data.runtime && data.runtime.dir) || '-'),
               h(
@@ -4530,10 +4765,10 @@ function groupTables(tables) {
               h(Row, { label: t('diag.uptime') }, formatUptime(data.host && data.host.uptimeMs)),
             ),
           ),
+          tab !== 'clients' ? null : renderClients(),
           tab !== 'audit'
             ? null
-            : h(
-            Card,
+            : h(            Card,
             { title: t('audit.title'), aside: audit.entries.length ? String(audit.entries.length) : null },
             h(
               'div',

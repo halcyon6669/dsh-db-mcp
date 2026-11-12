@@ -273,6 +273,43 @@ the *Runtime* tab lists the conversations that are limited so you can see it at 
 glance. The limit is a per-conversation convenience, not a security boundary: the
 files under the runtime directory stay readable by your account.
 
+## Connect another agent
+
+The Python server speaks MCP over stdio, so DSH is only one of the clients that can
+use it. The **Connect** tab in the panel shows the address other agents can point at
+and writes their configuration for you.
+
+The endpoint is `http://127.0.0.1:8765/dsh-db-mcp` by default. It starts with the plugin, the
+port can be changed in that tab, and the address has a copy button. If Windows refuses
+the preferred port, the server moves to the next free one and the tab shows where it
+landed.
+
+One click writes the entry into each client's own configuration file:
+
+| Client | File | What is written |
+| --- | --- | --- |
+| Visual Studio Code | `%APPDATA%\Code\User\mcp.json` | HTTP entry under `servers` |
+| VS Code Insiders | `%APPDATA%\Code - Insiders\User\mcp.json` | HTTP entry under `servers` |
+| Cursor | `~/.cursor/mcp.json` | HTTP entry under `mcpServers` |
+| Claude Code | `~/.claude.json` | HTTP entry under `mcpServers` |
+| Claude Desktop | `%APPDATA%\Claude\claude_desktop_config.json` | stdio entry (python + `server/main.py`) |
+| Codex CLI | `~/.codex/config.toml` | `[mcp_servers.dsh-db-mcp]` stdio entry |
+
+Claude Desktop and Codex get a stdio entry instead of a URL because that form needs no
+listening port; the other three take the HTTP address so they always see the same
+process the panel manages. Every client reads the same `datasources.json` and
+`secrets.json`, so a source added in the panel shows up everywhere without a restart
+of the client — only of the MCP server itself.
+
+Two things are DSH-only and are **not** available to those clients: the audit log
+(written by the plugin's host half) and the per-conversation limit (it keys off the
+DSH conversation id). Read-only enforcement still applies, because it lives in Python.
+
+To run the server yourself, `server/main.py` accepts `--stdio` (default), `--http`,
+`--sse`, `--host`, `--port` and `--path` (the streamable-HTTP path, `/dsh-db-mcp` by
+default), and the same values through `DB_MCP_TRANSPORT`, `DB_MCP_HOST`, `DB_MCP_PORT`
+and `DB_MCP_PATH`.
+
 ## Audit log
 
 Every MCP tool call appends one JSON line to `<runtime>/logs/audit.jsonl` (0600):

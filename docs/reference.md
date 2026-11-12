@@ -17,6 +17,10 @@ are `GET`; every mutation is `POST` (the same-origin check compares `Origin` wit
 | `GET /groups` | declared groups plus every group label in use |
 | `GET /dbeaver/scan` | DBeaver connections; never includes passwords |
 | `GET /mcp/status` | Python server phase, tool list, last error, stderr tail |
+| `GET /http/status` | streamable-HTTP endpoint state: running, host, port, `url` (`http://host:port/dsh-db-mcp`), `sseUrl`, stderr tail |
+| `POST /http/start` · `POST /http/stop` | start (optional `{ port }`) or stop the HTTP endpoint |
+| `GET /clients` | the endpoint URL plus every supported outside client: config file, detected, configured |
+| `POST /clients/configure` | write this server into one client's config (`{ client }`) |
 | `GET /settings` · `POST /settings` | global write switch and audit switch |
 | `GET /scopes` · `POST /scopes` | per-conversation data-source limits (`{ session, datasources }`; an empty list lifts the limit) |
 | `GET /audit?limit=N` | tail of the tool-call audit log (default 20, max 200) |
@@ -118,8 +122,10 @@ written atomically via a temporary file plus rename.
 `secrets.json` holds `{ "schemaVersion": 1, "secrets": { "<id>": { "password": "…" } } }`
 and is read only by the Host, never sent to the page.
 
-`settings.json` holds `{ "allowWrite": false, "auditLog": true, "updatedAt": "…" }`.
-`allowWrite` counts only when it is exactly `true`.
+`settings.json` holds `{ "allowWrite": false, "auditLog": true, "httpEnabled": true, "httpPort": 8765, "updatedAt": "…" }`.
+`allowWrite` counts only when it is exactly `true`; `httpEnabled` defaults to `true`, and
+`httpPort` must fall between 1024 and 65535 (the server moves to the next free port when
+Windows refuses the requested one, and the panel shows the port actually in use).
 
 `sessions.json` holds the conversation limits:
 

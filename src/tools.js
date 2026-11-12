@@ -8,14 +8,18 @@
  */
 
 import { existsSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { connect, createServer } from 'node:net';
 import { join } from 'node:path';
 
 // Same cache-busting marker as host.js, so editing this file takes effect on the
 // next `POST /api/reload` without restarting DSH.
 const GENERATION = new URL(import.meta.url).searchParams.get('v') || '0';
-const { McpClient, McpError } = await import(new URL(`./mcp.js?v=${GENERATION}`, import.meta.url).href);
+const { McpClient, McpError, childEnvironment } = await import(new URL(`./mcp.js?v=${GENERATION}`, import.meta.url).href);
 
 export const TOOL_PREFIX = 'mcp__db__';
+/** Path the streamable-HTTP transport answers on; kept in one place. */
+const HTTP_PATH = '/dsh-db-mcp';
 const TOOL_TIMEOUT_MS = 60_000;
 
 /** Candidate interpreters, most specific first. */
@@ -147,6 +151,12 @@ export function createBridge({
   // must not register its tools into a host that is already being torn down.
   let bootEpoch = 0;
   let state = { phase: 'idle', error: null, tools: [], serverInfo: null, startedAt: null };
+  /**
+   * The optional HTTP side. DSH itself speaks stdio; other MCP clients (VS Code,
+   * Cursor, Codex, Claude Desktop) want a URL, so this keeps one more Python
+   * process serving `streamable-http` on /mcp over the same registry.
+   */
+  let httpState = { child: null, port: null, host: null, python: null, startedAt: null, error: null, stderr: '' };
 
   function toolsService() {
     if (!ctx) return undefined;
@@ -171,6 +181,7 @@ export function createBridge({
       python: state.python ?? null,
       exit: client?.exitInfo ?? null,
       stderr: client?.stderrTail ?? '',
+      http: httpStatus(),
     };
   }
 
@@ -488,9 +499,171 @@ export function createBridge({
     return { tool: name, value: result.parsed ?? null, text: result.text, isError: result.isError === true };
   }
 
+  /** The interpreter the stdio bridge would use, resolved the same way. */
+  function httpPython() {
+    for (const candidate of pythonCandidates(config, runtimeDir)) {
+      if (candidate.includes('\\') || candidate.includes('/')) {
+        if (existsSync(candidate)) return candidate;
+        continue;
+      }
+      return candidate;
+    }
+    return null;
+  }
+
+  function httpStatus() {
+    const port = httpState.port;
+    const host = httpState.host || '127.0.0.1';
+    return {
+      running: Boolean(httpState.child),
+      host,
+      port,
+      url: port ? `http://${host}:${port}${HTTP_PATH}` : null,
+      sseUrl: port ? `http://${host}:${port}/sse` : null,
+      python: httpState.python,
+      startedAt: httpState.startedAt,
+      error: httpState.error,
+      stderr: httpState.stderr,
+      pid: httpState.child?.pid ?? null,
+    };
+  }
+
+  function stopHttp() {
+    const child = httpState.child;
+    httpState = { ...httpState, child: null, startedAt: null };
+    if (child) {
+      try {
+        child.kill();
+      } catch {
+        /* already gone */
+      }
+    }
+    return httpStatus();
+  }
+
+  /**
+   * Find a port this machine will actually let us bind. Windows can refuse a
+   * seemingly free port (WinError 10013) when it falls in a reserved range, so
+   * the preferred port is only a wish; the next few are tried after it.
+   */
+  async function pickPort(preferred, host) {
+    const first = Number(preferred) || 8765;
+    for (let offset = 0; offset <= 20; offset += 1) {
+      const candidate = first + offset;
+      if (candidate > 65535) break;
+      const free = await new Promise((resolve) => {
+        const server = createServer();
+        server.unref();
+        server.once('error', () => resolve(false));
+        server.once('listening', () => server.close(() => resolve(true)));
+        try {
+          server.listen(candidate, host);
+        } catch {
+          resolve(false);
+        }
+      });
+      if (free) return candidate;
+    }
+    return null;
+  }
+
+  /** Resolve once something accepts connections on host:port, or reject. */
+  function waitForPort(host, port, timeoutMs) {
+    const startedAt = Date.now();
+    return new Promise((resolve, reject) => {
+      const attempt = () => {
+        const socket = connect({ host, port });
+        let settled = false;
+        socket.setTimeout(1200);
+        socket.once('connect', () => {
+          settled = true;
+          socket.destroy();
+          resolve();
+        });
+        const fail = (error) => {
+          if (settled) return;
+          settled = true;
+          socket.destroy();
+          if (Date.now() - startedAt > timeoutMs) reject(error);
+          else setTimeout(attempt, 350);
+        };
+        socket.once('error', fail);
+        socket.once('timeout', () => fail(new Error('connect timeout')));
+      };
+      attempt();
+    });
+  }
+
+  /**
+   * Start (or reuse) the HTTP process. `port` defaults to the last one used so a
+   * restart after a settings change keeps the same URL visible in the panel.
+   */
+  async function startHttp({ port, host = '127.0.0.1' } = {}) {
+    const wanted = Number(port) || httpState.port || 8765;
+    if (httpState.child && httpState.port === wanted) return httpStatus();
+    if (httpState.child) stopHttp();
+    const python = httpPython();
+    if (!python) {
+      httpState = { ...httpState, error: 'no usable Python interpreter', port: wanted, host };
+      return httpStatus();
+    }
+    // A preferred port is only a wish: Windows refuses some ports outright.
+    const bindPort = await pickPort(wanted, host);
+    if (!bindPort) {
+      httpState = { ...httpState, child: null, error: `no free port near ${wanted}`, port: wanted, host };
+      return httpStatus();
+    }
+    const entry = serverEntry(packageDir);
+    const current = settings ? await settings().catch(() => ({ allowWrite: false })) : { allowWrite: false };
+    const child = spawn(python, [entry, '--http', '--host', host, '--port', String(bindPort), '--path', HTTP_PATH], {
+      cwd: join(packageDir, 'server'),
+      env: childEnvironment({
+        PYTHONIOENCODING: 'utf-8',
+        PYTHONUTF8: '1',
+        DB_MCP_RUNTIME: runtimeDir,
+        DB_MCP_ALLOW_WRITE: current && current.allowWrite === true ? '1' : '0',
+      }),
+      windowsHide: true,
+    });
+    httpState = { child, port: bindPort, host, python, startedAt: null, error: null, stderr: '' };
+    let stderr = '';
+    child.stderr?.setEncoding('utf8');
+    child.stderr?.on('data', (chunk) => {
+      stderr = `${stderr}${chunk}`.slice(-4000);
+      httpState = { ...httpState, stderr };
+    });
+    child.on('exit', (code, signal) => {
+      if (httpState.child === child) {
+        httpState = {
+          ...httpState,
+          child: null,
+          startedAt: null,
+          error: `HTTP server exited (code ${code ?? 'null'}${signal ? `, ${signal}` : ''})`,
+        };
+      }
+    });
+    try {
+      await waitForPort(host, wanted, 20_000);
+    } catch (error) {
+      if (httpState.child === child) stopHttp();
+      httpState = {
+        ...httpState,
+        child: null,
+        startedAt: null,
+        error: `HTTP server did not answer on ${host}:${wanted} (${error?.message ?? error})`,
+        stderr,
+      };
+      return httpStatus();
+    }
+    httpState = { ...httpState, startedAt: new Date().toISOString(), error: null };
+    log(`HTTP MCP listening on http://${host}:${wanted}${HTTP_PATH}`);
+    return httpStatus();
+  }
+
   async function dispose() {
     bootEpoch += 1;
     starting = null;
+    stopHttp();
     disposeTools();
     if (client) {
       await client.stop();
@@ -499,5 +672,5 @@ export function createBridge({
     state = { ...state, phase: 'idle', tools: [] };
   }
 
-  return { ensure, restart, dispose, status, call };
+  return { ensure, restart, dispose, status, call, startHttp, stopHttp, httpStatus };
 }
