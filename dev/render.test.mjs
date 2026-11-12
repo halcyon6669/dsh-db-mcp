@@ -179,10 +179,14 @@ if (panel) {
   const header = collect(panel, (node) => node.type === 'h1')
   check('main panel: title rendered', header.length === 1)
   const tabs = collect(panel, (node) => node.type === 'button' && node.props.role === 'tab')
-  check('main panel: six tabs', tabs.length === 6, String(tabs.length))
+  check('main panel: seven tabs', tabs.length === 7, String(tabs.length))
   check(
     'main panel: first tab is active',
-    tabs.length === 6 && tabs[0].props['aria-selected'] === true && tabs[1].props['aria-selected'] === false,
+    tabs.length === 7 && tabs[0].props['aria-selected'] === true && tabs[1].props['aria-selected'] === false,
+  )
+  check(
+    'main panel: the tools tab is its own step',
+    mod.__test.TABS.some((tab) => tab.id === 'tools') && mod.__test.tabLabel((key) => key, 'tools') === 'tab.tools',
   )
   const back = collect(panel, (node) => node.type === 'button' && node.props.className === 'dbmcp-back')
   check('main panel: back-to-chat button', back.length === 1, String(back.length))

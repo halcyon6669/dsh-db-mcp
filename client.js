@@ -19,7 +19,15 @@ window.__ModuleLoader__.load({
 
     const NS = 'db-mcp'
     /** Top-level tabs of the panel. `sources` also hosts the create/edit/import/structure views. */
-    const TABS = [{ id: 'list' }, { id: 'create' }, { id: 'import' }, { id: 'runtime' }, { id: 'clients' }, { id: 'audit' }]
+    const TABS = [
+      { id: 'list' },
+      { id: 'create' },
+      { id: 'import' },
+      { id: 'runtime' },
+      { id: 'clients' },
+      { id: 'tools' },
+      { id: 'audit' },
+    ]
 
     /** Tab labels stay literal so the i18n check can see every key. */
     function tabLabel(t, id) {
@@ -27,6 +35,7 @@ window.__ModuleLoader__.load({
       if (id === 'import') return t('tab.import')
       if (id === 'runtime') return t('tab.runtime')
       if (id === 'clients') return t('tab.clients')
+      if (id === 'tools') return t('tab.tools')
       if (id === 'audit') return t('tab.audit')
       return t('tab.list')
     }
@@ -37,6 +46,7 @@ window.__ModuleLoader__.load({
       if (mode === 'import') return 'import'
       if (mode === 'runtime') return 'runtime'
       if (mode === 'clients') return 'clients'
+      if (mode === 'tools') return 'tools'
       if (mode === 'audit') return 'audit'
       return 'list'
     }
@@ -219,6 +229,7 @@ window.__ModuleLoader__.load({
         'tab.import': 'Import from DBeaver',
         'tab.runtime': 'Runtime',
         'tab.clients': 'Connect',
+      'tab.tools': 'Tools',
         'tab.audit': 'Audit log',
         'header.backToChat': 'Back to chat',
         'form.group': 'Group',
@@ -455,6 +466,7 @@ window.__ModuleLoader__.load({
         'tab.import': '从 DBeaver 导入',
         'tab.runtime': '运行时诊断',
         'tab.clients': '接入其它客户端',
+      'tab.tools': '工具',
         'tab.audit': '审计日志',
         'header.backToChat': '返回会话',
         'form.group': '分组',
@@ -4662,12 +4674,21 @@ function groupTables(tables) {
             (clients && clients.clients ? clients.clients : []).map(renderClientRow),
           ),
           h('p', { className: 'dbmcp-hint' }, t('clients.stdioNote')),
-          h(
-            'div',
-            { className: 'dbmcp-tools-head' },
-            h('h3', { className: 'dbmcp-tools-title' }, t('tools.title')),
-            h('span', { className: 'dbmcp-hint' }, t('tools.hint')),
-          ),
+        )
+
+      /** Which tools the agent can see at all; the Python server still serves all of them. */
+      const renderTools = () =>
+        h(
+          Card,
+          {
+            title: t('tools.title'),
+            aside: h(
+              'span',
+              { className: 'dbmcp-pill' },
+              `${tools && tools.tools ? tools.tools.filter((tool) => tool.enabled !== false).length : 0} / ${tools && tools.tools ? tools.tools.length : 0}`,
+            ),
+          },
+          h('p', { className: 'dbmcp-hint' }, t('tools.hint')),
           h(
             'div',
             { className: 'dbmcp-tools' },
@@ -4899,6 +4920,7 @@ function groupTables(tables) {
             ),
           ),
           tab !== 'clients' ? null : renderClients(),
+          tab !== 'tools' ? null : renderTools(),
           tab !== 'audit'
             ? null
             : h(            Card,
@@ -5004,6 +5026,8 @@ function groupTables(tables) {
       inject: ['slots', 'locale', 'layout', 'theme'],
       /** Parser and components exposed for the offline tests in dev/. */
       __test: {
+        TABS,
+        tabLabel,
         parseConnectionText,
         uniqueId,
         slugId,
