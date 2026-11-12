@@ -1090,30 +1090,50 @@ export function createHost(options = {}) {
     return { entries: entries.slice(-Math.max(1, Math.min(200, limit))).reverse(), error: null }
   }
 
-  /** Where the editors and CLI agents keep their own MCP configuration. */
+  /**
+   * Where the editors and CLI agents keep their own MCP configuration.
+   * Only the clients this platform actually has a file for are listed, so the
+   * panel never offers a target it cannot write.
+   */
   function clientTargets() {
-    const appData = process.env.APPDATA || ''
     const home = homedir()
     const list = []
-    if (appData) {
-      list.push({ id: 'vscode', label: 'Visual Studio Code', shape: 'vscode', file: join(appData, 'Code', 'User', 'mcp.json') })
+
+    // VS Code keeps its user config under a per-platform root.
+    let editorRoot = ''
+    if (process.platform === 'win32') editorRoot = process.env.APPDATA || ''
+    else if (process.platform === 'darwin') editorRoot = join(home, 'Library', 'Application Support')
+    else editorRoot = process.env.XDG_CONFIG_HOME || join(home, '.config')
+
+    if (editorRoot) {
+      list.push({ id: 'vscode', label: 'Visual Studio Code', shape: 'vscode', file: join(editorRoot, 'Code', 'User', 'mcp.json') })
       list.push({
         id: 'vscode-insiders',
         label: 'VS Code Insiders',
         shape: 'vscode',
-        file: join(appData, 'Code - Insiders', 'User', 'mcp.json'),
+        file: join(editorRoot, 'Code - Insiders', 'User', 'mcp.json'),
       })
     }
+
     list.push({ id: 'cursor', label: 'Cursor', shape: 'mcpServers', file: join(home, '.cursor', 'mcp.json') })
     list.push({ id: 'claude-code', label: 'Claude Code', shape: 'mcpServers', file: join(home, '.claude.json') })
-    if (appData) {
-      list.push({
-        id: 'claude-desktop',
-        label: 'Claude Desktop',
-        shape: 'mcpServers',
-        file: join(appData, 'Claude', 'claude_desktop_config.json'),
-      })
+
+    // Claude Desktop ships on Windows and macOS only.
+    if (process.platform === 'win32' || process.platform === 'darwin') {
+      const desktopRoot =
+        process.platform === 'win32'
+          ? process.env.APPDATA || ''
+          : join(home, 'Library', 'Application Support')
+      if (desktopRoot) {
+        list.push({
+          id: 'claude-desktop',
+          label: 'Claude Desktop',
+          shape: 'mcpServers',
+          file: join(desktopRoot, 'Claude', 'claude_desktop_config.json'),
+        })
+      }
     }
+
     list.push({ id: 'codex', label: 'Codex CLI', shape: 'toml', file: join(home, '.codex', 'config.toml') })
     return list
   }

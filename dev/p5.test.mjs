@@ -138,7 +138,17 @@ try {
 
   const clients = await get('/clients')
   const ids = (clients.body?.clients || []).map((item) => item.id)
-  check('the client list covers the supported agents', clients.status === 200 && ids.length === 6, ids.join(','))
+  // Only the clients this platform can actually write are listed.
+  const portable = ['cursor', 'claude-code', 'codex']
+  const expected =
+    process.platform === 'win32' || process.platform === 'darwin'
+      ? ['vscode', 'vscode-insiders', ...portable.slice(0, 2), 'claude-desktop', portable[2]]
+      : ['vscode', 'vscode-insiders', ...portable]
+  check(
+    'the client list covers the supported agents',
+    clients.status === 200 && expected.every((id) => ids.includes(id)),
+    ids.join(','),
+  )
   check(
     'Claude Code and Codex are both offered',
     ids.includes('claude-code') && ids.includes('codex'),

@@ -288,12 +288,15 @@ One click writes the entry into each client's own configuration file:
 
 | Client | File | What is written |
 | --- | --- | --- |
-| Visual Studio Code | `%APPDATA%\Code\User\mcp.json` | HTTP entry under `servers` |
-| VS Code Insiders | `%APPDATA%\Code - Insiders\User\mcp.json` | HTTP entry under `servers` |
+| Visual Studio Code | `%APPDATA%\Code\User\mcp.json` (Windows), `~/Library/Application Support/Code/User/mcp.json` (macOS), `~/.config/Code/User/mcp.json` (Linux) | HTTP entry under `servers` |
+| VS Code Insiders | the same path with `Code - Insiders` | HTTP entry under `servers` |
 | Cursor | `~/.cursor/mcp.json` | HTTP entry under `mcpServers` |
 | Claude Code | `~/.claude.json` | HTTP entry under `mcpServers` |
 | Claude Desktop | `%APPDATA%\Claude\claude_desktop_config.json` | stdio entry (python + `server/main.py`) |
 | Codex CLI | `~/.codex/config.toml` | `[mcp_servers.dsh-db-mcp]` stdio entry |
+
+The panel only lists a client when this platform has a configuration file for it,
+so on Linux Claude Desktop is absent and VS Code resolves under `~/.config`.
 
 Claude Desktop and Codex get a stdio entry instead of a URL because that form needs no
 listening port; the other three take the HTTP address so they always see the same
