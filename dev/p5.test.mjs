@@ -149,6 +149,36 @@ try {
     (clients.body?.clients || []).every((item) => typeof item.file === 'string' && item.file.length > 0),
   )
 
+  const limits = await get('/tools')
+  check(
+    'the tool list carries the two row limits',
+    limits.body?.limits?.sampleRows === 20 && limits.body?.limits?.maxRows === 200,
+    JSON.stringify(limits.body?.limits),
+  )
+
+  await post('/settings', { limits: { sampleRows: 50, maxRows: 90 } })
+  const savedLimits = await get('/tools')
+  check(
+    'row limits are saved and clamped',
+    savedLimits.body?.limits?.sampleRows === 50 && savedLimits.body?.limits?.maxRows === 90,
+    JSON.stringify(savedLimits.body?.limits),
+  )
+
+  await post('/settings', { limits: { sampleRows: 9999, maxRows: 0 } })
+  const clamped = await get('/tools')
+  check(
+    'out of range limits fall back to the defaults',
+    clamped.body?.limits?.sampleRows === 20 && clamped.body?.limits?.maxRows === 200,
+    JSON.stringify(clamped.body?.limits),
+  )
+
+  const limitTools = (limits.body?.tools || []).filter((tool) => tool.limit)
+  check(
+    'row-limited tools advertise their range',
+    limitTools.every((tool) => tool.limit.min >= 1 && tool.limit.max >= tool.limit.value),
+    JSON.stringify(limitTools.map((tool) => [tool.name, tool.limit])),
+  )
+
   const unknown = await post('/clients/configure', { client: 'nope' })
   check('an unknown client is refused', unknown.status === 404 && /unknown client/.test(String(unknown.body?.error || '')))
 } finally {

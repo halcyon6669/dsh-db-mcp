@@ -946,6 +946,21 @@ export function createHost(options = {}) {
   const settingsFile = join(dir, SETTINGS_FILE)
   const auditFile = join(dir, AUDIT_FILE)
 
+  /** Row limits the agent falls back to when it does not name one. */
+  const ROW_LIMIT_DEFAULTS = { sampleRows: 20, maxRows: 200 }
+  const ROW_LIMIT_CAPS = { sampleRows: 200, maxRows: 2000 }
+
+  function rowLimits(value) {
+    const source = cleanRecord(value)
+    const limits = {}
+    for (const key of Object.keys(ROW_LIMIT_DEFAULTS)) {
+      const raw = Number(source[key])
+      limits[key] =
+        Number.isInteger(raw) && raw >= 1 && raw <= ROW_LIMIT_CAPS[key] ? raw : ROW_LIMIT_DEFAULTS[key]
+    }
+    return limits
+  }
+
   async function readSettings() {
     const read = await readJson(settingsFile)
     const value = cleanRecord(read.value)
@@ -964,6 +979,7 @@ export function createHost(options = {}) {
             .map((name) => name.trim())
             .slice(0, 32)
         : [],
+      limits: rowLimits(value.limits),
       httpPort:
         Number.isInteger(port) && port >= HTTP_PORT_MIN && port <= HTTP_PORT_MAX ? port : HTTP_PORT_DEFAULT,
       updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : null,
@@ -987,6 +1003,7 @@ export function createHost(options = {}) {
               .filter((name) => typeof name === 'string' && /^[a-z][a-z0-9_]{0,40}$/.test(name.trim()))
               .map((name) => name.trim())
               .slice(0, 32),
+      limits: rowLimits(patch.limits === undefined ? current.limits : patch.limits),
       httpPort: port,
       updatedAt: isoNow(),
     }
@@ -1846,6 +1863,7 @@ export function createHost(options = {}) {
           return sendJson(response, 200, {
             ok: true,
             disabled: settingsNow.disabledTools || [],
+      limits: settingsNow.limits,
             tools: listing.tools,
             scopeTool: listing.scopeTool,
           })
@@ -1925,11 +1943,16 @@ export function createHost(options = {}) {
           allowWrite: payload.allowWrite,
           auditLog: payload.auditLog,
           disabledTools: payload.disabledTools,
+        limits: payload.limits,
           httpEnabled: payload.httpEnabled,
           httpPort: payload.httpPort,
         })
         if (!settings) return sendJson(response, 400, { ok: false, error: 'httpPort must be an integer between 1024 and 65535' })
-        if (payload.allowWrite !== undefined || payload.disabledTools !== undefined) {
+        if (
+        payload.allowWrite !== undefined ||
+        payload.disabledTools !== undefined ||
+        payload.limits !== undefined
+      ) {
           void bridge.restart().catch(() => {})
         }
         return sendJson(response, 200, { ok: true, settings })

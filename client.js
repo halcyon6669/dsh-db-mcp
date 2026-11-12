@@ -113,6 +113,10 @@ window.__ModuleLoader__.load({
         'tools.offCount': '{n} tool(s) switched off.',
         'tools.on': '{name} is on.',
         'tools.off': '{name} is off.',
+      'tools.rows': 'rows',
+      'tools.limitLabel': 'Default rows for {argument}',
+      'tools.limitHint': 'Rows used when the agent does not ask for a number (1-{max}).',
+      'tools.limitSaved': 'Default row count saved.',
         'sources.count': '{n} configured',
         'sources.empty.title': 'No data source yet',
         'sources.empty.body': 'Add one here, or import the connections DBeaver already keeps on this machine. The agent queries real data through MCP tools, never through this page.',
@@ -351,6 +355,10 @@ window.__ModuleLoader__.load({
         'tools.offCount': '已关闭 {n} 个工具。',
         'tools.on': '已开启 {name}。',
         'tools.off': '已关闭 {name}。',
+      'tools.rows': '行',
+      'tools.limitLabel': '{argument} 的默认行数',
+      'tools.limitHint': '模型没指定行数时默认返回多少行（1-{max}）。',
+      'tools.limitSaved': '默认行数已保存。',
         'sources.count': '已配置 {n} 个',
         'sources.empty.title': '还没有数据源',
         'sources.empty.body': '可以在这里新增，也可以直接导入这台机器上 DBeaver 已有的连接。AI 通过 MCP 工具查询真实数据，不会在这个页面里执行 SQL。',
@@ -1122,7 +1130,16 @@ window.__ModuleLoader__.load({
         margin: 2px 0 0;
         flex: 0 0 auto;
       }
-      .dbmcp-tool-main {
+      .dbmcp-tool-limit { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px; }
+  .dbmcp-tool-limit .dbmcp-limit {
+    width: 74px;
+    padding: 3px 6px;
+    font-size: 12px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+  .dbmcp-limit-unit { font-size: 12px; color: var(--dsw-alias-label-secondary); }
+  .dbmcp-tool-main {
         display: flex;
         flex-direction: column;
         gap: 1px;
@@ -4024,6 +4041,23 @@ function groupTables(tables) {
       }
 
       /** Publish or withdraw one tool for the agent. */
+      const [limitDraft, setLimitDraft] = React.useState({})
+
+      /** Save one default row count; the server clamps it to its own cap. */
+      const commitLimit = async (limit) => {
+        const raw = Number(limitDraft[limit.key])
+        if (!Number.isInteger(raw) || raw < limit.min || raw > limit.max) {
+          setLimitDraft({ ...limitDraft, [limit.key]: String(limit.value) })
+          return
+        }
+        if (raw === limit.value) return
+        const next = { ...((tools && tools.limits) || {}), [limit.key]: raw }
+        await apiPost('/settings', { limits: next })
+        setLimitDraft({ ...limitDraft, [limit.key]: undefined })
+        setNotice(t('tools.limitSaved'))
+        await load()
+      }
+
       const toggleTool = async (name, on) => {
         const current = (tools && Array.isArray(tools.disabled) ? tools.disabled : []).filter((item) => item !== name)
         const next = on ? current : [...current, name]
@@ -4713,6 +4747,34 @@ function groupTables(tables) {
                   h('code', { className: 'dbmcp-tool-name' }, tool.full || tool.name),
                   h('span', { className: 'dbmcp-tool-desc' }, firstLine(tool.description)),
                 ),
+                tool.limit
+                  ? h(
+                      'span',
+                      {
+                        className: 'dbmcp-tool-limit',
+                        title: fmt(t('tools.limitHint'), { max: tool.limit.max }),
+                      },
+                      h('input', {
+                        type: 'number',
+                        className: 'dbmcp-input dbmcp-limit',
+                        min: tool.limit.min,
+                        max: tool.limit.max,
+                        step: 1,
+                        value: limitDraft[tool.limit.key] !== undefined ? limitDraft[tool.limit.key] : tool.limit.value,
+                        'aria-label': fmt(t('tools.limitLabel'), { argument: tool.limit.argument }),
+                        disabled: busy,
+                        onChange: (event) => setLimitDraft({ ...limitDraft, [tool.limit.key]: event.target.value }),
+                        onBlur: () => commitLimit(tool.limit),
+                        onKeyDown: (event) => {
+                          if (event.key === 'Enter') {
+                            event.preventDefault()
+                            event.currentTarget.blur()
+                          }
+                        },
+                      }),
+                      h('span', { className: 'dbmcp-limit-unit' }, t('tools.rows')),
+                    )
+                  : null,
               ),
             ),
           ),

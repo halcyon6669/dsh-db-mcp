@@ -124,6 +124,9 @@ written atomically via a temporary file plus rename.
 and is read only by the Host, never sent to the page.
 
 `settings.json` holds `{ "allowWrite": false, "auditLog": true, "httpEnabled": true, "httpPort": 8765, "disabledTools": [], "updatedAt": "…" }`.
+`limits` holds `{ "sampleRows": 20, "maxRows": 200 }`: the row counts handed to `sample_rows`
+and `execute_sql` when the model does not name one. Out-of-range values fall back to those
+defaults.
 `disabledTools` lists tool names without the `mcp__db__` prefix (for example `["get_ddl"]`):
 those are left out of the agent's registry, while the Python server keeps serving them over
 stdio and HTTP.

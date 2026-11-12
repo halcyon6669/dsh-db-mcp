@@ -225,7 +225,9 @@ export function createBridge({
       if (!active || !active.running) {
         throw new McpError('the database MCP server is not running', { code: 'not_running' });
       }
-      const result = await active.callTool(name, args, { timeoutMs: TOOL_TIMEOUT_MS });
+      const result = await active.callTool(name, withRowLimit(name, args), {
+        timeoutMs: TOOL_TIMEOUT_MS,
+      });
       if (audited) auditEntry(name, args, startedAt, result, null);
       return result;
     } catch (error) {
@@ -335,17 +337,50 @@ export function createBridge({
   }
 
   /**
+   * Row limits the agent gets when it does not name one. The panel edits these;
+   * the model can still override them per call inside the server's hard cap.
+   */
+  const ROW_LIMIT_TOOLS = {
+    sample_rows: { key: 'sampleRows', argument: 'limit', min: 1, max: 200 },
+    execute_sql: { key: 'maxRows', argument: 'max_rows', min: 1, max: 2000 },
+  };
+
+  let rowLimits = { sampleRows: 20, maxRows: 200 };
+
+  function withRowLimit(name, args) {
+    const rule = ROW_LIMIT_TOOLS[name];
+    if (!rule) return args;
+    const explicit = args[rule.argument];
+    if (explicit !== undefined && explicit !== null && explicit !== '') return args;
+    const value = rowLimits[rule.key];
+    if (!Number.isInteger(value)) return args;
+    return { ...args, [rule.argument]: value };
+  }
+
+  /**
    * What the panel shows: every tool the server offers, its purpose, and whether
    * it is currently published to the agent.
    */
   function toolCatalog() {
-    const tools = catalog.map((tool) => ({
-      name: tool.name,
-      full: `${TOOL_PREFIX}${tool.name}`,
-      description: tool.description || '',
-      parameters: safeParameters(tool.inputSchema),
-      enabled: !isOff(tool.name),
-    }));
+    const tools = catalog.map((tool) => {
+      const rule = ROW_LIMIT_TOOLS[tool.name];
+      return {
+        name: tool.name,
+        full: `${TOOL_PREFIX}${tool.name}`,
+        description: tool.description || '',
+        parameters: safeParameters(tool.inputSchema),
+        enabled: !isOff(tool.name),
+        limit: rule
+          ? {
+              key: rule.key,
+              argument: rule.argument,
+              value: rowLimits[rule.key],
+              min: rule.min,
+              max: rule.max,
+            }
+          : null,
+      };
+    });
     return { tools, scopeTool: scopeDisposer !== null, disabled: [...disabledTools] };
   }
 
@@ -435,6 +470,11 @@ export function createBridge({
     disabledTools = Array.isArray(current && current.disabledTools)
       ? current.disabledTools.map((name) => String(name || '').trim()).filter(Boolean)
       : [];
+    const limits = current && current.limits ? current.limits : {};
+    rowLimits = {
+      sampleRows: Number.isInteger(limits.sampleRows) ? limits.sampleRows : 20,
+      maxRows: Number.isInteger(limits.maxRows) ? limits.maxRows : 200,
+    };
     const candidates = pythonCandidates(config, runtimeDir);
     let lastError = null;
     for (const candidate of candidates) {

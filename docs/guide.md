@@ -305,11 +305,16 @@ Two things are DSH-only and are **not** available to those clients: the audit lo
 (written by the plugin's host half) and the per-conversation limit (it keys off the
 DSH conversation id). Read-only enforcement still applies, because it lives in Python.
 
-Below the client list the same tab shows **Tools the agent sees** — one row per tool with
+The **Tools** tab shows **Tools the agent sees** — one row per tool with
 a checkbox. Unchecking a tool stops the plugin from publishing it, so the model never
 sees it; the Python server still offers it over stdio/HTTP, which means the switch trims
 the DSH agent's tool list rather than the database's capabilities. `mcp__db__session_scope`
 is not on the list: switching it off would strand a conversation that already has a limit.
+
+Two rows carry a small number box: `sample_rows` and `execute_sql`. It is the row count the
+agent gets when it does not ask for one (`20` and `200` out of the box, capped at `200` and
+`2000`). The model can still pass a larger number up to that cap, so this is a default, not
+a hard limit — the hard cap lives in the Python server (`DB_MCP_MAX_ROWS_HARD`).
 
 To run the server yourself, `server/main.py` accepts `--stdio` (default), `--http`,
 `--sse`, `--host`, `--port` and `--path` (the streamable-HTTP path, `/dsh-db-mcp` by
