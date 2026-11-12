@@ -389,6 +389,73 @@ if (stripTree) {
   check('strip: no repeated version pill', versionPill.length === 0, `got ${versionPill.length}`)
 }
 
+// Palette assertions: custom themes may hand us translucent tokens (a wallpaper
+// shines through), so the panel composites them into opaque colours.
+const paletteOf = mod.__test.paletteOf
+const parseColor = mod.__test.parseColor
+const HEX = /^#[0-9a-f]{6}$/
+const luma = (hex) => {
+  const n = Number.parseInt(hex.slice(1), 16)
+  return 0.299 * ((n >> 16) & 255) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)
+}
+
+if (typeof paletteOf !== 'function' || typeof parseColor !== 'function') {
+  check('palette: exported for testing', false, 'paletteOf/parseColor missing')
+} else {
+  // A translucent wallpaper theme: every background arrives with alpha < 1.
+  const wallpaper = {
+    active: {
+      id: 'wallpaper',
+      colorScheme: 'dark',
+      tokens: {
+        '--dsw-alias-bg-base': 'rgba(20, 24, 31, 0.35)',
+        '--dsw-alias-bg-layer-1': 'rgba(255, 255, 255, 0.06)',
+        '--dsw-alias-bg-layer-2': 'rgba(255, 255, 255, 0.12)',
+        '--dsw-alias-border-l1': 'rgba(255, 255, 255, 0.14)',
+        '--dsw-alias-label-primary': 'rgba(255, 255, 255, 0.92)',
+        '--dsw-alias-brand-primary': 'rgba(90, 160, 255, 0.8)',
+      },
+    },
+    revision: 7,
+  }
+  const palette = paletteOf(wallpaper)
+  const opaque = Object.entries(palette).filter(([, value]) => !HEX.test(String(value)))
+  check('palette: every alias resolves to an opaque hex', opaque.length === 0, JSON.stringify(opaque))
+  check('palette: covers the aliases the stylesheet reads', Object.keys(palette).length >= 12, `${Object.keys(palette).length}`)
+  check('palette: a translucent canvas is flattened, not dropped', luma(palette['--dsw-alias-bg-base']) < 60, palette['--dsw-alias-bg-base'])
+  check(
+    'palette: layers stay distinguishable from the canvas',
+    palette['--dsw-alias-bg-layer-1'] !== palette['--dsw-alias-bg-base'] &&
+      palette['--dsw-alias-bg-layer-2'] !== palette['--dsw-alias-bg-layer-1'],
+    `${palette['--dsw-alias-bg-base']} / ${palette['--dsw-alias-bg-layer-1']} / ${palette['--dsw-alias-bg-layer-2']}`,
+  )
+  check('palette: secondary ink is dimmer than primary', luma(palette['--dsw-alias-label-secondary']) < luma(palette['--dsw-alias-label-primary']))
+
+  // Pure black: the theme offers no layer colours at all, so they are lifted.
+  const black = paletteOf({ active: { id: 'black', colorScheme: 'dark', tokens: {} }, revision: 1 })
+  check('palette: pure black keeps the page near-black', luma(black['--dsw-alias-bg-base']) < 16, black['--dsw-alias-bg-base'])
+  check(
+    'palette: pure black still separates cards',
+    luma(black['--dsw-alias-bg-layer-1']) > luma(black['--dsw-alias-bg-base']) + 8,
+    `${black['--dsw-alias-bg-base']} -> ${black['--dsw-alias-bg-layer-1']}`,
+  )
+  check(
+    'palette: pure black borders are visible',
+    luma(black['--dsw-alias-border-l1']) > luma(black['--dsw-alias-bg-layer-1']) + 8,
+    `${black['--dsw-alias-bg-layer-1']} vs ${black['--dsw-alias-border-l1']}`,
+  )
+
+  // Pure white: the same lift, in the other direction.
+  const white = paletteOf({ active: { id: 'white', colorScheme: 'light', tokens: {} }, revision: 2 })
+  check('palette: pure white keeps the page white', luma(white['--dsw-alias-bg-base']) > 247, white['--dsw-alias-bg-base'])
+  check(
+    'palette: pure white still separates cards',
+    luma(white['--dsw-alias-bg-layer-1']) < luma(white['--dsw-alias-bg-base']) - 4,
+    `${white['--dsw-alias-bg-base']} -> ${white['--dsw-alias-bg-layer-1']}`,
+  )
+  check('palette: parseColor understands the shapes themes send', ['#abc', '#aabbcc', 'rgb(1, 2, 3)', 'rgba(1, 2, 3, 0.5)'].every((value) => parseColor(value) !== null))
+}
+
 const total = passed + failures.length
 if (failures.length > 0) {
   console.log(`render.test: ${passed}/${total} passed`)

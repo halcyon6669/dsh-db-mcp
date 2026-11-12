@@ -1885,6 +1885,154 @@ window.__ModuleLoader__.load({
       return service
     }
 
+    /* ---------- theme-aware solid surfaces ----------
+       A custom theme may paint translucent surfaces over a wallpaper: cards then
+       dissolve into the picture and labels lose contrast. Re-derive solid
+       equivalents of the alias tokens from the active palette and overlay them
+       on the panel subtree, so the panel reads the same on white, black and
+       wallpapered themes. */
+
+    let themeService = null
+    const themeSubs = new Set()
+    const NO_PALETTE = Object.freeze({})
+    let paletteCache = NO_PALETTE
+    let paletteKey = ''
+
+    function parseColor(value) {
+      if (typeof value !== 'string') return null
+      const text = value.trim()
+      let match = /^#([0-9a-f]{3,8})$/i.exec(text)
+      if (match) {
+        let hex = match[1]
+        if (hex.length === 3 || hex.length === 4) hex = hex.split('').map((part) => part + part).join('')
+        if (hex.length !== 6 && hex.length !== 8) return null
+        return {
+          r: parseInt(hex.slice(0, 2), 16),
+          g: parseInt(hex.slice(2, 4), 16),
+          b: parseInt(hex.slice(4, 6), 16),
+          a: hex.length === 8 ? parseInt(hex.slice(6, 8), 16) / 255 : 1,
+        }
+      }
+      match = /^rgba?\(([^)]+)\)$/i.exec(text)
+      if (!match) return null
+      const parts = match[1].split(/[\s,/]+/).filter(Boolean).map(Number)
+      if (parts.length < 3 || parts.slice(0, 3).some((item) => !Number.isFinite(item))) return null
+      const alpha = parts.length > 3 && Number.isFinite(parts[3]) ? parts[3] : 1
+      return { r: parts[0], g: parts[1], b: parts[2], a: Math.max(0, Math.min(1, alpha)) }
+    }
+
+    function composite(color, base) {
+      const alpha = Math.max(0, Math.min(1, color.a))
+      return {
+        r: color.r * alpha + base.r * (1 - alpha),
+        g: color.g * alpha + base.g * (1 - alpha),
+        b: color.b * alpha + base.b * (1 - alpha),
+        a: 1,
+      }
+    }
+
+    function mixColor(from, to, weight) {
+      return {
+        r: from.r + (to.r - from.r) * weight,
+        g: from.g + (to.g - from.g) * weight,
+        b: from.b + (to.b - from.b) * weight,
+        a: 1,
+      }
+    }
+
+    function drift(a, b) {
+      return Math.max(Math.abs(a.r - b.r), Math.abs(a.g - b.g), Math.abs(a.b - b.b))
+    }
+
+    function toCss(color) {
+      const channel = (value) => Math.max(0, Math.min(255, Math.round(value))).toString(16).padStart(2, '0')
+      return '#' + channel(color.r) + channel(color.g) + channel(color.b)
+    }
+
+    function paletteOf(snapshot) {
+      const active = (snapshot && snapshot.active) || {}
+      const tokens = active.tokens || {}
+      const dark = active.colorScheme === 'dark'
+      const floor = dark ? { r: 12, g: 12, b: 14, a: 1 } : { r: 255, g: 255, b: 255, a: 1 }
+      const token = (name) => parseColor(tokens[name])
+
+      const baseRaw = token('--dsw-alias-bg-base')
+      const canvas = baseRaw ? composite(baseRaw, floor) : floor
+
+      const layerRaw = token('--dsw-alias-bg-layer-1')
+      let surface = layerRaw ? composite(layerRaw, canvas) : canvas
+      const layer2Raw = token('--dsw-alias-bg-layer-2')
+      let surface2 = layer2Raw ? composite(layer2Raw, surface) : surface
+
+      const inkRaw = token('--dsw-alias-label-primary') || (dark ? { r: 232, g: 232, b: 236, a: 1 } : { r: 26, g: 26, b: 30, a: 1 })
+      const ink = composite(inkRaw, canvas)
+
+      /* On a pure black or pure white scheme the theme's layers collapse onto the
+         canvas; lift them a little so cards still separate from the page. */
+      if (drift(surface, canvas) < 8) surface = mixColor(canvas, ink, dark ? 0.14 : 0.05)
+      if (drift(surface2, surface) < 8) surface2 = mixColor(surface, ink, dark ? 0.2 : 0.07)
+
+      const secondRaw = token('--dsw-alias-label-secondary')
+      const ink2 = secondRaw ? composite(secondRaw, surface) : mixColor(surface, ink, 0.45)
+
+      const lineRaw = token('--dsw-alias-border-l1')
+      let line = lineRaw ? composite(lineRaw, surface) : mixColor(surface, ink, 0.16)
+      if (drift(line, surface) < 10) line = mixColor(surface, ink, 0.18)
+      const line2Raw = token('--dsw-alias-border-l2')
+      let line2 = line2Raw ? composite(line2Raw, surface2) : mixColor(surface2, ink, 0.24)
+      if (drift(line2, surface2) < 10) line2 = mixColor(surface2, ink, 0.26)
+
+      const accent = (name, fallback) => {
+        const raw = token(name)
+        if (!raw) return fallback
+        return raw.a >= 0.999 ? raw : composite(raw, surface)
+      }
+
+      return {
+        '--dsw-alias-bg-base': toCss(canvas),
+        '--dsw-alias-bg-layer-1': toCss(surface),
+        '--dsw-alias-bg-layer-2': toCss(surface2),
+        '--dsw-alias-bg-overlay': toCss(surface2),
+        '--dsw-alias-border-l1': toCss(line),
+        '--dsw-alias-border-l2': toCss(line2),
+        '--dsw-alias-label-primary': toCss(ink),
+        '--dsw-alias-label-secondary': toCss(ink2),
+        '--dsw-alias-brand-primary': toCss(accent('--dsw-alias-brand-primary', { r: 36, g: 123, b: 191, a: 1 })),
+        '--dsw-alias-state-success-primary': toCss(accent('--dsw-alias-state-success-primary', { r: 38, g: 158, b: 92, a: 1 })),
+        '--dsw-alias-state-warn-primary': toCss(accent('--dsw-alias-state-warn-primary', { r: 191, g: 128, b: 20, a: 1 })),
+        '--dsw-alias-state-error-primary': toCss(accent('--dsw-alias-state-error-primary', { r: 213, g: 68, b: 68, a: 1 })),
+        '--dsw-alias-state-idle-primary': toCss(accent('--dsw-alias-state-idle-primary', mixColor(surface, ink, 0.4))),
+      }
+    }
+
+    function paletteSnapshot() {
+      const service = themeService
+      if (!service || typeof service.getTheme !== 'function') return NO_PALETTE
+      let snapshot = null
+      try {
+        snapshot = service.getTheme()
+      } catch (error) {
+        return NO_PALETTE
+      }
+      const key = `${(snapshot && snapshot.revision) || ''}:${(snapshot && snapshot.preference) || ''}`
+      if (key !== paletteKey) {
+        paletteKey = key
+        paletteCache = paletteOf(snapshot)
+      }
+      return paletteCache
+    }
+
+    function subscribeTheme(onChange) {
+      themeSubs.add(onChange)
+      return () => {
+        themeSubs.delete(onChange)
+      }
+    }
+
+    function useThemePalette() {
+      return React.useSyncExternalStore(subscribeTheme, paletteSnapshot, paletteSnapshot)
+    }
+
     function fmt(text, values) {
       return String(text).replace(/\{(\w+)\}/g, (all, key) => (values && values[key] !== undefined ? String(values[key]) : all))
     }
@@ -3385,6 +3533,7 @@ function groupTables(tables) {
 
   function MainPanel() {
       const service = useLocale()
+      const palette = useThemePalette()
       const t = React.useMemo(() => (service ? service.bind(NS) : (key) => key), [service])
       const [state, setState] = React.useState({ status: 'loading', data: null, error: null })
       const [busy, setBusy] = React.useState(false)
@@ -4431,7 +4580,7 @@ function groupTables(tables) {
 
       return h(
         'div',
-        { className: 'dbmcp-page' },
+        { className: 'dbmcp-page', style: palette },
         h('style', null, CSS),
         h(
           'header',
@@ -4484,7 +4633,7 @@ function groupTables(tables) {
     }
 
     return {
-      inject: ['slots', 'locale', 'layout'],
+      inject: ['slots', 'locale', 'layout', 'theme'],
       /** Parser and components exposed for the offline tests in dev/. */
       __test: {
         parseConnectionText,
@@ -4512,10 +4661,26 @@ function groupTables(tables) {
         StatusStrip,
         sourceMatches,
         sectionOrder,
+        paletteOf,
+        parseColor,
       },
       apply(ctx) {
         localeService = ctx.locale
         layoutService = ctx.layout || null
+        themeService = ctx.theme || null
+        /* Two ways the active theme can change under us: the service tells its
+           own subscribers, and the host echoes a theme/change event. Listen to
+           both; either one invalidates the cached palette. */
+        const refreshPalette = () => {
+          paletteKey = ''
+          themeSubs.forEach((notify) => notify())
+        }
+        if (themeService && typeof themeService.subscribe === 'function') {
+          ctx.effect(() => themeService.subscribe(refreshPalette))
+        }
+        if (typeof ctx.on === 'function') {
+          ctx.effect(() => ctx.on('theme/change', refreshPalette))
+        }
         ctx.effect(() => ctx.locale.register(NS, 'en', DICT.en))
         ctx.effect(() => ctx.locale.register(NS, 'zh', DICT.zh))
 
