@@ -102,7 +102,7 @@ window.__ModuleLoader__.load({
         'clients.port': 'Port',
         'clients.start': 'Start',
         'clients.stop': 'Stop',
-        'clients.configure': 'Auto-configure',
+        'clients.configure': 'Write config',
         'clients.working': 'Writing…',
         'clients.configured': 'configured',
         'clients.notConfigured': 'not configured yet',
@@ -344,7 +344,7 @@ window.__ModuleLoader__.load({
         'clients.port': '端口',
         'clients.start': '启动',
         'clients.stop': '停止',
-        'clients.configure': '自动配置',
+        'clients.configure': '写入配置',
         'clients.working': '写入中…',
         'clients.configured': '已配置',
         'clients.notConfigured': '尚未配置',
@@ -4068,10 +4068,15 @@ function groupTables(tables) {
         }
         if (raw === limit.value) return
         const next = { ...((tools && tools.limits) || {}), [limit.key]: raw }
-        await apiPost('/settings', { limits: next })
-        setLimitDraft({ ...limitDraft, [limit.key]: undefined })
-        setNotice(t('tools.limitSaved'))
-        await load()
+        try {
+          await apiPost('/settings', { limits: next })
+          setLimitDraft({ ...limitDraft, [limit.key]: undefined })
+          setNotice({ message: t('tools.limitSaved'), isError: false })
+          await load()
+        } catch (error) {
+          setLimitDraft({ ...limitDraft, [limit.key]: String(limit.value) })
+          setNotice({ message: String((error && error.message) || error), isError: true })
+        }
       }
 
       const toggleTool = async (name, on) => {
@@ -5096,7 +5101,7 @@ function groupTables(tables) {
           ? h(
               'div',
               { className: 'dbmcp-notice' + (notice.isError ? ' is-error' : '') },
-              h('span', null, notice.message),
+              h('span', null, notice.message || notice),
               h('button', { type: 'button', className: 'dbmcp-btn is-small', onClick: () => setNotice(null) }, '×'),
             )
           : null,
