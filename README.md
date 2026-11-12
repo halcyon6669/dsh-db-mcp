@@ -12,6 +12,13 @@ database connections you already have into tools the agent can use.
 **Import from DBeaver, tick the boxes, ask a question** — no connection string to
 retype, no DSH file to edit, no Python to install.
 
+## How it works, on one page
+
+Left: what you do in the panel. Right: what happens in the conversation once a
+source exists.
+
+![The path from a DBeaver connection to an answer in chat](https://raw.githubusercontent.com/halcyon6669/dsh-db-mcp/main/asset/usage-guide.en.png)
+
 ## Screenshots
 
 **Import from DBeaver.** The importer reads `data-sources.json` from your DBeaver
@@ -26,13 +33,6 @@ grouped them, engine badges, and a failed probe stays inline with its full error
 and a copy button.
 
 ![Data source list](https://raw.githubusercontent.com/halcyon6669/dsh-db-mcp/main/asset/1.png)
-
-## How it works, on one page
-
-Left: what you do in the panel. Right: what happens in the conversation once a
-source exists.
-
-![The path from a DBeaver connection to an answer in chat](https://raw.githubusercontent.com/halcyon6669/dsh-db-mcp/main/asset/usage-guide.en.png)
 
 ## Zero configuration, in three senses
 

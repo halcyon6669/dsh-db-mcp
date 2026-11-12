@@ -9,6 +9,12 @@
 
 一个 [DSH](https://github.com/deepseek-ai/deepseek-harness) 插件，把你已有的数据库连接直接变成智能体能用的工具。**从 DBeaver 导入、勾选、提问**——连接串不用重打，DSH 文件不用改，Python 也不用自己装。
 
+## 一张图看懂
+
+左边是在面板里要做的事，右边是有数据源之后、在对话里发生的事。
+
+![从 DBeaver 连接到对话里拿到答案](https://raw.githubusercontent.com/halcyon6669/dsh-db-mcp/main/asset/usage-guide.zh.png)
+
 ## 界面截图
 
 **从 DBeaver 导入。** 导入器读取 DBeaver 工作区的 `data-sources.json`，再用 DBeaver 自带的密钥解密 `credentials-config.json`，主机、端口、库名、用户、已存口令一次到位；已经登记过的连接会被标出来，同一个地址不会重复添加。
@@ -18,12 +24,6 @@
 **数据源列表。** 顶部是健康概览，数据源按你的分组排列，带引擎徽标；探测失败的那条就地把完整报错摊开，旁边一键复制。
 
 ![数据源列表](https://raw.githubusercontent.com/halcyon6669/dsh-db-mcp/main/asset/1.png)
-
-## 一张图看懂
-
-左边是在面板里要做的事，右边是有数据源之后、在对话里发生的事。
-
-![从 DBeaver 连接到对话里拿到答案](https://raw.githubusercontent.com/halcyon6669/dsh-db-mcp/main/asset/usage-guide.zh.png)
 
 ## 三个方面都不用配
 
