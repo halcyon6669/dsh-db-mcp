@@ -42,8 +42,6 @@
     "cordis.patch.yml",
     "server/*.py",
     "server/requirements.txt",
-    "asset/*.png",
-    "screenshots.json",
     "docs/*.md",
     "LICENSE",
     "README.md",
