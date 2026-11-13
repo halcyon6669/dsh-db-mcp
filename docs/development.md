@@ -18,11 +18,25 @@ server/store.py     reads the registry written by the Host
 cordis.patch.yml    one Loader row with id "db-mcp"
 dev/                test suites and the version bump script
 docs/               this documentation
+asset/              screenshots and diagram exports used by the READMEs
 ```
 
 The package ships `index.js`, `src/*.js`, `client.js`, `locale/*.json`, `icon.svg`,
 `cordis.patch.yml`, `server/*.py`, `server/requirements.txt`, `docs/*.md`, both
 READMEs and the license.
+
+## Architecture diagrams
+
+`docs/architecture.drawio` holds three pages — the file layout, the call graph and the
+runtime picture. The call graph and the runtime page are also exported to
+`asset/architecture-calls.png` and `asset/architecture-runtime.png` for places that
+cannot render draw.io. Line numbers inside the diagrams are the ones measured in this
+checkout, so refresh them when a release moves those functions: open the file, edit the
+labels, re-export the PNGs.
+
+![Call graph: panel route, agent tool route, startup and hot reload](../asset/architecture-calls.png)
+
+![Runtime picture: browser, Host, Python child, runtime files and outside MCP clients](../asset/architecture-runtime.png)
 
 ## Hot reload
 

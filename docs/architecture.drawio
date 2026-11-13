@@ -1,0 +1,375 @@
+<mxfile host="localhost" pages="3">
+  <diagram id="7aroqqgg-i3r9" name="工程文件结构">
+    <mxGraphModel dx="1436" dy="844" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="p1t" parent="1" style="text;fontSize=16;fontStyle=1;align=left;verticalAlign=middle;whiteSpace=wrap;html=1;" value="dsh-db-mcp v0.9.7 · 工程文件结构" vertex="1">
+          <mxGeometry height="30" width="520" x="30" y="10" as="geometry" />
+        </mxCell>
+        <mxCell id="c1" parent="1" style="swimlane;startSize=24;fillColor=#f7f9fc;strokeColor=#9aa4b2;fontSize=11;fontStyle=1;whiteSpace=wrap;html=1;" value="浏览器 · Web Client" vertex="1">
+          <mxGeometry height="250" width="190" x="20" y="60" as="geometry" />
+        </mxCell>
+        <mxCell id="n1" parent="c1" style="rounded=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;whiteSpace=wrap;html=1;" value="client.js&lt;br&gt;面板 UI · 5021 行" vertex="1">
+          <mxGeometry height="44" width="160" x="15" y="34" as="geometry" />
+        </mxCell>
+        <mxCell id="n2" parent="c1" style="rounded=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;whiteSpace=wrap;html=1;" value="locale/en.json" vertex="1">
+          <mxGeometry height="34" width="160" x="15" y="94" as="geometry" />
+        </mxCell>
+        <mxCell id="n3" parent="c1" style="rounded=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;whiteSpace=wrap;html=1;" value="locale/zh.json" vertex="1">
+          <mxGeometry height="34" width="160" x="15" y="136" as="geometry" />
+        </mxCell>
+        <mxCell id="n4" parent="c1" style="rounded=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;whiteSpace=wrap;html=1;" value="icon.svg" vertex="1">
+          <mxGeometry height="34" width="160" x="15" y="178" as="geometry" />
+        </mxCell>
+        <mxCell id="c2" parent="1" style="swimlane;startSize=24;fillColor=#f7f9fc;strokeColor=#9aa4b2;fontSize=11;fontStyle=1;whiteSpace=wrap;html=1;" value="Host 进程 · Node.js / Cordis" vertex="1">
+          <mxGeometry height="290" width="260" x="240" y="60" as="geometry" />
+        </mxCell>
+        <mxCell id="n5" parent="c2" style="rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;whiteSpace=wrap;html=1;" value="index.js · 109 行&lt;br&gt;Cordis 入口 · 2 条路由" vertex="1">
+          <mxGeometry height="44" width="220" x="20" y="34" as="geometry" />
+        </mxCell>
+        <mxCell id="n6" parent="c2" style="rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;whiteSpace=wrap;html=1;" value="src/host.js · 2058 行&lt;br&gt;注册表 / 导入 / 探测 / 设置 / 审计" vertex="1">
+          <mxGeometry height="44" width="220" x="20" y="96" as="geometry" />
+        </mxCell>
+        <mxCell id="n7" parent="c2" style="rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;whiteSpace=wrap;html=1;" value="src/tools.js · 744 行&lt;br&gt;spawn Python · 发布工具" vertex="1">
+          <mxGeometry height="44" width="220" x="20" y="158" as="geometry" />
+        </mxCell>
+        <mxCell id="n8" parent="c2" style="rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;whiteSpace=wrap;html=1;" value="src/mcp.js · 308 行&lt;br&gt;stdio JSON-RPC 客户端" vertex="1">
+          <mxGeometry height="44" width="220" x="20" y="220" as="geometry" />
+        </mxCell>
+        <mxCell id="c3" parent="1" style="swimlane;startSize=24;fillColor=#f7f9fc;strokeColor=#9aa4b2;fontSize=11;fontStyle=1;whiteSpace=wrap;html=1;" value="Python 子进程 · FastMCP" vertex="1">
+          <mxGeometry height="290" width="270" x="520" y="60" as="geometry" />
+        </mxCell>
+        <mxCell id="n9" parent="c3" style="rounded=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;whiteSpace=wrap;html=1;" value="server/main.py · 351 行&lt;br&gt;FastMCP · 8 个工具" vertex="1">
+          <mxGeometry height="44" width="190" x="40" y="34" as="geometry" />
+        </mxCell>
+        <mxCell id="n10" parent="c3" style="rounded=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;whiteSpace=wrap;html=1;" value="server/engines.py · 765 行&lt;br&gt;连接 / 元数据 / 查询 / DDL" vertex="1">
+          <mxGeometry height="44" width="190" x="40" y="96" as="geometry" />
+        </mxCell>
+        <mxCell id="n11" parent="c3" style="rounded=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;whiteSpace=wrap;html=1;" value="server/store.py · 98 行&lt;br&gt;读取注册表" vertex="1">
+          <mxGeometry height="44" width="190" x="40" y="158" as="geometry" />
+        </mxCell>
+        <mxCell id="n12" parent="c3" style="rounded=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;whiteSpace=wrap;html=1;" value="server/requirements.txt&lt;br&gt;mcp · psycopg · PyMySQL …" vertex="1">
+          <mxGeometry height="44" width="190" x="40" y="220" as="geometry" />
+        </mxCell>
+        <mxCell id="c4" parent="1" style="swimlane;startSize=24;fillColor=#f7f9fc;strokeColor=#9aa4b2;fontSize=11;fontStyle=1;whiteSpace=wrap;html=1;" value="工程配置 · 文档 · 测试" vertex="1">
+          <mxGeometry height="180" width="750" x="20" y="370" as="geometry" />
+        </mxCell>
+        <mxCell id="n13" parent="c4" style="rounded=1;fillColor=#f5f5f5;strokeColor=#9e9e9e;fontSize=10;whiteSpace=wrap;html=1;" value="package.json" vertex="1">
+          <mxGeometry height="36" width="150" x="20" y="40" as="geometry" />
+        </mxCell>
+        <mxCell id="n14" parent="c4" style="rounded=1;fillColor=#f5f5f5;strokeColor=#9e9e9e;fontSize=10;whiteSpace=wrap;html=1;" value="cordis.patch.yml" vertex="1">
+          <mxGeometry height="36" width="150" x="190" y="40" as="geometry" />
+        </mxCell>
+        <mxCell id="n15" parent="c4" style="rounded=1;fillColor=#f5f5f5;strokeColor=#9e9e9e;fontSize=10;whiteSpace=wrap;html=1;" value="docs/*.md" vertex="1">
+          <mxGeometry height="36" width="150" x="360" y="40" as="geometry" />
+        </mxCell>
+        <mxCell id="n16" parent="c4" style="rounded=1;fillColor=#f5f5f5;strokeColor=#9e9e9e;fontSize=10;whiteSpace=wrap;html=1;" value="dev/*.test.mjs" vertex="1">
+          <mxGeometry height="36" width="190" x="530" y="40" as="geometry" />
+        </mxCell>
+        <mxCell id="n17" parent="c4" style="rounded=1;fillColor=#f5f5f5;strokeColor=#9e9e9e;fontSize=10;whiteSpace=wrap;html=1;" value=".github/workflows/publish.yml" vertex="1">
+          <mxGeometry height="36" width="150" x="20" y="95" as="geometry" />
+        </mxCell>
+        <mxCell id="n18" parent="c4" style="rounded=1;fillColor=#f5f5f5;strokeColor=#9e9e9e;fontSize=10;whiteSpace=wrap;html=1;" value="asset/*.png" vertex="1">
+          <mxGeometry height="36" width="150" x="190" y="95" as="geometry" />
+        </mxCell>
+        <mxCell id="n19" parent="c4" style="rounded=1;fillColor=#f5f5f5;strokeColor=#9e9e9e;fontSize=10;whiteSpace=wrap;html=1;" value="screenshots.json" vertex="1">
+          <mxGeometry height="36" width="150" x="360" y="95" as="geometry" />
+        </mxCell>
+        <mxCell id="n20" parent="c4" style="rounded=1;fillColor=#f5f5f5;strokeColor=#9e9e9e;fontSize=10;whiteSpace=wrap;html=1;" value="README.md · LICENSE" vertex="1">
+          <mxGeometry height="36" width="190" x="530" y="95" as="geometry" />
+        </mxCell>
+        <mxCell id="e1" edge="1" parent="1" source="n1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;endArrow=block;strokeColor=#5b6b7c;fontSize=9;exitX=1;exitY=0.5;entryX=0;entryY=0.5;html=1;" target="n5" value="HTTP JSON">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e2" edge="1" parent="1" source="n5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;endArrow=block;strokeColor=#5b6b7c;fontSize=9;exitX=0.5;exitY=1;entryX=0.5;entryY=0;html=1;" target="n6" value="import ?v=n">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e3" edge="1" parent="1" source="n6" style="edgeStyle=orthogonalEdgeStyle;rounded=0;endArrow=block;strokeColor=#5b6b7c;fontSize=9;exitX=0.5;exitY=1;entryX=0.5;entryY=0;html=1;" target="n7" value="createBridge">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e4" edge="1" parent="1" source="n7" style="edgeStyle=orthogonalEdgeStyle;rounded=0;endArrow=block;strokeColor=#5b6b7c;fontSize=9;exitX=0.5;exitY=1;entryX=0.5;entryY=0;html=1;" target="n8" value="new McpClient">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e5" edge="1" parent="1" source="n7" style="edgeStyle=orthogonalEdgeStyle;rounded=0;endArrow=block;strokeColor=#5b6b7c;fontSize=8;exitX=1;exitY=0.5;entryX=0;entryY=0.5;html=1;" target="n9" value="spawn">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="508" y="240" />
+              <mxPoint x="508" y="116" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e6" edge="1" parent="1" source="n9" style="edgeStyle=orthogonalEdgeStyle;rounded=0;endArrow=block;strokeColor=#5b6b7c;fontSize=8;exitX=0.5;exitY=1;entryX=0.5;entryY=0;html=1;" target="n10" value="introspect / query">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e7" edge="1" parent="1" source="n9" style="edgeStyle=orthogonalEdgeStyle;rounded=0;endArrow=block;strokeColor=#5b6b7c;fontSize=8;exitX=0;exitY=0.5;entryX=0;entryY=0.5;html=1;" target="n11" value="load_registry">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="540" y="116" />
+              <mxPoint x="540" y="240" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="p1note" parent="1" style="text;fontSize=10;fontColor=#666666;align=left;verticalAlign=middle;whiteSpace=wrap;html=1;" value="行数为当前 checkout 实测；运行时数据（datasources.json / secrets.json 等）不在仓库内，见「运行时架构」页。" vertex="1">
+          <mxGeometry height="24" width="700" x="20" y="558" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram id="uar62cpa-enea" name="代码调用图">
+    <mxGraphModel dx="1436" dy="844" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="t2" parent="1" style="text;fontSize=15;fontStyle=1;align=left;verticalAlign=middle;whiteSpace=wrap;html=1;" value="dsh-db-mcp · 代码调用图（行号为当前 checkout 实测）" vertex="1">
+          <mxGeometry height="28" width="520" x="20" y="16" as="geometry" />
+        </mxCell>
+        <mxCell id="b1" parent="1" style="swimlane;startSize=24;fillColor=#f7f9fc;strokeColor=#9aa4b2;fontSize=11;fontStyle=1;whiteSpace=wrap;html=1;" value="① 面板调用链：client.js → HTTP → src/host.js" vertex="1">
+          <mxGeometry height="110" width="780" x="10" y="60" as="geometry" />
+        </mxCell>
+        <mxCell id="p1" parent="b1" style="rounded=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;whiteSpace=wrap;html=1;" value="client.js&lt;br&gt;MainPanel() 3749" vertex="1">
+          <mxGeometry height="44" width="124" x="14" y="30" as="geometry" />
+        </mxCell>
+        <mxCell id="p2" parent="b1" style="rounded=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;whiteSpace=wrap;html=1;" value="apiGet / apiPost&lt;br&gt;2246 / 2259" vertex="1">
+          <mxGeometry height="44" width="124" x="168" y="30" as="geometry" />
+        </mxCell>
+        <mxCell id="p3" parent="b1" style="rounded=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;whiteSpace=wrap;html=1;" value="index.js 路由&lt;br&gt;webServer 98" vertex="1">
+          <mxGeometry height="44" width="124" x="322" y="30" as="geometry" />
+        </mxCell>
+        <mxCell id="p4" parent="b1" style="rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;whiteSpace=wrap;html=1;" value="src/host.js&lt;br&gt;handle() 1846" vertex="1">
+          <mxGeometry height="44" width="124" x="476" y="30" as="geometry" />
+        </mxCell>
+        <mxCell id="p5" parent="b1" style="rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;whiteSpace=wrap;html=1;" value="业务函数&lt;br&gt;→ sendJson()" vertex="1">
+          <mxGeometry height="44" width="124" x="630" y="30" as="geometry" />
+        </mxCell>
+        <mxCell id="ep1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;endArrow=block;strokeColor=#5b6b7c;fontSize=8;exitX=1;exitY=0.5;entryX=0;entryY=0.5;html=1;" edge="1" parent="1" source="p1" target="p2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ep2" edge="1" parent="1" source="p2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;endArrow=block;strokeColor=#5b6b7c;fontSize=8;exitX=1;exitY=0.5;entryX=0;entryY=0.5;html=1;" target="p3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ep3" edge="1" parent="1" source="p3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;endArrow=block;strokeColor=#5b6b7c;fontSize=8;exitX=1;exitY=0.5;entryX=0;entryY=0.5;html=1;" target="p4" value="fetch">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ep4" edge="1" parent="1" source="p4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;endArrow=block;strokeColor=#5b6b7c;fontSize=8;exitX=1;exitY=0.5;entryX=0;entryY=0.5;html=1;" target="p5">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="b2" parent="1" style="swimlane;startSize=24;fillColor=#f7f9fc;strokeColor=#9aa4b2;fontSize=11;fontStyle=1;whiteSpace=wrap;html=1;" value="② Agent 工具调用链：src/tools.js → src/mcp.js → server/*.py" vertex="1">
+          <mxGeometry height="200" width="780" x="10" y="190" as="geometry" />
+        </mxCell>
+        <mxCell id="q1" parent="b2" style="rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;whiteSpace=wrap;html=1;" value="src/tools.js&lt;br&gt;工具处理器 407" vertex="1">
+          <mxGeometry height="44" width="124" x="14" y="32" as="geometry" />
+        </mxCell>
+        <mxCell id="q2" parent="b2" style="rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;whiteSpace=wrap;html=1;" value="invoke() 219&lt;br&gt;withRowLimit() 350" vertex="1">
+          <mxGeometry height="44" width="124" x="168" y="32" as="geometry" />
+        </mxCell>
+        <mxCell id="q3" parent="b2" style="rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;whiteSpace=wrap;html=1;" value="src/mcp.js&lt;br&gt;callTool() 156" vertex="1">
+          <mxGeometry height="44" width="124" x="322" y="32" as="geometry" />
+        </mxCell>
+        <mxCell id="q4" parent="b2" style="rounded=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;whiteSpace=wrap;html=1;" value="server/main.py&lt;br&gt;8 个工具函数" vertex="1">
+          <mxGeometry height="44" width="124" x="476" y="32" as="geometry" />
+        </mxCell>
+        <mxCell id="r1" parent="b2" style="rounded=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;whiteSpace=wrap;html=1;" value="server/store.py&lt;br&gt;resolve() 75" vertex="1">
+          <mxGeometry height="44" width="124" x="14" y="126" as="geometry" />
+        </mxCell>
+        <mxCell id="r2" parent="b2" style="rounded=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;whiteSpace=wrap;html=1;" value="engines.connect()&lt;br&gt;143" vertex="1">
+          <mxGeometry height="44" width="124" x="168" y="126" as="geometry" />
+        </mxCell>
+        <mxCell id="r3" parent="b2" style="rounded=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;whiteSpace=wrap;html=1;" value="engines 查询&lt;br&gt;execute_sql 778" vertex="1">
+          <mxGeometry height="44" width="124" x="322" y="126" as="geometry" />
+        </mxCell>
+        <mxCell id="r4" parent="b2" style="rounded=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10;whiteSpace=wrap;html=1;" value="数据库引擎&lt;br&gt;SQLite / PG / Gauss / MySQL / Oracle" vertex="1">
+          <mxGeometry height="44" width="124" x="476" y="126" as="geometry" />
+        </mxCell>
+        <mxCell id="eq1" edge="1" parent="1" source="q1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;endArrow=block;strokeColor=#5b6b7c;fontSize=8;exitX=1;exitY=0.5;entryX=0;entryY=0.5;html=1;" target="q2" value="scope 校验">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="eq2" edge="1" parent="1" source="q2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;endArrow=block;strokeColor=#5b6b7c;fontSize=8;exitX=1;exitY=0.5;entryX=0;entryY=0.5;html=1;" target="q3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="eq3" edge="1" parent="1" source="q3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;endArrow=block;strokeColor=#5b6b7c;fontSize=8;exitX=1;exitY=0.5;entryX=0;entryY=0.5;html=1;" target="q4" value="stdio">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="eq4" value="tools/call" style="edgeStyle=orthogonalEdgeStyle;rounded=0;endArrow=block;strokeColor=#5b6b7c;fontSize=8;exitX=0.5;exitY=1;entryX=0.5;entryY=0;html=1;" edge="1" parent="1" source="q4" target="r1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="548" y="290" />
+              <mxPoint x="76" y="290" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="er1" edge="1" parent="1" source="r1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;endArrow=block;strokeColor=#5b6b7c;fontSize=8;exitX=1;exitY=0.5;entryX=0;entryY=0.5;html=1;" target="r2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="er2" edge="1" parent="1" source="r2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;endArrow=block;strokeColor=#5b6b7c;fontSize=8;exitX=1;exitY=0.5;entryX=0;entryY=0.5;html=1;" target="r3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="er3" edge="1" parent="1" source="r3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;endArrow=block;strokeColor=#5b6b7c;fontSize=8;exitX=1;exitY=0.5;entryX=0;entryY=0.5;html=1;" target="r4">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="b3" parent="1" style="swimlane;startSize=24;fillColor=#f7f9fc;strokeColor=#9aa4b2;fontSize=11;fontStyle=1;whiteSpace=wrap;html=1;" value="③ 启动与热重载" vertex="1">
+          <mxGeometry height="150" width="780" x="10" y="420" as="geometry" />
+        </mxCell>
+        <mxCell id="s1" parent="b3" style="rounded=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;whiteSpace=wrap;html=1;" value="index.js apply() 23&lt;br&gt;loadHost() ?v=n" vertex="1">
+          <mxGeometry height="44" width="124" x="14" y="30" as="geometry" />
+        </mxCell>
+        <mxCell id="s2" parent="b3" style="rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;whiteSpace=wrap;html=1;" value="src/host.js&lt;br&gt;createHost()" vertex="1">
+          <mxGeometry height="44" width="124" x="168" y="30" as="geometry" />
+        </mxCell>
+        <mxCell id="s3" parent="b3" style="rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;whiteSpace=wrap;html=1;" value="createBridge()&lt;br&gt;tools.js" vertex="1">
+          <mxGeometry height="44" width="124" x="322" y="30" as="geometry" />
+        </mxCell>
+        <mxCell id="s4" parent="b3" style="rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;whiteSpace=wrap;html=1;" value="boot() 462&lt;br&gt;McpClient.start() 104" vertex="1">
+          <mxGeometry height="44" width="124" x="476" y="30" as="geometry" />
+        </mxCell>
+        <mxCell id="s5" parent="b3" style="rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;whiteSpace=wrap;html=1;" value="registerTools() 387&lt;br&gt;mcp__db__* 工具" vertex="1">
+          <mxGeometry height="44" width="124" x="630" y="30" as="geometry" />
+        </mxCell>
+        <mxCell id="snote" parent="b3" style="text;fontSize=9;fontColor=#444444;align=left;verticalAlign=middle;whiteSpace=wrap;html=1;" value="热重载：POST /reload → unloadHost() → import ./src/host.js?v=n+1 → createHost()（index.js 自身改动仍需重启 DSH）；POST /mcp/restart 只替换 Python 子进程，工具注册保持不变，避免 agent 工具目录失效。" vertex="1">
+          <mxGeometry height="44" width="750" x="14" y="92" as="geometry" />
+        </mxCell>
+        <mxCell id="es1" edge="1" parent="1" source="s1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;endArrow=block;strokeColor=#5b6b7c;fontSize=8;exitX=1;exitY=0.5;entryX=0;entryY=0.5;html=1;" target="s2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="es2" edge="1" parent="1" source="s2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;endArrow=block;strokeColor=#5b6b7c;fontSize=8;exitX=1;exitY=0.5;entryX=0;entryY=0.5;html=1;" target="s3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="es3" edge="1" parent="1" source="s3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;endArrow=block;strokeColor=#5b6b7c;fontSize=8;exitX=1;exitY=0.5;entryX=0;entryY=0.5;html=1;" target="s4" value="ensure()">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="es4" edge="1" parent="1" source="s4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;endArrow=block;strokeColor=#5b6b7c;fontSize=8;exitX=1;exitY=0.5;entryX=0;entryY=0.5;html=1;" target="s5" value="tools/list">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram id="ie1ndnl2-bwzw" name="运行时架构">
+    <mxGraphModel dx="1436" dy="844" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="t3" parent="1" style="text;fontSize=15;fontStyle=1;align=left;verticalAlign=middle;whiteSpace=wrap;html=1;" value="dsh-db-mcp · 运行时架构（进程、数据流、外部客户端）" vertex="1">
+          <mxGeometry height="28" width="520" x="20" y="16" as="geometry" />
+        </mxCell>
+        <mxCell id="panel" parent="1" style="rounded=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;whiteSpace=wrap;html=1;" value="Web 面板&lt;br&gt;client.js" vertex="1">
+          <mxGeometry height="60" width="160" x="40" y="80" as="geometry" />
+        </mxCell>
+        <mxCell id="agent" parent="1" style="rounded=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;whiteSpace=wrap;html=1;" value="DSH Agent 会话&lt;br&gt;mcp__db__* 工具" vertex="1">
+          <mxGeometry height="60" width="160" x="40" y="200" as="geometry" />
+        </mxCell>
+        <mxCell id="hostzone" parent="1" style="swimlane;startSize=24;fillColor=#f7f9fc;strokeColor=#9aa4b2;fontSize=11;fontStyle=1;whiteSpace=wrap;html=1;" value="DSH Host 进程 · Node.js / Cordis" vertex="1">
+          <mxGeometry height="300" width="260" x="230" y="50" as="geometry" />
+        </mxCell>
+        <mxCell id="h1" parent="hostzone" style="rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;whiteSpace=wrap;html=1;" value="index.js · 路由 + loadHost()" vertex="1">
+          <mxGeometry height="40" width="230" x="15" y="32" as="geometry" />
+        </mxCell>
+        <mxCell id="h2" parent="hostzone" style="rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;whiteSpace=wrap;html=1;" value="host.js · 注册表 / 探测 / 审计" vertex="1">
+          <mxGeometry height="40" width="230" x="15" y="92" as="geometry" />
+        </mxCell>
+        <mxCell id="h3" parent="hostzone" style="rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;whiteSpace=wrap;html=1;" value="tools.js · 工具桥接 / 作用域" vertex="1">
+          <mxGeometry height="40" width="230" x="15" y="152" as="geometry" />
+        </mxCell>
+        <mxCell id="h4" parent="hostzone" style="rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;whiteSpace=wrap;html=1;" value="mcp.js · stdio JSON-RPC 客户端" vertex="1">
+          <mxGeometry height="40" width="230" x="15" y="212" as="geometry" />
+        </mxCell>
+        <mxCell id="pyzone" parent="1" style="swimlane;startSize=24;fillColor=#f7f9fc;strokeColor=#9aa4b2;fontSize=11;fontStyle=1;whiteSpace=wrap;html=1;" value="Python 子进程 · FastMCP" vertex="1">
+          <mxGeometry height="300" width="250" x="530" y="50" as="geometry" />
+        </mxCell>
+        <mxCell id="s1" parent="pyzone" style="rounded=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;whiteSpace=wrap;html=1;" value="main.py&lt;br&gt;8 tools" vertex="1">
+          <mxGeometry height="40" width="130" x="15" y="32" as="geometry" />
+        </mxCell>
+        <mxCell id="s4" parent="pyzone" style="rounded=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;whiteSpace=wrap;html=1;" value="store.py" vertex="1">
+          <mxGeometry height="40" width="85" x="150" y="32" as="geometry" />
+        </mxCell>
+        <mxCell id="s2" parent="pyzone" style="rounded=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;whiteSpace=wrap;html=1;" value="engines.py · 连接 / 元数据 / 查询" vertex="1">
+          <mxGeometry height="40" width="220" x="15" y="100" as="geometry" />
+        </mxCell>
+        <mxCell id="s3" parent="pyzone" style="rounded=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10;whiteSpace=wrap;html=1;" value="SQLite · PostgreSQL · GaussDB&lt;br&gt;MySQL · Oracle" vertex="1">
+          <mxGeometry height="50" width="220" x="15" y="170" as="geometry" />
+        </mxCell>
+        <mxCell id="filezone" parent="1" style="swimlane;startSize=24;fillColor=#f7f9fc;strokeColor=#9aa4b2;fontSize=11;fontStyle=1;whiteSpace=wrap;html=1;" value="运行时数据 · $DSH_HOME/db-mcp" vertex="1">
+          <mxGeometry height="130" width="420" x="20" y="380" as="geometry" />
+        </mxCell>
+        <mxCell id="f1" parent="filezone" style="rounded=0;fillColor=#f5f5f5;strokeColor=#9e9e9e;fontSize=9;whiteSpace=wrap;html=1;" value="datasources.json" vertex="1">
+          <mxGeometry height="32" width="125" x="15" y="32" as="geometry" />
+        </mxCell>
+        <mxCell id="f2" parent="filezone" style="rounded=0;fillColor=#f5f5f5;strokeColor=#9e9e9e;fontSize=9;whiteSpace=wrap;html=1;" value="secrets.json" vertex="1">
+          <mxGeometry height="32" width="125" x="150" y="32" as="geometry" />
+        </mxCell>
+        <mxCell id="f3" parent="filezone" style="rounded=0;fillColor=#f5f5f5;strokeColor=#9e9e9e;fontSize=9;whiteSpace=wrap;html=1;" value="settings.json" vertex="1">
+          <mxGeometry height="32" width="120" x="285" y="32" as="geometry" />
+        </mxCell>
+        <mxCell id="f4" parent="filezone" style="rounded=0;fillColor=#f5f5f5;strokeColor=#9e9e9e;fontSize=9;whiteSpace=wrap;html=1;" value="sessions.json" vertex="1">
+          <mxGeometry height="32" width="125" x="15" y="76" as="geometry" />
+        </mxCell>
+        <mxCell id="f5" parent="filezone" style="rounded=0;fillColor=#f5f5f5;strokeColor=#9e9e9e;fontSize=9;whiteSpace=wrap;html=1;" value="logs/audit.jsonl" vertex="1">
+          <mxGeometry height="32" width="125" x="150" y="76" as="geometry" />
+        </mxCell>
+        <mxCell id="clzone" parent="1" style="swimlane;startSize=24;fillColor=#f7f9fc;strokeColor=#9aa4b2;fontSize=11;fontStyle=1;whiteSpace=wrap;html=1;" value="外部 MCP 客户端（streamable HTTP）" vertex="1">
+          <mxGeometry height="130" width="310" x="470" y="380" as="geometry" />
+        </mxCell>
+        <mxCell id="c1" parent="clzone" style="rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;whiteSpace=wrap;html=1;" value="VS Code" vertex="1">
+          <mxGeometry height="30" width="85" x="15" y="32" as="geometry" />
+        </mxCell>
+        <mxCell id="c2" parent="clzone" style="rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;whiteSpace=wrap;html=1;" value="Cursor" vertex="1">
+          <mxGeometry height="30" width="85" x="110" y="32" as="geometry" />
+        </mxCell>
+        <mxCell id="c3" parent="clzone" style="rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;whiteSpace=wrap;html=1;" value="Claude Code" vertex="1">
+          <mxGeometry height="30" width="90" x="205" y="32" as="geometry" />
+        </mxCell>
+        <mxCell id="c4" parent="clzone" style="rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;whiteSpace=wrap;html=1;" value="Claude Desktop" vertex="1">
+          <mxGeometry height="30" width="130" x="15" y="76" as="geometry" />
+        </mxCell>
+        <mxCell id="c5" parent="clzone" style="rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;whiteSpace=wrap;html=1;" value="Codex" vertex="1">
+          <mxGeometry height="30" width="140" x="155" y="76" as="geometry" />
+        </mxCell>
+        <mxCell id="e1" edge="1" parent="1" source="panel" style="edgeStyle=orthogonalEdgeStyle;rounded=0;endArrow=block;strokeColor=#5b6b7c;fontSize=8;exitX=1;exitY=0.5;entryX=0;entryY=0.5;html=1;" target="h1" value="HTTP /api">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e2" edge="1" parent="1" source="agent" style="edgeStyle=orthogonalEdgeStyle;rounded=0;endArrow=block;strokeColor=#5b6b7c;fontSize=8;exitX=1;exitY=0.5;entryX=0;entryY=0.5;html=1;" target="h3" value="tools/call">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e3" edge="1" parent="1" source="h1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;endArrow=block;strokeColor=#5b6b7c;fontSize=8;exitX=0.5;exitY=1;entryX=0.5;entryY=0;html=1;" target="h2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e4" edge="1" parent="1" source="h2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;endArrow=block;strokeColor=#5b6b7c;fontSize=8;exitX=0.5;exitY=1;entryX=0.5;entryY=0;html=1;" target="h3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e5" edge="1" parent="1" source="h3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;endArrow=block;strokeColor=#5b6b7c;fontSize=8;exitX=0.5;exitY=1;entryX=0.5;entryY=0;html=1;" target="h4">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e6" edge="1" parent="1" source="h3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;endArrow=block;strokeColor=#5b6b7c;fontSize=8;exitX=1;exitY=0.5;entryX=0;entryY=0.5;html=1;" target="s1" value="spawn / stdio">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="510" y="222" />
+              <mxPoint x="510" y="102" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e7" edge="1" parent="1" source="s1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;endArrow=block;strokeColor=#5b6b7c;fontSize=8;exitX=1;exitY=0.5;entryX=0;entryY=0.5;html=1;" target="s4">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e8" edge="1" parent="1" source="s1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;endArrow=block;strokeColor=#5b6b7c;fontSize=8;exitX=0.5;exitY=1;entryX=0.5;entryY=0;html=1;" target="s2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e9" edge="1" parent="1" source="s2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;endArrow=block;strokeColor=#5b6b7c;fontSize=8;exitX=0.5;exitY=1;entryX=0.5;entryY=0;html=1;" target="s3" value="SQL">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e10" edge="1" parent="1" source="hostzone" style="edgeStyle=orthogonalEdgeStyle;rounded=0;endArrow=block;strokeColor=#5b6b7c;fontSize=8;exitX=0.2;exitY=1;entryX=0.62;entryY=0;html=1;" target="filezone" value="读写注册表 / 密钥 / 设置 / 审计">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e11" edge="1" parent="1" source="clzone" style="edgeStyle=orthogonalEdgeStyle;rounded=0;endArrow=block;strokeColor=#5b6b7c;fontSize=8;exitX=0.5;exitY=0;entryX=0.9;entryY=1;html=1;" target="hostzone" value="HTTP :8765/dsh-db-mcp">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="625" y="368" />
+              <mxPoint x="464" y="368" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="note3" parent="1" style="text;fontSize=9;fontColor=#444444;align=left;verticalAlign=middle;whiteSpace=wrap;html=1;" value="Python 侧无状态：每次工具调用自建连接并关闭；Host 侧 datasources.json / secrets.json / settings.json / sessions.json 均以 0600 原子写入。" vertex="1">
+          <mxGeometry height="30" width="760" x="20" y="525" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
