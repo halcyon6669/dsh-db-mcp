@@ -52,6 +52,37 @@ Three things to know about upgrades:
 - Upgrading needs either an exact version or a removed lock entry: `add` will not
   move a dependency that still satisfies its existing range.
 
+### Updating from the app
+
+Settings → Plugins upgrades the plugin in place. Two things are worth knowing:
+
+- The server half is imported once at boot, so the new code only runs after you
+  restart DSH. The panel picks the update up immediately; the MCP tools do not.
+- If the dialog stops at *stop and remove &lt;old version&gt;* with **other
+  configurations still use components from this bundle**, another profile or agent
+  preset still mounts it. Update or remove it there too — or quit DSH and run the
+  loop below.
+
+A running DSH keeps the package's files open, which is what makes an in-place swap
+fail on Windows (`EPERM … rename`). Quit it completely, then update every profile
+that already contains the plugin:
+
+```powershell
+$profiles = 'desktop', 'web'
+foreach ($p in $profiles) {
+  $file = "$env:USERPROFILE\.dsh\profiles\$p\package.json"
+  if ((Test-Path $file) -and ((Get-Content $file -Raw) -match '"dsh-db-mcp"')) {
+    dsh plugin --profile $p add dsh-db-mcp
+  }
+}
+```
+
+If pnpm answers `Already up to date`, name the version to force the move:
+`dsh plugin --profile desktop add dsh-db-mcp@0.9.7`.
+
+Nothing you configured is at risk: sources, saved passwords, settings and the audit
+log live in `~/.dsh/db-mcp`, outside the package.
+
 If the sidebar entry disappears after a restart, see [Troubleshooting](#troubleshooting).
 
 ## The panel

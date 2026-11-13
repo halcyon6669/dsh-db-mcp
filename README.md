@@ -97,6 +97,11 @@ dsh plugin --profile web add dsh-db-mcp       # web UI
 any other name is created on first use). Remove with
 `dsh plugin --profile desktop remove dsh-db-mcp`.
 
+Upgrading has its own traps — pnpm's metadata cache, its release cooldown, and
+Windows holding the old files open. See [Updating from the app](docs/guide.md#updating-from-the-app);
+if the app asks you to disable other configurations first, quit DSH and run the
+update loop from a terminal.
+
 Then:
 
 1. Sidebar → **Database**.

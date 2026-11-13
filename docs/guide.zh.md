@@ -36,6 +36,29 @@ dsh plugin --profile desktop add C:\path\to\dsh-db-mcp
 - pnpm 对新版本有冷却期（`minimumReleaseAge`，默认 1440 分钟），避免刚发布、可能已被投毒的新版本被自动解析。点名具体版本时，pnpm 会把该版本记进 profile 的 `pnpm-workspace.yaml` 里的 `minimumReleaseAgeExclude`，这就是你看到的 `Added 1 entry to minimumReleaseAgeExclude …`。这不是错误：豁免只针对那一个版本，只放行这一次 pin。想改成先询问，在 profile 的 `pnpm-workspace.yaml` 里设 `minimumReleaseAgeStrict: true`；想清理过期条目，设 `minimumReleaseAgeExcludePrune: true`。
 - 升级要么写精确版本，要么先删掉 lock 条目：只要依赖还满足原有范围，`add` 不会动它。
 
+### 在应用里更新
+
+「设置 → 插件」可以直接就地升级。两点要知道：
+
+- 服务端那一半在启动时只导入一次，所以新代码要**重启 DSH** 后才运行；页面上会立刻变成新版，MCP 工具不会。
+- 如果对话框停在「停止并移除 <旧版本>」并提示**其他配置仍在使用这个组合包的组件**，说明还有另一个 profile 或智能体预设挂着它。要么把那边也一并更新/移除，要么退出 DSH 跑下面的循环。
+
+运行中的 DSH 会占用包目录里的文件，这正是 Windows 上就地替换失败（`EPERM … rename`）的原因。请**完全退出** DSH（不是刷新页面），再把每个已经装了它的 profile 都更到新版：
+
+```powershell
+$profiles = 'desktop', 'web'
+foreach ($p in $profiles) {
+  $file = "$env:USERPROFILE\.dsh\profiles\$p\package.json"
+  if ((Test-Path $file) -and ((Get-Content $file -Raw) -match '"dsh-db-mcp"')) {
+    dsh plugin --profile $p add dsh-db-mcp
+  }
+}
+```
+
+如果 pnpm 回答 `Already up to date`，写出版本号强制升级：`dsh plugin --profile desktop add dsh-db-mcp@0.9.7`。
+
+你配置的东西不会有风险：数据源、已存口令、设置与审计日志都在 `~/.dsh/db-mcp`，不在包目录里。
+
 如果重启后侧栏入口消失，见 [排错](#排错)。
 
 ## 面板
