@@ -497,7 +497,71 @@ try {
   const emptyReorder = await call('POST', '/datasources/reorder', { ids: [] })
   check('reorder needs at least one id', emptyReorder.status === 400, emptyReorder.body.error)
   await call('POST', '/datasources/delete', { id: 'order-a' })
-  await call('POST', '/datasources/delete', { id: first.body.id ? 'order-b' : 'order-b' })
+  await call('POST', '/datasources/delete', { id: 'order-b' })
+
+  // A registry from the allow/deny build carries `schemas: { mode, names }` and
+  // no `writableSchemas`. The allow list is carried over as the write list; a
+  // deny list is not inverted, because "everything except these" is not a list
+  // of schemas a write may touch. Either way the old key is dropped on mount.
+  const legacyDir = await mkdtemp(join(tmpdir(), 'dbmcp-legacy-'))
+  await writeFile(
+    join(legacyDir, 'datasources.json'),
+    JSON.stringify({
+      schemaVersion: 1,
+      updatedAt: new Date().toISOString(),
+      groups: [],
+      datasources: [
+        {
+          id: 'legacy-allow',
+          name: 'Legacy allow',
+          kind: 'sqlite',
+          config: { file: 'C:/tmp/legacy-allow.db' },
+          readOnly: true,
+          schemas: { mode: 'allow', names: ['main', 'sales'] },
+        },
+        {
+          id: 'legacy-deny',
+          name: 'Legacy deny',
+          kind: 'sqlite',
+          config: { file: 'C:/tmp/legacy-deny.db' },
+          readOnly: true,
+          schemas: { mode: 'deny', names: ['hr'] },
+        },
+      ],
+    }),
+    'utf8',
+  )
+  const legacyHost = createHost({ dir: legacyDir, config: { probeTimeoutMs: 5000 } })
+  const legacyServer = createServer((req, res) => legacyHost.handle(req, res))
+  await new Promise((resolve) => legacyServer.listen(0, '127.0.0.1', resolve))
+  const legacyBase = `http://127.0.0.1:${legacyServer.address().port}/plugins/db-mcp/api`
+  try {
+    // The migration is fired without being awaited, so give it a moment to land
+    // before the first read; the registry write is a single atomic rename.
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    const listed = await fetch(`${legacyBase}/datasources`).then((response) => response.json())
+    const allowRow = (listed.datasources || []).find((item) => item.id === 'legacy-allow')
+    const denyRow = (listed.datasources || []).find((item) => item.id === 'legacy-deny')
+    check(
+      'an allow list becomes the writable schemas',
+      JSON.stringify(allowRow && allowRow.writableSchemas) === JSON.stringify(['main', 'sales']),
+      JSON.stringify(allowRow && allowRow.writableSchemas),
+    )
+    check(
+      'a deny list does not become a writable list',
+      JSON.stringify(denyRow && denyRow.writableSchemas) === JSON.stringify([]),
+      JSON.stringify(denyRow && denyRow.writableSchemas),
+    )
+    const rewritten = JSON.parse(await readFile(join(legacyDir, 'datasources.json'), 'utf8'))
+    check(
+      'the legacy schemas key is dropped from the file',
+      rewritten.datasources.every((item) => !('schemas' in item)),
+      JSON.stringify(rewritten.datasources.map((item) => Object.keys(item).includes('schemas'))),
+    )
+  } finally {
+    await new Promise((resolve) => legacyServer.close(resolve))
+    await rm(legacyDir, { recursive: true, force: true })
+  }
 } finally {
   await new Promise((resolve) => server.close(resolve))
   const failed = results.filter((entry) => !entry.ok)

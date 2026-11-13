@@ -127,6 +127,12 @@ and never rewritten by the Host.
 before the field existed simply has none — which makes such a source unwritable
 until the list is set.
 
+A registry from the earlier allow/deny build carries `schemas: { mode, names }`
+instead. The Host rewrites that once, on mount: an `allow` list becomes
+`writableSchemas` verbatim (the schemas the user trusted are the schemas a write
+should be confined to), a `deny` list becomes an empty list (inverting "everything
+except these" would grant the whole catalog), and the `schemas` key is dropped.
+
 `secrets.json` holds `{ "schemaVersion": 1, "secrets": { "<id>": { "password": "v1.…" } } }`
 and is read only by the Host and its Python child, never sent to the page.
 

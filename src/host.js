@@ -1091,6 +1091,34 @@ export function createHost(options = {}) {
     await writeJsonAtomic(secretsFile, { schemaVersion: SCHEMA_VERSION, secrets: sealed.secrets }, 0o600)
   }
 
+  /**
+   * Move a registry written by the earlier allow/deny build onto `writableSchemas`.
+   *
+   * That build stored `schemas: { mode, names }` and gated reads as well. The
+   * allow list is the honest mapping: it named the schemas the user trusted, and
+   * that is exactly the set a write should be confined to. A deny list cannot be
+   * inverted safely — "everything except these" is not a write allow list — so
+   * those sources start with no writable schema and ask again on the next
+   * unlock. The old key is dropped either way, so nothing reads it by accident.
+   */
+  async function migrateSchemas() {
+    const registry = await readRegistry()
+    if (registry.error || registry.missing) return false
+    let changed = false
+    const datasources = registry.datasources.map((item) => {
+      const legacy = cleanRecord(item.schemas)
+      if (!legacy || (!('mode' in legacy) && !('names' in legacy))) return item
+      changed = true
+      const { schemas, ...rest } = item
+      const carried = legacy.mode === 'allow' ? normalizeWritableSchemas(legacy.names) : []
+      const kept = normalizeWritableSchemas(rest.writableSchemas)
+      return { ...rest, writableSchemas: kept.length > 0 ? kept : carried }
+    })
+    if (!changed) return false
+    await writeRegistry(datasources, registry.groups)
+    return true
+  }
+
   const settingsFile = join(dir, SETTINGS_FILE)
   const auditFile = join(dir, AUDIT_FILE)
 
@@ -2249,6 +2277,10 @@ export function createHost(options = {}) {
   // A runtime directory written by an older build keeps plaintext passwords in
   // secrets.json; seal them on first mount so the file stops carrying them.
   void migrateSecrets().catch(() => null)
+
+  // Same for a registry from the allow/deny build: its schema list has to become
+  // `writableSchemas` before the panel reads it, or the next unlock starts blank.
+  void migrateSchemas().catch(() => null)
 
   // Outside clients (VS Code, Cursor, Codex) need a URL rather than stdio, so the
   // HTTP half starts too unless the user switched it off in settings. It only
