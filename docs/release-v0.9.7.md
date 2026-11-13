@@ -1,0 +1,51 @@
+## v0.9.7 — seal the passwords, confine the writes
+
+### Added
+
+- **Passwords are encrypted at rest.** `secrets.json` no longer holds plaintext:
+  each source's password is an AES-256-GCM envelope
+  (`v1.<iv>.<tag>.<ciphertext>`), opened with a 32-byte `secret.key` created beside
+  it on first use (mode `0600`). The source id is the additional authenticated
+  data, so an envelope copied onto another source does not decrypt. A runtime
+  directory written by an older build is sealed on the next mount. Deleting
+  `secret.key` revokes every stored password at once.
+- **Writable schemas.** Turning a source from read-only to writable opens a dialog
+  listing the schemas that source actually reports, one checkbox each; nothing is
+  saved until at least one is ticked. The list is stored on the source as
+  `writableSchemas`, survives a switch back to read-only, and comes back
+  pre-ticked on the next unlock. The row shows it only while the source is
+  writable, so a locked row never claims a permission that is not in force.
+- **Architecture diagrams** in `docs/architecture.drawio` — three pages covering
+  the file layout, the code call graph and the runtime picture — with PNG exports
+  for the READMEs.
+
+### Changed
+
+- **A write is checked against the chosen schemas.** `server/writes.py` splits each
+  statement on `;`, resolves the object it writes to (insert / update / delete /
+  merge / truncate / DDL / grant / call, with `create index` resolved through its
+  `on` clause) and refuses anything aimed outside the list. A statement whose
+  target cannot be worked out is refused rather than guessed at. Reads stay
+  unrestricted. The check runs in the Python server, so the panel, the agent and
+  every external MCP client meet the same rule.
+- The panel lists the schemas of a source from `list_tables`, which now returns
+  them as a plain array alongside the tables.
+- A source may not be writable with an empty list: both the single save and the
+  bulk route refuse it with a `400`.
+
+### Fixed
+
+- A write that returns no result set is committed. psycopg raises "the last
+  operation didn't produce records" when such a cursor is iterated, and that
+  exception escaped before `connection.commit()`, rolling back a write the server
+  had already applied.
+- Long catalog names are readable in the structure browser. A name wider than the
+  rail truncates with an ellipsis and keeps its full value in the tooltip, the kind
+  pill beside it keeps its width, and a narrow panel stacks the tree above the
+  column list instead of squeezing the names.
+- A registry from the earlier allow/deny build is migrated on mount: an `allow`
+  list becomes `writableSchemas`, a `deny` list becomes an empty list (inverting
+  "everything except these" would grant the whole catalog), and the old key is
+  dropped.
+
+**Install:** `dsh plugin --profile desktop add dsh-db-mcp@0.9.7`
