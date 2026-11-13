@@ -211,6 +211,23 @@ if (schemaView) {
   check('schema view: the title appears once, in the card header', repeated.length === 0, `got ${repeated.length}`)
 }
 
+// A catalog can hand out names longer than the rail is wide (GaussDB's
+// global_plancache_status…). Pixels are out of reach here, so pin the rules that
+// do the work: the name truncates and keeps its full value in `title`, and the
+// kind pill never shrinks to make room for it.
+const schemaNameRule = source.slice(source.indexOf('.dbmcp-schema-name {'), source.indexOf('.dbmcp-schema-name {') + 260)
+check('schema list: the name truncates', schemaNameRule.includes('text-overflow: ellipsis'), schemaNameRule.slice(0, 80))
+check('schema list: the name may shrink', schemaNameRule.includes('min-width: 0'), schemaNameRule.slice(0, 80))
+check(
+  'schema list: the kind pill keeps its width',
+  /\.dbmcp-schema-table \.dbmcp-pill \{[^}]*flex: 0 0 auto/.test(source),
+)
+check('schema list: the name carries the full value as a title', source.includes("title: table.name"))
+check(
+  'schema list: one column when the panel is narrow',
+  source.includes('@container (max-width: 560px)') && source.includes('container-type: inline-size'),
+)
+
 // Required-field marking only shows up after a save attempt, so check the input
 // primitive can carry the state the form turns on.
 const { TextInput } = mod.__test

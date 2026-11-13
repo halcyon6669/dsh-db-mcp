@@ -936,12 +936,26 @@ window.__ModuleLoader__.load({
         display: flex;
         flex-direction: column;
         gap: 12px;
+        /* The panel is a sidebar, so its own width — not the viewport's — decides
+           whether two columns still fit. The wrapper is the container because an
+           element cannot answer a query about its own size. */
+        container-type: inline-size;
       }
       .dbmcp-schema {
         display: grid;
         grid-template-columns: minmax(160px, 220px) minmax(0, 1fr);
         gap: 18px;
         align-items: start;
+      }
+      /* One column when the panel is narrow: the rail keeps its own scroll box
+         above the column list instead of squeezing the names to two characters. */
+      @container (max-width: 560px) {
+        .dbmcp-schema {
+          grid-template-columns: minmax(0, 1fr);
+        }
+        .dbmcp-schema-groups {
+          max-height: 300px;
+        }
       }
       .dbmcp-schema-side {
         display: flex;
@@ -979,6 +993,18 @@ window.__ModuleLoader__.load({
         font-size: 12px;
         font-weight: 600;
         color: var(--dsw-alias-label-secondary);
+      }
+      /* The qualified name of the open table: the same truncation rule as the
+         rail, so a long name cannot push the column count out of the card. */
+      .dbmcp-schema-title {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: var(--dsw-alias-label-primary);
+      }
+      .dbmcp-schema-head .dbmcp-hint {
+        flex: 0 0 auto;
       }
       .dbmcp-schema-tables {
         list-style: none;
@@ -1048,6 +1074,20 @@ window.__ModuleLoader__.load({
         font-size: 13px;
         text-align: left;
         cursor: pointer;
+      }
+      /* A GaussDB catalog hands out names like
+         global_plancache_status_global_recovery_status — longer than the rail is
+         wide. The name gets the room, truncates with an ellipsis, and keeps the
+         full value in its title; the kind pill never shrinks. */
+      .dbmcp-schema-name {
+        min-width: 0;
+        flex: 1 1 auto;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .dbmcp-schema-table .dbmcp-pill {
+        flex: 0 0 auto;
       }
       .dbmcp-schema-table:hover {
         background: var(--dsw-alias-bg-layer-2);
@@ -3750,7 +3790,7 @@ function groupTables(tables) {
                         onClick: () => setCollapsed({ ...collapsed, [schema]: !closed }),
                       },
                       h('span', { className: 'dbmcp-schema-caret', 'aria-hidden': 'true' }, closed ? '▸' : '▾'),
-                      h('span', { className: 'dbmcp-schema-group-name' }, groupLabel(schema)),
+                      h('span', { className: 'dbmcp-schema-group-name', title: groupLabel(schema) }, groupLabel(schema)),
                       h('span', { className: 'dbmcp-hint' }, String(items.length)),
                     ),
                     closed
@@ -3770,7 +3810,7 @@ function groupTables(tables) {
                                   className: 'dbmcp-schema-table' + (active ? ' is-active' : ''),
                                   onClick: () => setPicked({ schema: table.schema || '', name: table.name }),
                                 },
-                                h('span', null, table.name),
+                                h('span', { className: 'dbmcp-schema-name', title: table.name }, table.name),
                                 table.type ? h('span', { className: 'dbmcp-pill' }, table.type) : null,
                               ),
                             )
@@ -3811,7 +3851,11 @@ function groupTables(tables) {
                         h(
                           'div',
                           { className: 'dbmcp-schema-head' },
-                          h('span', null, pickedSchema ? `${pickedSchema}.${detail.table}` : detail.table),
+                          h(
+                            'span',
+                            { className: 'dbmcp-schema-title', title: pickedSchema ? `${pickedSchema}.${detail.table}` : detail.table },
+                            pickedSchema ? `${pickedSchema}.${detail.table}` : detail.table,
+                          ),
                           h('span', { className: 'dbmcp-hint' }, fmt(t('schema.columns'), { n: (detail.columns || []).length })),
                         ),
                         h(
