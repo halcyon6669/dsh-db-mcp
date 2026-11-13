@@ -267,6 +267,12 @@ cannot run SQL, and nothing is cached. The header row keeps the way back to the
 list, the connection target and the same identifier chip, so the handle the agent
 needs is in view while you read the tables.
 
+Catalog names can outrun the rail — GaussDB alone has views like
+`global_plancache_status`. A long name truncates with an ellipsis and keeps its
+full value in the tooltip; the kind pill beside it keeps its width. When the
+panel is too narrow for two columns, the tree moves above the column list instead
+of squeezing the names.
+
 Below the tree there is nothing to switch: reads are never limited by schema.
 Writes are, and they are chosen on the row itself — see *Writable schemas* below.
 
