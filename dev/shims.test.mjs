@@ -20,7 +20,15 @@ const manifest = (() => {
     const raw = readFileSync(new URL('../package.json', import.meta.url), 'utf8')
     if (raw.charCodeAt(0) === 0xfeff) return { ok: false, message: 'package.json starts with a BOM' }
     const parsed = JSON.parse(raw)
-    return { ok: Boolean(parsed.name && parsed.version && parsed.dsh && parsed.dsh.bundle), message: `${parsed.name}@${parsed.version}, no BOM` }
+    // What npm actually ships: the storefront images belong in the tarball, the
+    // dev fixtures never do (the scripts read local DBeaver files).
+    const files = Array.isArray(parsed.files) ? parsed.files : []
+    const shipsAssets = files.includes('asset/*.png')
+    const shipsDev = files.some((entry) => entry === 'dev' || entry.startsWith('dev/'))
+    return {
+      ok: Boolean(parsed.name && parsed.version && parsed.dsh && parsed.dsh.bundle) && shipsAssets && !shipsDev,
+      message: `${parsed.name}@${parsed.version}, no BOM, assets ${shipsAssets ? 'in' : 'MISSING'}, dev ${shipsDev ? 'SHIPPED' : 'excluded'}`,
+    }
   } catch (error) {
     return { ok: false, message: `package.json unreadable: ${error.message}` }
   }
