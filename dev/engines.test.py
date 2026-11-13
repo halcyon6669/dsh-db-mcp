@@ -47,6 +47,21 @@ class FakeCursor:
         self.closed = True
 
 
+class PsycopgLikeCursor(FakeCursor):
+    """A cursor that raises when iterated without a result set, as psycopg does.
+
+    `psycopg` answers `"the last operation didn't produce records"` when a write
+    statement is iterated. That exception used to escape `_rows()` before
+    `connection.commit()`, so the write was rolled back even though the server
+    had applied it.
+    """
+
+    def __iter__(self):
+        if not self.description:
+            raise RuntimeError("the last operation didn't produce records")
+        return iter(self._rows)
+
+
 class FakeConnection:
     def __init__(self, cursor: FakeCursor):
         self._cursor = cursor
@@ -66,10 +81,11 @@ class FakeConnection:
 CONFIG = {
     "sqlite": {},
     "postgres": {"schema": "public"},
+    "gauss": {"schema": "public"},
     "mysql": {"database": "testdb"},
     "oracle": {"user": "TEST"},
 }
-DEFAULT_SCHEMA = {"sqlite": "main", "postgres": "public", "mysql": "testdb", "oracle": "TEST"}
+DEFAULT_SCHEMA = {"sqlite": "main", "postgres": "public", "gauss": "public", "mysql": "testdb", "oracle": "TEST"}
 
 
 def profile(kind: str, read_only: bool = False) -> dict:
@@ -177,6 +193,18 @@ class WritePermission(unittest.TestCase):
         self.assertEqual(result["rowCount"], 1)
         self.assertEqual(connection.commits, 0)
         self.assertEqual(connection.rollbacks, 1)
+
+    def test_write_without_result_set_is_still_committed(self):
+        """A driver that raises on iterating a write must not undo the commit."""
+        self.allow_write()
+        cursor = PsycopgLikeCursor(rowcount=1)
+        connection = FakeConnection(cursor)
+        result = engines.execute_sql(profile("gauss"), connection, "insert into demo_items (id) values (1)", 200)
+        self.assertEqual(connection.commits, 1, "the write must be committed, not lost to the read attempt")
+        self.assertEqual(connection.rollbacks, 0)
+        self.assertEqual(result["rows"], [])
+        self.assertEqual(result["columns"], [])
+        self.assertEqual(result["affectedRows"], 1)
 
     def test_failed_write_is_not_committed(self):
         self.allow_write()

@@ -106,6 +106,12 @@ def _cell(value):
 
 def _rows(cursor, max_rows: int) -> tuple[list[str], list[list], bool]:
     columns = [str(description[0]) for description in (cursor.description or [])]
+    if not columns:
+        # A write returns no result set. psycopg raises "the last operation
+        # didn't produce records" when the cursor is iterated anyway, and that
+        # exception escaped before `connection.commit()`, rolling the write back.
+        # No columns means nothing to read: report zero rows.
+        return [], [], False
     rows: list[list] = []
     truncated = False
     for index, row in enumerate(cursor):
