@@ -59,13 +59,14 @@ Settings → Plugins upgrades the plugin in place. Two things are worth knowing:
 - The server half is imported once at boot, so the new code only runs after you
   restart DSH. The panel picks the update up immediately; the MCP tools do not.
 - If the dialog stops at *stop and remove &lt;old version&gt;* with **other
-  configurations still use components from this bundle**, another profile or agent
-  preset still mounts it. Update or remove it there too — or quit DSH and run the
-  loop below.
+  configurations still use components from this bundle**, the app that is running
+  counts as one of those configurations. Restart DSH and update again — in practice
+  that is all it takes.
+- On Windows the restart also matters for a second reason: a running DSH holds the
+  package's files open, so the in-place swap would fail with `EPERM … rename`.
 
-A running DSH keeps the package's files open, which is what makes an in-place swap
-fail on Windows (`EPERM … rename`). Quit it completely, then update every profile
-that already contains the plugin:
+If a restart is not an option, or several profiles kept their own copy, quit DSH
+completely and update every profile that already contains the plugin:
 
 ```powershell
 $profiles = 'desktop', 'web'
