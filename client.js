@@ -3440,6 +3440,15 @@ const writableNames = (source) => {
 }
 
 /**
+ * Whether a row shows its writable-schemas pill.
+ *
+ * The list outlives a switch back to read-only, because it is the next unlock's
+ * starting point. Showing it on a locked row would read as a permission that is
+ * not in force, so the pill only appears once the source is actually writable.
+ */
+const showsWritable = (source) => Boolean(source) && source.readOnly === false && writableNames(source).length > 0
+
+/**
  * Section order for the list. "Ungrouped" is a bucket like any other, but it is
  * not a declared group, so it has to be added here — otherwise filtering on it
  * renders nothing.
@@ -4637,9 +4646,11 @@ function groupTables(tables) {
                       },
                       source.readOnly === false ? t('sources.readwrite') : t('sources.readonly'),
                     ),
-                    // Only shown when the source is writable, so a plain source
-                    // keeps the row as short as before.
-                    writableNames(source).length > 0
+                    // The list is kept on a read-only source (it is the next
+                    // unlock's starting point), but showing it there reads as a
+                    // permission that is not in force: it only earns a pill once
+                    // the source is actually writable.
+                    showsWritable(source)
                       ? h(
                           'span',
                           {
@@ -5533,6 +5544,7 @@ function groupTables(tables) {
         StatusStrip,
         sourceMatches,
         writableNames,
+        showsWritable,
         sectionOrder,
         paletteOf,
         parseColor,

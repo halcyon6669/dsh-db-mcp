@@ -225,7 +225,7 @@ check(
 
 // The table list is grouped per schema and filterable; both helpers are pure so
 // they can be checked without a live MCP server.
-const { groupTables, tableMatches, connectionMatches } = mod.__test
+const { groupTables, tableMatches, connectionMatches, writableNames, showsWritable } = mod.__test
 const grouped = groupTables([
   { name: 'orders', schema: 'sales' },
   { name: 'customers', schema: 'sales' },
@@ -241,6 +241,30 @@ check('schema grouping sorts groups', grouped.map(([schema]) => schema).join(','
 check('schema filter matches table names', tableMatches({ name: 'Orders' }, 'ord') === true)
 check('schema filter matches schema names', tableMatches({ name: 'x', schema: 'Sales' }, 'sales') === true)
 check('schema filter drops non-matches', tableMatches({ name: 'x', schema: 'y' }, 'zzz') === false)
+
+// The writable-schemas pill is a statement about a permission that is in force.
+// The list survives a switch back to read-only, so the pill must not: showing
+// "writable main" on a locked row would claim something that is not true.
+check(
+  'writable pill: shown on a writable source that names schemas',
+  showsWritable({ readOnly: false, writableSchemas: ['main'] }) === true,
+)
+check(
+  'writable pill: hidden when the source is read-only',
+  showsWritable({ readOnly: true, writableSchemas: ['main'] }) === false,
+)
+check(
+  'writable pill: hidden when the source names no schema',
+  showsWritable({ readOnly: false, writableSchemas: [] }) === false,
+)
+check(
+  'writable pill: a missing list counts as empty',
+  writableNames({}).length === 0 && showsWritable({ readOnly: false }) === false,
+)
+check(
+  'writable pill: blank names are not a list',
+  showsWritable({ readOnly: false, writableSchemas: ['', '  '] }) === false,
+)
 
 check(
   'import filter matches name/host/user',
