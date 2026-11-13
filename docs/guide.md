@@ -282,7 +282,9 @@ Three independent gates decide whether a statement may write:
    amber while that source accepts writes.
 3. **Writable schemas** — a writable source also says which schemas it may write
    to. Turning it writable asks first, and a statement aimed anywhere else is
-   refused.
+   refused. The row shows that list only while the source is writable: the list
+   survives a switch back to read-only, but a pill on a locked row would claim a
+   permission that is not in force.
 
 The Python server reads the global flag at start-up and the host restarts it
 whenever the switch flips. Read-only is enforced again at the driver where the
