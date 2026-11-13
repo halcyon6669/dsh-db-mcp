@@ -138,11 +138,16 @@ smaller tool list in the model's context.
 
 ## Safety
 
-- **Read-only by default**, with two independent gates: a global write switch and a
-  per-source flag. Both must be open before a statement may write.
-- **Passwords stay local, encrypted at rest.** They live in `secrets.json` as
-  AES-256-GCM envelopes (mode `0600`), with the key in `secret.key` beside them; no
-  HTTP route ever returns one, and the Python child receives a short environment
+- **Read-only by default**, with three independent gates: a global write switch, a
+  per-source flag, and the schemas that source may write to. All must be open before
+  a statement may write.
+- **Writes are confined to chosen schemas.** Turning a source writable asks which
+  schemas it may write to, one checkbox each; a statement aimed anywhere else is
+  refused before it reaches the database. Reads stay unrestricted. The guard runs in
+  the Python server, so the panel, the agent and the HTTP endpoint all obey it.
+- **Passwords stay local, encrypted at rest.** `secrets.json` holds an AES-256-GCM
+  envelope per source, the key lives beside it in `secret.key` (mode `0600`); no HTTP
+  route ever returns a password, and the Python child receives a short environment
   allowlist rather than the whole DSH environment.
 - **Every tool call is audited** to `logs/audit.jsonl` — tool, source, duration, row
   count, SQL. Result rows are never logged.

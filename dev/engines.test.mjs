@@ -6,9 +6,10 @@
  *
  * Only the standard library is needed for `engines.test.py`: it imports
  * `server/engines.py` against a stub DB-API connection and never opens a real
- * database. `secretbox.test.py` additionally needs `cryptography`, and skips
- * itself when that is missing. Candidates are tried in order (configured path,
- * plugin venv, PATH) and the first one that actually starts runs the suites.
+ * database. `writes.test.py` is the same, and `secretbox.test.py` additionally
+ * needs `cryptography`, skipping itself when that is missing. Candidates are
+ * tried in order (configured path, plugin venv, PATH) and the first one that
+ * actually starts runs the suites.
  */
 import { existsSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
@@ -22,6 +23,7 @@ const packageDir = dirname(dirname(fileURLToPath(import.meta.url)))
 const runtimeDir = process.env.DB_MCP_RUNTIME || join(process.env.DSH_HOME || join(homedir(), '.dsh'), 'db-mcp')
 const testFiles = [
   join(packageDir, 'dev', 'engines.test.py'),
+  join(packageDir, 'dev', 'writes.test.py'),
   join(packageDir, 'dev', 'secretbox.test.py'),
 ]
 

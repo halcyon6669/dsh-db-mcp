@@ -267,9 +267,12 @@ cannot run SQL, and nothing is cached. The header row keeps the way back to the
 list, the connection target and the same identifier chip, so the handle the agent
 needs is in view while you read the tables.
 
+Below the tree there is nothing to switch: reads are never limited by schema.
+Writes are, and they are chosen on the row itself — see *Writable schemas* below.
+
 ## Safety switches
 
-Two independent gates decide whether a statement may write:
+Three independent gates decide whether a statement may write:
 
 1. **Global switch** — `allowWrite` in `<runtime>/settings.json`, toggled on the
    *Runtime* tab. Off by default; while off every write is refused with
@@ -277,11 +280,52 @@ Two independent gates decide whether a statement may write:
 2. **Per-source flag** — `readOnly` on the source, on by default. Click the
    *read-only* / *writable* pill on a row to flip it in one click; the pill turns
    amber while that source accepts writes.
+3. **Writable schemas** — a writable source also says which schemas it may write
+   to. Turning it writable asks first, and a statement aimed anywhere else is
+   refused.
 
 The Python server reads the global flag at start-up and the host restarts it
 whenever the switch flips. Read-only is enforced again at the driver where the
 engine allows it (`mode=ro` for SQLite, `default_transaction_read_only` for
 PostgreSQL, `SET SESSION TRANSACTION READ ONLY` for MySQL).
+
+## Writable schemas
+
+Reads stay unrestricted: the agent can look at every schema the login can see. A
+write is different — a source that accepts writes has to name the schemas it may
+write to.
+
+Flip a row from *read-only* to *writable* and a dialog asks where it may write. It
+lists the schemas of that source with one checkbox each — nothing to type. A schema
+the source already writes to stays on the list even when the catalog no longer
+shows it. Nothing is preselected on a source that never had a list; a source that
+had one comes back with the same boxes ticked, because switching back to read-only
+keeps the list. **Allow writes** stays disabled until at least one box is ticked.
+
+The same names can be edited later in **Edit** → **More settings** → *Writable
+schemas*, comma separated. They are stored on the source, so the dialog and the
+form always agree.
+
+The guard runs in the Python server, which means it covers the agent, the HTTP
+endpoint and the panel alike:
+
+- Every statement in a batch is checked; a leading `--` comment or a `;` does not
+  hide one.
+- Reads (`select`, `with`, `show`, `explain`, …) always pass.
+- A write is resolved to the schema it lands on — `insert into sales.orders`,
+  `update "hr".employees`, `create table audit.log`, `create index i on
+  sales.orders`, `grant … on sales.orders`, `call sales.recalc()`.
+- An unqualified target takes the source's own default: `main` for SQLite, the
+  configured database for MySQL, the configured schema (or the Oracle user) for
+  the rest, and `public` for PostgreSQL when nothing is set.
+- A statement whose target cannot be read is refused, not allowed through.
+- A source that is writable with no list at all refuses every write; the panel
+  will not put it in that state, but a hand-edited registry can.
+
+This is a guard, not a grant. It keeps the agent from writing outside the schemas
+it was given, but the real boundary stays in the database: a login that can write
+`hr.employees` can still do it over any other client. For a hard limit, give the
+source a narrower `GRANT` as well.
 
 Stored passwords are encrypted at rest. `secrets.json` holds an AES-256-GCM
 envelope per source and the key lives beside it in `secret.key` (mode `0600`,

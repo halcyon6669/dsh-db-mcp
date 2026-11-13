@@ -20,6 +20,7 @@ from typing import Any, Optional
 from mcp.server.fastmcp import FastMCP
 
 import engines
+import writes
 import store
 
 DEFAULT_MAX_ROWS = int(os.environ.get("DB_MCP_MAX_ROWS") or 200)
@@ -127,7 +128,7 @@ def _clamp_rows(limit: Optional[int]) -> int:
 
 
 def _error(error: Exception) -> dict:
-    if isinstance(error, (engines.DbError, store.StoreError)):
+    if isinstance(error, (engines.DbError, store.StoreError, writes.WriteBlocked)):
         payload = {"ok": False, "error": {"code": error.code, "message": error.message}}
         if error.hint:
             payload["error"]["hint"] = error.hint

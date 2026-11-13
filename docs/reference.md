@@ -30,7 +30,7 @@ are `GET`; every mutation is `POST` (the same-origin check compares `Origin` wit
 | `POST /datasources/save` | create or update a source (`id` immutable); a second row for the same host + port + database + user is refused with `409` |
 | `POST /datasources/delete` | remove a source and its stored secret |
 | `POST /datasources/test` | real login probe (accepts `id`, or an inline `kind` + `config` + `password`) |
-| `POST /datasources/bulk` | `action: test \| readOnly \| group \| delete` over `ids` |
+| `POST /datasources/bulk` | `action: test \| readOnly \| group \| delete` over `ids`; `readOnly: false` also takes `writableSchemas` |
 | `POST /datasources/reorder` | rewrite the row order given `ids`; sources it does not name keep their place at the end |
 | `POST /groups/save` · `POST /groups/delete` | create, rename (`from`) or delete a group |
 | `POST /dbeaver/import` | copy selected DBeaver connections into the registry |
@@ -64,7 +64,7 @@ Row limits come from the server: `DB_MCP_MAX_ROWS` (default 200) per call, cappe
 | Tool | Parameters | Returns |
 | ---- | ---------- | ------- |
 | `list_datasources` | — | `[{ id, name, kind, target, readOnly, isDefault }]` |
-| `list_tables` | `datasource?`, `schema?` | `{ datasource, tables: [{ schema, name, type }] }` |
+| `list_tables` | `datasource?`, `schema?` | `{ datasource, tables: [{ schema, name, type }], schemas: [string] }` |
 | `describe_table` | `table`, `datasource?`, `schema?` | `{ columns: [{ name, type, nullable, default, primaryKey }] }` |
 | `sample_rows` | `table`, `datasource?`, `limit=20`, `schema?` | `{ columns, rows, rowCount, truncated }` |
 | `execute_sql` | `sql`, `datasource?`, `max_rows?` | `{ columns, rows, rowCount, truncated, elapsedMs }`, or `{ affectedRows }` for a write |
@@ -86,7 +86,7 @@ Failures come back as `{ ok: false, error: { code, message, hint? } }` with
 
 | Code | Meaning |
 | ---- | ------- |
-| `user_error` | the request is wrong: unknown datasource, refused write, bad table name |
+| `user_error` | the request is wrong: unknown datasource, refused write, bad table name, write outside the writable schemas |
 | `db_error` | the engine refused or failed: authentication, syntax, timeout |
 | `infra_error` | the plugin could not get that far: interpreter missing, venv broken |
 
@@ -110,7 +110,8 @@ and never rewritten by the Host.
       "kind": "postgres",
       "group": "docker",
       "config": { "host": "127.0.0.1", "port": 5432, "database": "demo", "user": "demo", "schema": "public" },
-      "readOnly": true,
+      "writableSchemas": ["public", "sales"],
+      "readOnly": false,
       "isDefault": true,
       "tags": [],
       "createdAt": "…",
@@ -120,6 +121,11 @@ and never rewritten by the Host.
   ]
 }
 ```
+
+`writableSchemas` lists the schemas a non-read-only source may write to; see
+[Writable schemas](#writable-schemas). It is optional, and a registry written
+before the field existed simply has none — which makes such a source unwritable
+until the list is set.
 
 `secrets.json` holds `{ "schemaVersion": 1, "secrets": { "<id>": { "password": "v1.…" } } }`
 and is read only by the Host and its Python child, never sent to the page.
@@ -185,6 +191,53 @@ data source.
 `id` must match `^[a-z0-9][a-z0-9-]{0,31}$` and never changes; `name` ≤ 64
 characters; `group` ≤ 48.
 
+### Writable schemas
+
+Reads are never restricted by schema. Writes are: a source that is not read-only
+carries a `writableSchemas` list, and a statement that would write anywhere else
+is refused before it reaches the database.
+
+```json
+"writableSchemas": ["public", "sales"]
+```
+
+| Field | Meaning |
+| ----- | ------- |
+| `writableSchemas` | up to 32 schema names, each ≤ 64 characters; quotes are stripped, duplicates folded, names with spaces dropped |
+
+The list is stored on the source, so switching back to read-only keeps it and the
+next unlock dialog preselects it. A source may not be writable with an empty list:
+`POST /datasources/bulk` with `{ "action": "readOnly", "readOnly": false }` returns
+400 unless the source already has one, and the panel asks first.
+
+The guard runs in the Python child (`server/writes.py`), inside
+`ensure_readable`, so the agent, the HTTP endpoint and the panel all hit it:
+
+- Every statement in a batch is checked; a leading `--` comment or a `;` does not
+  hide one.
+- Reads (`select`, `with`, `show`, `explain`, …) always pass.
+- A write is resolved to its target schema: `insert into sales.orders`,
+  `update "hr".employees`, `create table audit.log`, `create index i on
+  sales.orders`, `grant … on sales.orders`, `call sales.recalc()`. The modifiers
+  are skipped, and `create index` lands on the table after `on`.
+- An unqualified target takes the source's default schema: `main` for SQLite, the
+  configured database for MySQL, `config.schema` (or the Oracle user, upper-cased)
+  otherwise, and `public` for PostgreSQL when nothing is set.
+- A statement whose target cannot be read is refused rather than allowed.
+- Names compare case-insensitively.
+
+This is a guard, not a grant. It keeps the agent from writing outside the schemas
+it was given; the real boundary stays in the database. A login that can write
+`hr.employees` can still do it over any other client, so a source that needs less
+should also get a narrower `GRANT`.
+
+The panel enforces the same rule in its own way: turning a source writable opens a
+dialog that lists the schemas of that source (`GET /schema?datasource=` returns
+them as `schemas: string[]`) with one checkbox each. A schema the source already
+writes to stays on that list even when the catalog no longer shows it. Confirming
+with nothing ticked is disabled; a source that reports no schema at all says so
+instead of showing an empty dialog.
+
 ## Plugin configuration
 
 The bundle row in the profile accepts these options (all optional):
@@ -210,8 +263,8 @@ The Python side reads `DB_MCP_RUNTIME`, `DB_MCP_ALLOW_WRITE`, `DB_MCP_MAX_ROWS` 
 - A Python 3.10+ interpreter for the MCP server, with the packages from
   `server/requirements.txt`. 3.10 is the floor set by `mcp`, `psycopg`, `oracledb`
   and `pydantic`; the panel's one-click install builds the venv for you.
-  `mcp` must stay on 1.x — 2.x renamed `FastMCP`. `cryptography` opens the
-  password envelopes: without it every stored password reports as unreadable
-  rather than being sent in the clear.
+  `mcp` must stay on 1.x — 2.x renamed `FastMCP`. `cryptography` opens the stored
+  password envelopes; without it every source reports `infra_error` instead of
+  connecting.
 - Windows, macOS or Linux. The venv layout (`Scripts/python.exe` vs `bin/python`)
   and the DBeaver workspace path are resolved per platform.

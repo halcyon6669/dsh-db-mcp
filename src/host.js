@@ -215,6 +215,7 @@ function publicProfile(profile, secrets) {
     tags: Array.isArray(profile.tags) ? profile.tags.filter((tag) => typeof tag === 'string') : [],
     group: typeof profile.group === 'string' ? profile.group : '',
     config: configToPublic(profile.kind, config),
+    writableSchemas: normalizeWritableSchemas(profile.writableSchemas),
     target: describeTarget(profile.kind, config),
     hasSecret: Boolean(secret && SECRET_FIELDS.some((field) => trimmed(secret[field]))),
     // A secret that no longer opens (the key was replaced or deleted) must be
@@ -229,6 +230,40 @@ function publicProfile(profile, secrets) {
 /** Validate raw user input, returning { profile, password, error }. */
 function groupName(value) {
   return typeof value === 'string' ? value.trim().slice(0, 48) : ''
+}
+
+/**
+ * The schemas a writable source may write to, as `['sales', 'billing']`.
+ *
+ * Reads are never restricted, so this is only consulted when the source is
+ * writable: switching read-only off asks for this list first, and every
+ * changing statement is checked against it in server/writes.py.
+ */
+const MAX_WRITABLE_SCHEMAS = 32
+const MAX_SCHEMA_NAME_LENGTH = 64
+
+function schemaName(value) {
+  if (typeof value !== 'string') return ''
+  const text = value.trim().replace(/^["`]+|["`]+$/g, '').trim()
+  if (!text || text.length > MAX_SCHEMA_NAME_LENGTH) return ''
+  if (/\s/.test(text)) return ''
+  return text
+}
+
+function normalizeWritableSchemas(raw) {
+  const declared = Array.isArray(raw) ? raw : []
+  const seen = new Set()
+  const names = []
+  for (const item of declared) {
+    const name = schemaName(item)
+    if (!name) continue
+    const folded = name.toLowerCase()
+    if (seen.has(folded)) continue
+    seen.add(folded)
+    names.push(name)
+    if (names.length >= MAX_WRITABLE_SCHEMAS) break
+  }
+  return names
 }
 
 function normalizeInput(input, existing) {
@@ -291,6 +326,10 @@ function normalizeInput(input, existing) {
     : trimmed(raw.group)
   if (group.length > 48) return { error: 'group must be at most 48 characters' }
 
+  const writableSchemas = raw.writableSchemas === undefined || raw.writableSchemas === null
+    ? normalizeWritableSchemas(existing && existing.writableSchemas)
+    : normalizeWritableSchemas(raw.writableSchemas)
+
   const profile = {
     id,
     name,
@@ -300,6 +339,7 @@ function normalizeInput(input, existing) {
     isDefault: raw.isDefault === true || (existing ? existing.isDefault === true : false),
     tags,
     group,
+    writableSchemas,
     createdAt: (existing && existing.createdAt) || isoNow(),
     updatedAt: isoNow(),
     lastProbe: existing ? existing.lastProbe ?? null : null,
@@ -1641,6 +1681,33 @@ export function createHost(options = {}) {
       if (action === 'group') return { ...item, group: trimmed(payload.group).slice(0, 48), updatedAt: isoNow() }
       return { ...item, readOnly: payload.readOnly !== false, updatedAt: isoNow() }
     })
+    if (action === 'readOnly') {
+      /* Turning a source writable is a decision about where it may write, so the
+         caller has to say so in the same call. Going back to read-only keeps the
+         list: it is the next unlock's starting point, not stale state. */
+      const writable = payload.readOnly === false
+      const requested = payload.writableSchemas === undefined || payload.writableSchemas === null
+        ? null
+        : normalizeWritableSchemas(payload.writableSchemas)
+      if (writable && requested !== null && requested.length === 0) {
+        return { status: 400, body: { ok: false, error: 'a writable source needs at least one writable schema' } }
+      }
+      for (const item of next) {
+        if (!target.includes(item.id)) continue
+        if (requested !== null) item.writableSchemas = requested
+        else item.writableSchemas = normalizeWritableSchemas(item.writableSchemas)
+        if (writable && item.writableSchemas.length === 0) {
+          return {
+            status: 400,
+            body: {
+              ok: false,
+              error: `${item.name || item.id} needs at least one writable schema before it can be writable`,
+              datasourceId: item.id,
+            },
+          }
+        }
+      }
+    }
     await writeRegistry(next)
     const { secrets } = await readSecrets()
     return {
@@ -1766,14 +1833,30 @@ export function createHost(options = {}) {
     const target = describeTarget(profile.kind, profile.config)
 
     try {
-      if (!table) {
+        if (!table) {
         const args = schema ? { datasource: id, schema } : { datasource: id }
         const result = await bridge.call('list_tables', args, { audit: false })
         const value = result.value || {}
         if (value.ok === false) {
           return [200, { ok: false, datasource: id, target, error: value.error || { message: 'list_tables failed' } }]
         }
-        return [200, { ok: true, datasource: id, target, tables: value.tables || [] }]
+        const tables = value.tables || []
+        // Every schema the catalog returned: the unlock dialog draws one
+        // checkbox per row, so this is what the user picks from. Older Python
+        // builds only send the tables, so fall back to their schema names.
+        const listed = Array.isArray(value.schemas) && value.schemas.length > 0
+          ? value.schemas
+          : tables.map((table) => table && table.schema).filter(Boolean)
+        return [
+          200,
+          {
+            ok: true,
+            datasource: id,
+            target,
+            tables,
+            schemas: Array.from(new Set(listed.map((name) => String(name)))),
+          },
+        ]
       }
       const args = schema ? { datasource: id, table, schema } : { datasource: id, table }
       const result = await bridge.call('describe_table', args, { audit: false })
@@ -1839,6 +1922,22 @@ export function createHost(options = {}) {
     // is the only one available; a saved source keeps using its stored secret.
     const supplied = typeof payload.password === 'string' ? payload.password : ''
     const secret = profile.id ? secrets[profile.id] : supplied ? { password: supplied } : null
+    if (secret && secret.broken) {
+      return {
+        status: 200,
+        body: {
+          ok: true,
+          probe: {
+            ok: false,
+            message: 'the stored password cannot be decrypted — re-enter it in Edit',
+            latencyMs: 0,
+            at: isoNow(),
+            detail: null,
+          },
+          target: describeTarget(profile.kind, profile.config),
+        },
+      }
+    }
     const result = await testProfile(profile, secret, probeOptions)
     const probe = {
       ok: result.ok,
@@ -2164,7 +2263,15 @@ export function createHost(options = {}) {
   return {
     version: PLUGIN_VERSION,
     handle,
-    __test: { parseJdbcUrl, parseOracleUrl, mapDBeaverConnection, sourceIdentity, hostsOf, endpointLabel },
+    __test: {
+      parseJdbcUrl,
+      parseOracleUrl,
+      mapDBeaverConnection,
+      sourceIdentity,
+      hostsOf,
+      endpointLabel,
+      normalizeWritableSchemas,
+    },
     dispose: async () => {
       await bridge.dispose()
     },

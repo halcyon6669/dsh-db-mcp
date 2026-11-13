@@ -306,6 +306,80 @@ try {
   const schemaUnknown = await call('GET', '/schema?datasource=ghost')
   check('schema rejects unknown sources', schemaUnknown.status === 404, schemaUnknown.body.error)
 
+  // A writable source names the schemas it may write to. The list is normalised
+  // on the way in (quotes stripped, duplicates folded, blanks dropped) and it
+  // survives a switch back to read-only, so flipping the pill twice does not
+  // make the operator retype it.
+  const writable = await call('POST', '/datasources/save', {
+    id: 'writable-db',
+    name: 'Writable db',
+    kind: 'postgres',
+    config: { host: '127.0.0.1', port: 5999, database: 'x', user: 'alice' },
+    writableSchemas: ['"sales"', ' Sales ', '', 'billing', 'BILLING'],
+  })
+  check('writable schemas are stored', writable.status === 200, writable.body.error)
+  check(
+    'writable schemas normalise names',
+    JSON.stringify(writable.body.datasource?.writableSchemas) === JSON.stringify(['sales', 'billing']),
+    JSON.stringify(writable.body.datasource?.writableSchemas),
+  )
+  const writableDefault = await call('POST', '/datasources/save', {
+    id: 'writable-default',
+    name: 'Writable default',
+    kind: 'sqlite',
+    config: { file: 'C:/tmp/writable.db' },
+  })
+  check(
+    'a source without writable schemas has an empty list',
+    JSON.stringify(writableDefault.body.datasource?.writableSchemas) === JSON.stringify([]),
+    JSON.stringify(writableDefault.body.datasource?.writableSchemas),
+  )
+  const writableOdd = await call('POST', '/datasources/save', {
+    id: 'writable-odd',
+    name: 'Writable odd',
+    kind: 'sqlite',
+    config: { file: 'C:/tmp/writable-odd.db' },
+    writableSchemas: ['x'.repeat(80), 'ok'],
+  })
+  check(
+    'long schema names are dropped',
+    JSON.stringify(writableOdd.body.datasource?.writableSchemas) === JSON.stringify(['ok']),
+    JSON.stringify(writableOdd.body.datasource?.writableSchemas),
+  )
+
+  // Unlocking without an answer is refused: a source that accepts writes and
+  // names no schema would let every write through, which is the thing the
+  // guard exists to prevent.
+  const blind = await call('POST', '/datasources/bulk', { action: 'readOnly', ids: ['writable-default'], readOnly: false })
+  check('unlocking without writable schemas is refused', blind.status === 400, blind.body.error)
+  const named = await call('POST', '/datasources/bulk', {
+    action: 'readOnly',
+    ids: ['writable-default'],
+    readOnly: false,
+    writableSchemas: ['main'],
+  })
+  check('unlocking with writable schemas succeeds', named.status === 200, named.body.error)
+  const afterUnlock = await call('GET', '/datasources')
+  const unlockedRow = (afterUnlock.body.datasources || []).find((item) => item.id === 'writable-default')
+  check('the source is writable', unlockedRow && unlockedRow.readOnly === false, JSON.stringify(unlockedRow && unlockedRow.readOnly))
+  check(
+    'the writable list survives the switch',
+    JSON.stringify(unlockedRow && unlockedRow.writableSchemas) === JSON.stringify(['main']),
+    JSON.stringify(unlockedRow && unlockedRow.writableSchemas),
+  )
+  const relock = await call('POST', '/datasources/bulk', { action: 'readOnly', ids: ['writable-default'], readOnly: true })
+  check('going read-only is always allowed', relock.status === 200, relock.body.error)
+  const afterRelock = await call('GET', '/datasources')
+  const relockedRow = (afterRelock.body.datasources || []).find((item) => item.id === 'writable-default')
+  check(
+    'the writable list is kept when the source goes read-only again',
+    JSON.stringify(relockedRow && relockedRow.writableSchemas) === JSON.stringify(['main']),
+    JSON.stringify(relockedRow && relockedRow.writableSchemas),
+  )
+  await call('POST', '/datasources/delete', { id: 'writable-db' })
+  await call('POST', '/datasources/delete', { id: 'writable-default' })
+  await call('POST', '/datasources/delete', { id: 'writable-odd' })
+
   const unknown = await call('GET', '/nope')
   check('unknown route 404', unknown.status === 404)
 
@@ -337,7 +411,13 @@ try {
     groupedOk,
     JSON.stringify(bulkGroup.body.datasources?.map((entry) => `${entry.id}=${entry.group}`)),
   )
-  const bulkReadOnly = await call('POST', '/datasources/bulk', { action: 'readOnly', ids: ['team-db'], readOnly: false })
+  // Becoming writable needs a schema list, so the bulk call carries one.
+  const bulkReadOnly = await call('POST', '/datasources/bulk', {
+    action: 'readOnly',
+    ids: ['team-db'],
+    readOnly: false,
+    writableSchemas: ['main'],
+  })
   const flipped = bulkReadOnly.body.datasources?.find((entry) => entry.id === 'team-db')
   check('bulk readOnly flips the flag', bulkReadOnly.status === 200 && flipped?.readOnly === false, String(flipped?.readOnly))
   const bulkEmpty = await call('POST', '/datasources/bulk', { action: 'group', ids: [] })

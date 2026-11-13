@@ -119,10 +119,10 @@ const sqliteTree = render(
   'create form (sqlite)',
   () => SourceForm({ t, draft: emptyDraft(), editing: null, takenIds: [], onSaved: noop, onCancel: noop }),
   {
-    inputs: 9,
+    inputs: 10,
     selects: 1,
     details: true,
-    labels: ['form.paste', 'form.user', 'form.password', 'form.file'],
+    labels: ['form.paste', 'form.user', 'form.password', 'form.file', 'form.schemaAccess'],
   },
 )
 if (sqliteTree) {
@@ -130,6 +130,7 @@ if (sqliteTree) {
   check('create form: more-settings summary', summary.length === 1 && texts(summary[0]).includes('form.more'))
   check('create form: smart-parsing tag', texts(sqliteTree).includes('form.smart'))
   check('create form: footer hint', texts(sqliteTree).includes('form.autoApply'))
+  check('create form: writable schemas are asked for', texts(sqliteTree).includes('form.schemaAccessHint'))
 }
 
 const pgDraft = emptyDraft()
@@ -138,7 +139,7 @@ pgDraft.config = { ...pgDraft.config, host: 'localhost', port: '5432', database:
 render(
   'create form (postgres)',
   () => SourceForm({ t, draft: pgDraft, editing: null, takenIds: ['app'], onSaved: noop, onCancel: noop }),
-  { inputs: 12, selects: 2, details: true, labels: ['form.host', 'form.port', 'form.database'] },
+  { inputs: 13, selects: 2, details: true, labels: ['form.host', 'form.port', 'form.database'] },
 )
 
 const oracleDraft = emptyDraft()

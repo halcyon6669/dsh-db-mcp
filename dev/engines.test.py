@@ -15,6 +15,10 @@ import unittest
 from pathlib import Path
 
 PACKAGE = Path(__file__).resolve().parent.parent
+# `server/main.py` runs with its own directory first on sys.path, which is how
+# `engines.py` reaches `import writes`. Loading it by path here has to set the
+# same thing up, or the module fails to import before any test runs.
+sys.path.insert(0, str(PACKAGE / "server"))
 SPEC = importlib.util.spec_from_file_location("db_mcp_engines", PACKAGE / "server" / "engines.py")
 engines = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(engines)
@@ -59,8 +63,24 @@ class FakeConnection:
         self.rollbacks += 1
 
 
+CONFIG = {
+    "sqlite": {},
+    "postgres": {"schema": "public"},
+    "mysql": {"database": "testdb"},
+    "oracle": {"user": "TEST"},
+}
+DEFAULT_SCHEMA = {"sqlite": "main", "postgres": "public", "mysql": "testdb", "oracle": "TEST"}
+
+
 def profile(kind: str, read_only: bool = False) -> dict:
-    return {"id": f"{kind}-test", "kind": kind, "readOnly": read_only}
+    """A source that may write, with the schema its unqualified writes land in."""
+    return {
+        "id": f"{kind}-test",
+        "kind": kind,
+        "config": dict(CONFIG[kind]),
+        "readOnly": read_only,
+        "writableSchemas": [DEFAULT_SCHEMA[kind]],
+    }
 
 
 class WritePermission(unittest.TestCase):

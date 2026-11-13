@@ -125,6 +125,8 @@ window.__ModuleLoader__.load({
         'sources.default': 'default',
         'sources.hasPassword': 'password saved',
         'sources.noPassword': 'no password',
+        'sources.writable': 'writable {names}',
+        'sources.writableHint': 'May only write to: {names}',
         'sources.secretBroken': 'stored password unreadable',
         'sources.neverProbed': 'never tested',
         'sources.idChip': 'ID',
@@ -172,6 +174,10 @@ window.__ModuleLoader__.load({
         'form.passwordEmpty': 'no password stored yet',
         'form.readOnly': 'Read-only (recommended)',
         'form.readOnlyHint': 'blocks writes for this source unless the global write switch is on',
+        'form.schemaAccess': 'Writable schemas',
+        'form.schemaAccessHint': 'chosen when you allow writes; reads stay unrestricted',
+        'form.schemaNames': 'Schemas',
+        'form.schemaNamesHint': 'comma separated, for example sales, billing',
         'form.schemaBroken': 'The stored password cannot be decrypted any more. Type it again to save it with the current key.',
         'form.invalid': 'Fill the required fields first.',
         'form.requiredHint': 'The connection string, user and password are required: fill them, then save.',
@@ -228,6 +234,17 @@ window.__ModuleLoader__.load({
         'notice.nowReadOnly': '{name} is read-only now.',
         'notice.nowWritable': '{name} accepts writes now.',
         'notice.nowWritableLocked': '{name} accepts writes now, but the global write switch is still off — turn it on under Runtime.',
+        'notice.bulkNeedsSchemas': 'Those sources name no writable schema yet. Switch them on one at a time to pick the schemas.',
+        'unlock.title': 'Where may {name} write?',
+        'unlock.hint': 'Reads stay unrestricted. A write that names any other schema is refused before it reaches the database.',
+        'unlock.loading': 'Reading the schema list…',
+        'unlock.error': 'Could not read the schema list.',
+        'unlock.retry': 'Try again',
+        'unlock.none': 'Tick at least one schema.',
+        'unlock.empty': 'This source reported no schema. Test the connection first, then try again.',
+        'unlock.selected': '{n} selected',
+        'unlock.confirm': 'Allow writes',
+        'unlock.cancel': 'Cancel',
         'action.schema': 'Structure',
         'action.backToSources': 'Data sources',
         'tab.list': 'Data source list',
@@ -369,6 +386,8 @@ window.__ModuleLoader__.load({
         'sources.default': '默认',
         'sources.hasPassword': '已存密码',
         'sources.noPassword': '无密码',
+        'sources.writable': '可写 {names}',
+        'sources.writableHint': '仅可写：{names}',
         'sources.secretBroken': '已存口令无法解密',
         'sources.neverProbed': '尚未测试',
         'sources.idChip': '标识符',
@@ -415,6 +434,10 @@ window.__ModuleLoader__.load({
         'form.passwordEmpty': '尚未保存口令',
         'form.readOnly': '只读（推荐）',
         'form.readOnlyHint': '未打开全局写开关时，此数据源拒绝写操作',
+        'form.schemaAccess': '可写模式',
+        'form.schemaAccessHint': '允许写入时才需要选择；读取不受限制',
+        'form.schemaNames': '模式名',
+        'form.schemaNamesHint': '用逗号分隔，例如 sales, billing',
         'form.schemaBroken': '已存口令无法再用当前密钥解密，请重新输入一次口令以按新密钥保存。',
         'form.invalid': '请先填写必填字段。',
         'form.requiredHint': '连接串、用户与口令都是必填项：填好之后再保存。',
@@ -471,6 +494,17 @@ window.__ModuleLoader__.load({
         'notice.nowReadOnly': '{name} 已改为只读。',
         'notice.nowWritable': '{name} 现在允许写。',
         'notice.nowWritableLocked': '{name} 现在允许写，但全局写开关还关着——到「运行时诊断」里打开它。',
+        'notice.bulkNeedsSchemas': '这些数据源还没有指定可写模式。请逐个打开开关，选择允许写的模式。',
+        'unlock.title': '{name} 可以写哪些模式？',
+        'unlock.hint': '读取不受限制。点名其它模式的写语句会在到达数据库之前被拒绝。',
+        'unlock.loading': '正在读取模式列表…',
+        'unlock.error': '无法读取模式列表。',
+        'unlock.retry': '重试',
+        'unlock.none': '至少勾选一个模式。',
+        'unlock.empty': '这个数据源没有报出任何模式。先测试一下连接，再回来试。',
+        'unlock.selected': '已选 {n} 个',
+        'unlock.confirm': '允许写',
+        'unlock.cancel': '取消',
         'action.schema': '结构',
         'action.backToSources': '数据源',
         'tab.list': '数据源列表',
@@ -767,8 +801,12 @@ window.__ModuleLoader__.load({
         color: var(--dsw-alias-state-warn-primary);
         border-color: var(--dsw-alias-state-warn-primary);
       }
-      /* A broken secret is a state worth noticing, not a button: a plain span
-         that never takes a click. */
+      /* A writable-schema list and a broken secret are states worth noticing,
+         not buttons: they are plain spans and never take a click. */
+      .dbmcp-pill.is-writable {
+        color: var(--dsw-alias-brand-primary);
+        border-color: color-mix(in srgb, var(--dsw-alias-brand-primary) 32%, transparent);
+      }
       .dbmcp-pill.is-broken {
         color: var(--dsw-alias-state-warn-primary);
         border-color: var(--dsw-alias-state-warn-primary);
@@ -1941,6 +1979,112 @@ window.__ModuleLoader__.load({
       .dbmcp-readonly .dbmcp-hint {
         padding-left: 24px;
       }
+      /* Schema policy sits next to the read-only switch: both narrow what the
+         agent may do, so they share one bordered block instead of looking like
+         two unrelated fields. */
+      .dbmcp-policy {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        border: 1px solid var(--dsw-alias-border-l1);
+        border-radius: 8px;
+        background: var(--dsw-alias-bg-layer-2);
+        padding: 12px 14px;
+      }
+      .dbmcp-policy-head {
+        display: flex;
+        align-items: baseline;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+      .dbmcp-policy .dbmcp-form-section {
+        gap: 12px;
+      }
+      .dbmcp-policy .dbmcp-hint {
+        font-size: 12px;
+      }
+      /* Unlock dialog: the one question asked before a source may accept
+         writes. It sits over the panel rather than in a tab, because the
+         answer decides what the write guard will let through afterwards. */
+      .dbmcp-unlock {
+        position: fixed;
+        inset: 0;
+        z-index: 40;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+        background: rgba(8, 10, 14, 0.45);
+      }
+      .dbmcp-unlock-card {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        width: min(520px, 100%);
+        max-height: min(80vh, 640px);
+        overflow: auto;
+        border: 1px solid var(--dsw-alias-border-l1);
+        border-radius: 10px;
+        background: var(--dsw-alias-bg-layer-1);
+        box-shadow: 0 18px 48px rgba(0, 0, 0, 0.32);
+        padding: 16px 18px;
+      }
+      .dbmcp-unlock-head {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      .dbmcp-unlock-title {
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--dsw-alias-label-primary);
+      }
+      .dbmcp-unlock-list {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        max-height: 260px;
+        overflow: auto;
+        border: 1px solid var(--dsw-alias-border-l1);
+        border-radius: 8px;
+        padding: 6px;
+      }
+      .dbmcp-unlock-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 4px 6px;
+        border-radius: 6px;
+        font-size: 12px;
+        color: var(--dsw-alias-label-primary);
+        cursor: pointer;
+      }
+      .dbmcp-unlock-row:hover {
+        background: var(--dsw-alias-bg-layer-2);
+      }
+      .dbmcp-unlock-row:disabled {
+        cursor: default;
+        opacity: 0.7;
+      }
+      .dbmcp-unlock-name {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .dbmcp-unlock-foot {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        justify-content: flex-end;
+        flex-wrap: wrap;
+      }
+      .dbmcp-unlock-foot .dbmcp-hint {
+        margin-right: auto;
+      }
       .dbmcp-help {
         display: inline-flex;
         align-items: center;
@@ -2653,6 +2797,9 @@ window.__ModuleLoader__.load({
         kind: 'sqlite',
         readOnly: true,
         config: baseConfig('sqlite'),
+        // Only consulted once writes are allowed: a writable source may write to
+        // these schemas and no others. Reads are never restricted.
+        writableSchemas: '',
         password: '',
         hasSecret: false,
         secretBroken: false,
@@ -2672,6 +2819,8 @@ window.__ModuleLoader__.load({
       draft.readOnly = source.readOnly !== false
       draft.hasSecret = source.hasSecret === true
       draft.secretBroken = source.secretBroken === true
+      const declared = Array.isArray(source && source.writableSchemas) ? source.writableSchemas : []
+      draft.writableSchemas = declared.join(', ')
       draft.config = {
         ...fallback,
         file: config.file || '',
@@ -2809,6 +2958,10 @@ window.__ModuleLoader__.load({
             kind: draft.kind,
             readOnly: draft.readOnly,
             config: { ...draft.config, port: draft.config.port ? Number(draft.config.port) : undefined },
+            writableSchemas: String(draft.writableSchemas || '')
+              .split(',')
+              .map((name) => name.trim())
+              .filter(Boolean),
             password: saveSecret && draft.password !== '' ? draft.password : undefined,
           }
           if (!body.id) delete body.id
@@ -3107,6 +3260,29 @@ window.__ModuleLoader__.load({
             h('div', { className: 'dbmcp-form-section is-two' }, manual),
             h(
               'div',
+              { className: 'dbmcp-policy' },
+              h(
+                'div',
+                { className: 'dbmcp-policy-head' },
+                h('span', { className: 'dbmcp-form-label' }, t('form.schemaAccess')),
+                h('span', { className: 'dbmcp-hint' }, t('form.schemaAccessHint')),
+              ),
+              h(
+                'div',
+                { className: 'dbmcp-form-section' },
+                h(
+                  Field,
+                  { key: 'writableSchemas', label: t('form.schemaNames'), hint: t('form.schemaNamesHint') },
+                  h(TextInput, {
+                    value: draft.writableSchemas,
+                    placeholder: 'sales, billing',
+                    onChange: (value) => patch({ writableSchemas: value }),
+                  }),
+                ),
+              ),
+            ),
+            h(
+              'div',
               { className: 'dbmcp-readonly' },
               h(
                 'label',
@@ -3255,6 +3431,12 @@ const sourceMatches = (source, needle) => {
     .join(' ')
     .toLowerCase()
   return hay.includes(text)
+}
+
+/** Schemas a writable source may write to; empty means it is not writable yet. */
+const writableNames = (source) => {
+  const names = source && Array.isArray(source.writableSchemas) ? source.writableSchemas : []
+  return names.filter((name) => typeof name === 'string' && name.trim() !== '')
 }
 
 /**
@@ -3452,18 +3634,24 @@ function groupTables(tables) {
       const [filter, setFilter] = React.useState('')
       const [collapsed, setCollapsed] = React.useState({})
 
+      const refresh = React.useCallback(async () => {
+        const data = await apiGet(`/schema?datasource=${encodeURIComponent(source.id)}`)
+        if (!data.ok) {
+          const failure = data.error || {}
+          const error = new Error(failure.message || t('schema.error'))
+          error.payload = failure
+          throw error
+        }
+        return data
+      }, [source.id, t])
+
       React.useEffect(() => {
         let alive = true
         setBusy(true)
         ;(async () => {
           try {
-            const data = await apiGet(`/schema?datasource=${encodeURIComponent(source.id)}`)
-            if (!alive) return
-            if (!data.ok) {
-              const failure = data.error || {}
-              setError(failure.hint ? `${failure.message || t('schema.error')} — ${failure.hint}` : failure.message || t('schema.error'))
-              setTables([])
-            } else {
+            const data = await refresh()
+            if (alive) {
               setTables(data.tables || [])
               setError(null)
             }
@@ -3479,7 +3667,7 @@ function groupTables(tables) {
         return () => {
           alive = false
         }
-      }, [source.id])
+      }, [refresh])
 
       const pickedSchema = picked ? picked.schema || '' : ''
       const pickedName = picked ? picked.name : ''
@@ -3517,30 +3705,24 @@ function groupTables(tables) {
       const visibleCount = visible.reduce((sum, [, items]) => sum + items.length, 0)
       const groupLabel = (schema) => (schema ? schema : t('schema.defaultSchema'))
 
-      let content
-      if (busy && !tables) {
-        content = h('div', { className: 'dbmcp-empty' }, t('schema.loading'))
-      } else if (error) {
-        content = h('div', { className: 'dbmcp-error' }, h('div', null, t('schema.error')), h('code', null, error))
-      } else if (!tables || tables.length === 0) {
-        content = h('div', { className: 'dbmcp-empty' }, t('schema.empty'))
-      } else {
-        const side = h(
+      const side = h(
+        'div',
+        { className: 'dbmcp-schema-side' },
+        h(
           'div',
-          { className: 'dbmcp-schema-side' },
-          h(
-            'div',
-            { className: 'dbmcp-schema-head' },
-            h('span', null, fmt(t('schema.tables'), { n: tables.length })),
-            needle ? h('span', { className: 'dbmcp-hint' }, fmt(t('schema.matching'), { n: visibleCount })) : null,
-          ),
-          h(TextInput, {
-            value: filter,
-            placeholder: t('schema.search'),
-            label: t('schema.search'),
-            onChange: setFilter,
-          }),
-          visibleCount === 0
+          { className: 'dbmcp-schema-head' },
+          h('span', null, fmt(t('schema.tables'), { n: tables ? tables.length : 0 })),
+          needle ? h('span', { className: 'dbmcp-hint' }, fmt(t('schema.matching'), { n: visibleCount })) : null,
+        ),
+        h(TextInput, {
+          value: filter,
+          placeholder: t('schema.search'),
+          label: t('schema.search'),
+          onChange: setFilter,
+        }),
+        !tables || tables.length === 0
+          ? h('div', { className: 'dbmcp-empty' }, t('schema.empty'))
+          : visibleCount === 0
             ? h('div', { className: 'dbmcp-empty' }, t('schema.noMatch'))
             : h(
                 'div',
@@ -3588,8 +3770,14 @@ function groupTables(tables) {
                   )
                 }),
               ),
-        )
+      )
 
+      let content
+      if (busy && !tables) {
+        content = h('div', { className: 'dbmcp-empty' }, t('schema.loading'))
+      } else if (error) {
+        content = h('div', { className: 'dbmcp-error' }, h('div', null, t('schema.error')), h('code', null, error))
+      } else {
         content = h(
           'div',
           { className: 'dbmcp-schema' },
@@ -3773,6 +3961,10 @@ function groupTables(tables) {
       const [notice, setNotice] = React.useState(null)
       const [probing, setProbing] = React.useState(null)
       const [pendingDelete, setPendingDelete] = React.useState(null)
+      // The unlock dialog: { source, picked, manual, catalog, busy, error }.
+      // Switching a source to writable goes through here, because a source
+      // that accepts writes must first say which schemas it may write to.
+      const [unlock, setUnlock] = React.useState(null)
       const [selected, setSelected] = React.useState([])
       const [bulkGroup, setBulkGroup] = React.useState('')
       const [pendingBulkDelete, setPendingBulkDelete] = React.useState(false)
@@ -3907,16 +4099,31 @@ function groupTables(tables) {
         }
       }
 
-      /** Flip one source between read-only and writable by clicking its pill. */
+      /**
+       * Flip one source between read-only and writable by clicking its pill.
+       *
+       * Going read-only is immediate. Going writable first asks which schemas
+       * may be written to: a source that accepts writes without saying where is
+       * exactly the thing this guard exists to prevent.
+       */
       const toggleReadOnly = async (source) => {
-        const wasWritable = source.readOnly === false
-        const nowWritable = !wasWritable
+        if (source.readOnly === false) {
+          await setReadOnly(source, true)
+          return
+        }
+        openUnlock(source)
+      }
+
+      /** POST the flag; `writableSchemas` rides along when unlocking. */
+      const setReadOnly = async (source, readOnly, writableSchemas) => {
         const name = source.name || source.id
         setBusy(true)
         try {
-          await apiPost('/datasources/bulk', { action: 'readOnly', ids: [source.id], readOnly: !nowWritable })
+          const body = { action: 'readOnly', ids: [source.id], readOnly }
+          if (writableSchemas !== undefined) body.writableSchemas = writableSchemas
+          await apiPost('/datasources/bulk', body)
           const globalOpen = Boolean(settings && settings.allowWrite)
-          const message = !nowWritable
+          const message = readOnly
             ? t('notice.nowReadOnly').replace('{name}', name)
             : globalOpen
               ? t('notice.nowWritable').replace('{name}', name)
@@ -3925,6 +4132,7 @@ function groupTables(tables) {
           load()
         } catch (error) {
           setNotice({ message: String((error && error.message) || error), isError: true })
+          throw error
         } finally {
           setBusy(false)
         }
@@ -3937,6 +4145,47 @@ function groupTables(tables) {
           return
         }
         await runBulk('delete')
+      }
+
+      /** Read the schema list once, when the dialog opens. */
+      const openUnlock = (source) => {
+        setUnlock({ source, picked: {}, catalog: null, busy: true, error: null })
+        ;(async () => {
+          try {
+            const data = await apiGet(`/schema?datasource=${encodeURIComponent(source.id)}`)
+            if (!data.ok) {
+              const failure = data.error || {}
+              throw new Error(failure.message || t('unlock.error'))
+            }
+            // `schemas` is the catalog's own list. A Host from before the field
+            // existed only sends the tables, so derive the list from their
+            // schema names rather than showing an empty dialog with no way out.
+            const listed = Array.isArray(data.schemas) && data.schemas.length > 0
+              ? data.schemas
+              : (Array.isArray(data.tables) ? data.tables : []).map((table) => table && table.schema)
+            const declared = Array.isArray(source.writableSchemas) ? source.writableSchemas : []
+            // Names the source already writes to stay on the list even when the
+            // catalog no longer shows them, so the choice can always be kept.
+            const names = Array.from(new Set(listed.concat(declared).filter((name) => typeof name === 'string' && name.trim() !== '')))
+            const picked = {}
+            for (const name of declared) {
+              if (names.includes(name)) picked[name] = true
+            }
+            setUnlock((prev) => (prev && prev.source.id === source.id ? { ...prev, picked, catalog: names, busy: false } : prev))
+          } catch (failure) {
+            setUnlock((prev) =>
+              prev && prev.source.id === source.id
+                ? { ...prev, busy: false, error: String((failure && failure.message) || failure) }
+                : prev,
+            )
+          }
+        })()
+      }
+
+      /** The names the dialog would submit: the ticked boxes. */
+      const unlockNames = (state) => {
+        if (!state) return []
+        return Object.keys(state.picked || {}).filter((name) => state.picked[name])
       }
 
       const probe = async (source) => {        setProbing(source.id)
@@ -4388,6 +4637,18 @@ function groupTables(tables) {
                       },
                       source.readOnly === false ? t('sources.readwrite') : t('sources.readonly'),
                     ),
+                    // Only shown when the source is writable, so a plain source
+                    // keeps the row as short as before.
+                    writableNames(source).length > 0
+                      ? h(
+                          'span',
+                          {
+                            className: 'dbmcp-pill is-writable',
+                            title: fmt(t('sources.writableHint'), { names: writableNames(source).join(', ') }),
+                          },
+                          fmt(t('sources.writable'), { names: writableNames(source).join(', ') }),
+                        )
+                      : null,
                     source.secretBroken === true
                       ? h('span', { className: 'dbmcp-pill is-broken' }, t('sources.secretBroken'))
                       : null,
@@ -4630,7 +4891,27 @@ function groupTables(tables) {
           ),
           h(
             'button',
-            { type: 'button', className: 'dbmcp-btn is-small', disabled: busy, onClick: () => runBulk('readOnly', { readOnly: false }) },
+            {
+              type: 'button',
+              className: 'dbmcp-btn is-small',
+              disabled: busy,
+              onClick: () => {
+                /* A source may only become writable once it names the schemas it
+                   may write to, and that answer is per source — so a selection
+                   without one is asked about instead of being rejected blind. */
+                const chosen = selected.map((id) => sources.find((item) => item.id === id)).filter(Boolean)
+                const pending = chosen.filter((item) => writableNames(item).length === 0)
+                if (pending.length === 0) {
+                  void runBulk('readOnly', { readOnly: false })
+                  return
+                }
+                if (chosen.length === 1) {
+                  openUnlock(chosen[0])
+                  return
+                }
+                setNotice({ message: t('notice.bulkNeedsSchemas'), isError: true })
+              },
+            },
             t('bulk.readwrite'),
           ),
           h(
@@ -5074,6 +5355,98 @@ function groupTables(tables) {
         body = h('div', { className: 'dbmcp-grid is-single' }, body)
       }
 
+      /* The unlock dialog. It asks the one question the write guard needs an
+         answer to, and it refuses to close with an empty answer. */
+      const unlockDialog = !unlock
+        ? null
+        : (() => {
+            const names = unlockNames(unlock)
+            const toggle = (name) =>
+              setUnlock((prev) =>
+                prev ? { ...prev, picked: { ...prev.picked, [name]: !prev.picked[name] } } : prev,
+              )
+            const confirm = async () => {
+              if (names.length === 0) return
+              const source = unlock.source
+              setUnlock(null)
+              try {
+                await setReadOnly(source, false, names)
+              } catch (error) {
+                /* setReadOnly already raised the banner */
+              }
+            }
+            return h(
+              'div',
+              { className: 'dbmcp-unlock', role: 'dialog', 'aria-modal': 'true' },
+              h(
+                'div',
+                { className: 'dbmcp-unlock-card' },
+                h(
+                  'div',
+                  { className: 'dbmcp-unlock-head' },
+                  h('span', { className: 'dbmcp-unlock-title' }, fmt(t('unlock.title'), { name: unlock.source.name || unlock.source.id })),
+                  h('span', { className: 'dbmcp-hint' }, t('unlock.hint')),
+                ),
+                unlock.busy
+                  ? h('div', { className: 'dbmcp-empty' }, t('unlock.loading'))
+                  : unlock.error
+                    ? h(
+                        'div',
+                        { className: 'dbmcp-error' },
+                        h('div', null, t('unlock.error')),
+                        h('code', null, unlock.error),
+                        h(
+                          'button',
+                          { type: 'button', className: 'dbmcp-btn is-small', onClick: () => openUnlock(unlock.source) },
+                          t('unlock.retry'),
+                        ),
+                      )
+                    : (unlock.catalog || []).length === 0
+                      ? h('div', { className: 'dbmcp-empty' }, t('unlock.empty'))
+                      : h(
+                          'ul',
+                          { className: 'dbmcp-unlock-list' },
+                          (unlock.catalog || []).map((name) =>
+                            h(
+                              'li',
+                              { key: `unlock-${name}` },
+                              h(
+                                'label',
+                                { className: 'dbmcp-unlock-row' },
+                                h('input', {
+                                  type: 'checkbox',
+                                  checked: unlock.picked[name] === true,
+                                  onChange: () => toggle(name),
+                                }),
+                                h('span', { className: 'dbmcp-unlock-name' }, name),
+                              ),
+                            ),
+                          ),
+                        ),
+                h(
+                  'div',
+                  { className: 'dbmcp-unlock-foot' },
+                  h(
+                    'span',
+                    { className: 'dbmcp-hint' + (names.length === 0 ? ' is-warn' : '') },
+                    names.length === 0 ? t('unlock.none') : fmt(t('unlock.selected'), { n: names.length }),
+                  ),
+                  h('button', { type: 'button', className: 'dbmcp-btn', onClick: () => setUnlock(null) }, t('unlock.cancel')),
+                  h(
+                    'button',
+                    {
+                      type: 'button',
+                      className: 'dbmcp-btn is-primary',
+                      disabled: names.length === 0 || unlock.busy,
+                      onClick: () => void confirm(),
+                    },
+                    t('unlock.confirm'),
+                  ),
+                ),
+              ),
+            )
+          })()
+
       return h(
         'div',
         { className: 'dbmcp-page', style: palette },
@@ -5125,6 +5498,7 @@ function groupTables(tables) {
             )
           : null,
         body,
+        unlockDialog,
       )
     }
 
@@ -5158,6 +5532,7 @@ function groupTables(tables) {
         reportTarget,
         StatusStrip,
         sourceMatches,
+        writableNames,
         sectionOrder,
         paletteOf,
         parseColor,

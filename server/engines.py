@@ -18,6 +18,8 @@ import time
 from pathlib import Path
 from urllib.parse import quote
 
+import writes
+
 READ_STARTERS = ("select", "with", "show", "describe", "desc", "explain", "pragma", "values", "table", "set")
 
 # GaussDB/openGauss speaks the PostgreSQL wire protocol and its catalogs are
@@ -81,6 +83,11 @@ def ensure_readable(sql: str, profile: dict) -> None:
             f"datasource {profile.get('id')} is read-only; `{keyword or 'this'} ` statements are refused",
             "uncheck read-only for this source in the Database panel to allow writes",
         )
+    # The source is writable, so it also names the schemas it may write to.
+    try:
+        writes.check(sql, profile)
+    except writes.WriteBlocked as blocked:
+        raise DbError("user_error", blocked.message, blocked.hint) from blocked
 
 
 def _cell(value):
@@ -604,12 +611,16 @@ def list_tables(profile: dict, connection, schema: str | None, limit: int = 500)
     # they are not part of the schema a user browses.
     rows = [item for item in rows if not str(item[0]).startswith("BIN$")]
     truncated = len(rows) > limit
-    return {
+    result = {
         "schema": effective,
         "tables": [{"schema": item[2], "name": item[0], "type": item[1]} for item in rows[:limit]],
         "truncated": truncated,
         "total": len(rows),
+        # Every schema the catalog returned, with the write switch each one would
+        # get: the structure view asks which schemas this source may write to.
+        "schemas": sorted({str(item[2]) for item in rows if item[2]}),
     }
+    return result
 
 
 def describe_table(profile: dict, connection, table: str, schema: str | None) -> dict:
