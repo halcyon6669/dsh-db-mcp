@@ -25,13 +25,9 @@
 
 ## 界面截图
 
-**从 DBeaver 导入。** 工作区里的每条连接都会列出它解析出的主机、库名和用户；已经登记过的那条会直接说明，而不是再让你添加一遍。
+**数据源列表。** 顶部是健康概览，数据源按你的分组排列，带引擎徽标和每次工具调用要用的标识符；探测失败的那条就地把完整报错摊开，旁边一键复制。**从 DBeaver 导入** 就排在它旁边。
 
-![从 DBeaver 导入](https://raw.githubusercontent.com/halcyon6669/dsh-db-mcp/main/asset/3.png)
-
-**数据源列表。** 顶部是健康概览，数据源按你的分组排列，带引擎徽标；探测失败的那条就地把完整报错摊开，旁边一键复制。
-
-![数据源列表](https://raw.githubusercontent.com/halcyon6669/dsh-db-mcp/main/asset/1.png)
+![数据源列表](https://raw.githubusercontent.com/halcyon6669/dsh-db-mcp/main/asset/source-list.png)
 
 ## 一份数据源，所有 DSH 通用
 

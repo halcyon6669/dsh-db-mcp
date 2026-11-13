@@ -37,17 +37,12 @@ source exists.
 
 ## Screenshots
 
-**Import from DBeaver.** Every connection in the workspace is listed with the host,
-database and user it resolved to; ones you already registered say so instead of
-offering a duplicate.
-
-![Import from DBeaver](https://raw.githubusercontent.com/halcyon6669/dsh-db-mcp/main/asset/3.png)
-
 **The source list.** A health strip across the top, sources grouped the way you
-grouped them, engine badges, and a failed probe stays inline with its full error
-and a copy button.
+grouped them, engine badges, the identifier each tool call needs, and a failed probe
+stays inline with its full error and a copy button. The **Import from DBeaver** tab
+sits right next to it.
 
-![Data source list](https://raw.githubusercontent.com/halcyon6669/dsh-db-mcp/main/asset/1.png)
+![Data source list](https://raw.githubusercontent.com/halcyon6669/dsh-db-mcp/main/asset/source-list.png)
 
 ## One set of sources, every DSH you run
 
