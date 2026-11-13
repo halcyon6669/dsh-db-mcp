@@ -7,7 +7,7 @@
  *
  * It never touches <DSH_HOME>/db-mcp; pass --dir=<path> to keep the output.
  */
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -275,7 +275,17 @@ try {
   const registryText = await readFile(join(dir, 'datasources.json'), 'utf8')
   check('registry file has no password', !/p@ss/.test(registryText))
   const secretsText = await readFile(join(dir, 'secrets.json'), 'utf8')
-  check('secrets file exists', secretsText.includes('p@ss'))
+  check('secrets file exists', secretsText.length > 0)
+  // The password must not survive as plaintext anywhere on disk: the stored
+  // value is an AES-256-GCM envelope, and only secret.key can open it.
+  check('secrets file has no plaintext password', !/p@ss/.test(secretsText))
+  check('secrets file holds an envelope', secretsText.includes('"v1.'))
+  const keyFile = await stat(join(dir, 'secret.key')).catch(() => null)
+  check('secret.key exists', Boolean(keyFile && keyFile.isFile()))
+  const sealedEntry = JSON.parse(secretsText).secrets.chinook
+  const { loadKey, decrypt } = await import('../src/secretbox.js')
+  const opened = await decrypt(await loadKey(dir), sealedEntry.password, 'chinook')
+  check('the envelope decrypts back to the password', opened === 'p@ss')
 
   const removed = await call('POST', '/datasources/delete', { id: 'chinook' })
   check('delete removes the source', removed.status === 200 && !removed.body.datasources.some((entry) => entry.id === 'chinook'))

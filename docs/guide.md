@@ -283,6 +283,16 @@ whenever the switch flips. Read-only is enforced again at the driver where the
 engine allows it (`mode=ro` for SQLite, `default_transaction_read_only` for
 PostgreSQL, `SET SESSION TRANSACTION READ ONLY` for MySQL).
 
+Stored passwords are encrypted at rest. `secrets.json` holds an AES-256-GCM
+envelope per source and the key lives beside it in `secret.key` (mode `0600`,
+created on first use). A copy of `secrets.json` alone — a backup, a sync folder, a
+file pasted into an issue — no longer carries any password, and an envelope moved
+onto another source fails to decrypt instead of handing back the wrong one.
+Anything running as your user can still read both files, so the panel tells you
+when a stored password cannot be decrypted (*stored password unreadable* on the
+row) and asks you to type it again. Deleting `secret.key` makes every stored
+password unreadable at once, which is the fastest way to revoke them all.
+
 ## Limiting one conversation
 
 A conversation can be narrowed to a subset of sources. Ask the assistant in plain
@@ -373,12 +383,13 @@ zone in the tooltip.
 ```
 $DSH_HOME/db-mcp/
   datasources.json   # sources and groups, never passwords, 0600
-  secrets.json       # per-source password, 0600, Host-only
+  secrets.json       # per-source password envelope, 0600, Host-only
+  secret.key         # key for those envelopes, 0600, created on first use
   settings.json      # global write switch + audit switch, 0600
   sessions.json      # per-conversation source limits, 0600
   logs/mcp.log       # masked log
   logs/audit.jsonl   # one line per MCP tool call, rotates at 512 KiB
-  .venv/             # plugin-local venv: mcp, psycopg, py-opengauss, PyMySQL, oracledb
+  .venv/             # plugin-local venv: mcp, psycopg, py-opengauss, PyMySQL, oracledb, cryptography
 ```
 
 ### Installing the Python dependencies by hand
@@ -407,7 +418,7 @@ package lives in that directory instead, so point `-r` at
 `<path>\server\requirements.txt` — the venv stays under `$DSH_HOME\db-mcp`.
 
 When it finishes, press **Restart MCP** in the same card (the button does this
-for you) and the dependency line should read five versions with no `missing`.
+for you) and the dependency line should read six versions with no `missing`.
 
 ## Test databases in Docker
 

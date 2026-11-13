@@ -125,6 +125,7 @@ window.__ModuleLoader__.load({
         'sources.default': 'default',
         'sources.hasPassword': 'password saved',
         'sources.noPassword': 'no password',
+        'sources.secretBroken': 'stored password unreadable',
         'sources.neverProbed': 'never tested',
         'sources.idChip': 'ID',
         'sources.idChipHint': 'this is the identifier every MCP tool takes as its datasource argument — click to copy',
@@ -171,6 +172,7 @@ window.__ModuleLoader__.load({
         'form.passwordEmpty': 'no password stored yet',
         'form.readOnly': 'Read-only (recommended)',
         'form.readOnlyHint': 'blocks writes for this source unless the global write switch is on',
+        'form.schemaBroken': 'The stored password cannot be decrypted any more. Type it again to save it with the current key.',
         'form.invalid': 'Fill the required fields first.',
         'form.requiredHint': 'The connection string, user and password are required: fill them, then save.',
         'import.body': 'Reads data-sources.json from the DBeaver workspace and decrypts credentials-config.json when it exists.',
@@ -367,6 +369,7 @@ window.__ModuleLoader__.load({
         'sources.default': '默认',
         'sources.hasPassword': '已存密码',
         'sources.noPassword': '无密码',
+        'sources.secretBroken': '已存口令无法解密',
         'sources.neverProbed': '尚未测试',
         'sources.idChip': '标识符',
         'sources.idChipHint': '智能体调用 MCP 工具时，用 datasource 参数传这个标识符 · 点击复制',
@@ -412,6 +415,7 @@ window.__ModuleLoader__.load({
         'form.passwordEmpty': '尚未保存口令',
         'form.readOnly': '只读（推荐）',
         'form.readOnlyHint': '未打开全局写开关时，此数据源拒绝写操作',
+        'form.schemaBroken': '已存口令无法再用当前密钥解密，请重新输入一次口令以按新密钥保存。',
         'form.invalid': '请先填写必填字段。',
         'form.requiredHint': '连接串、用户与口令都是必填项：填好之后再保存。',
         'import.body': '读取 DBeaver 工作区里的 data-sources.json；存在 credentials-config.json 时一并解密口令。',
@@ -762,6 +766,15 @@ window.__ModuleLoader__.load({
       button.dbmcp-pill.is-open {
         color: var(--dsw-alias-state-warn-primary);
         border-color: var(--dsw-alias-state-warn-primary);
+      }
+      /* A broken secret is a state worth noticing, not a button: a plain span
+         that never takes a click. */
+      .dbmcp-pill.is-broken {
+        color: var(--dsw-alias-state-warn-primary);
+        border-color: var(--dsw-alias-state-warn-primary);
+      }
+      .dbmcp-hint.is-warn {
+        color: var(--dsw-alias-state-warn-primary);
       }
       /* The identifier is the handle every MCP tool takes as its datasource
          argument, so it gets a chip of its own instead of trailing the target
@@ -2642,6 +2655,7 @@ window.__ModuleLoader__.load({
         config: baseConfig('sqlite'),
         password: '',
         hasSecret: false,
+        secretBroken: false,
         nameTouched: false,
         idTouched: false,
       }
@@ -2657,6 +2671,7 @@ window.__ModuleLoader__.load({
       draft.kind = source.kind || 'sqlite'
       draft.readOnly = source.readOnly !== false
       draft.hasSecret = source.hasSecret === true
+      draft.secretBroken = source.secretBroken === true
       draft.config = {
         ...fallback,
         file: config.file || '',
@@ -3023,6 +3038,7 @@ window.__ModuleLoader__.load({
               },
             }),
             draft.hasSecret ? h('span', { className: 'dbmcp-hint' }, t('form.passwordKeep')) : null,
+            draft.secretBroken ? h('span', { className: 'dbmcp-hint is-warn' }, t('form.schemaBroken')) : null,
           ),
         ),
         h(
@@ -4372,6 +4388,9 @@ function groupTables(tables) {
                       },
                       source.readOnly === false ? t('sources.readwrite') : t('sources.readonly'),
                     ),
+                    source.secretBroken === true
+                      ? h('span', { className: 'dbmcp-pill is-broken' }, t('sources.secretBroken'))
+                      : null,
                   ),
               h(
                 'div',

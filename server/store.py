@@ -11,6 +11,8 @@ import json
 import os
 from pathlib import Path
 
+import secretbox
+
 SCHEMA_VERSION = 1
 
 
@@ -61,11 +63,18 @@ def password_of(profile: dict, secrets: dict | None = None) -> str | None:
     entry = secrets.get(profile.get("id"))
     if not isinstance(entry, dict):
         return None
-    for key in ("password", "#password"):
-        value = entry.get(key)
-        if isinstance(value, str) and value != "":
-            return value
-    return None
+    if not any(isinstance(entry.get(key), str) and entry.get(key) != "" for key in ("password", "#password")):
+        return None
+    try:
+        return secretbox.open_password(entry, secretbox.load_key(runtime_dir()), profile.get("id"))
+    except secretbox.SecretError as error:
+        # Returning None here would turn an unreadable key into a misleading
+        # authentication failure; say what is actually wrong instead.
+        raise StoreError(
+            "infra_error",
+            str(error),
+            "re-enter the password in the Database panel, or delete secret.key and set the passwords again",
+        ) from error
 
 
 def all_sources() -> list[dict]:

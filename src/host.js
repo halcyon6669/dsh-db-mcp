@@ -12,7 +12,9 @@
  *
  * Storage lives under <DSH_HOME>/db-mcp:
  *   datasources.json  registry without credentials (atomic write, mode 0600)
- *   secrets.json      per-source passwords, mode 0600, never returned to the page
+ *   secrets.json      per-source passwords as AES-256-GCM envelopes, mode 0600,
+ *                     never returned to the page
+ *   secret.key        the key that opens those envelopes, mode 0600
  *
  * The Python MCP server and the MCP row wiring arrive in P3.
  */
@@ -30,6 +32,7 @@ import { connect as netConnect } from 'node:net'
 // copy after a reload.
 const GENERATION = new URL(import.meta.url).searchParams.get('v') || '0'
 const { createBridge } = await import(new URL(`./tools.js?v=${GENERATION}`, import.meta.url).href)
+const secretbox = await import(new URL(`./secretbox.js?v=${GENERATION}`, import.meta.url).href)
 
 const API_PREFIX = '/plugins/db-mcp/api'
 const PLUGIN_NAME = 'dsh-db-mcp'
@@ -37,6 +40,10 @@ const PLUGIN_VERSION = '0.9.7'
 const SCHEMA_VERSION = 1
 const REGISTRY_FILE = 'datasources.json'
 const SECRETS_FILE = 'secrets.json'
+const SECRET_KEY_FILE = 'secret.key'
+// Fields inside one secrets.json entry that hold a password. `#password` is the
+// key DBeaver's own import uses; both are sealed the same way.
+const SECRET_FIELDS = ['password', '#password']
 const SETTINGS_FILE = 'settings.json'
 // Per-conversation data-source allowlists. Missing file or an empty id list
 // means "no limit": every source stays reachable.
@@ -209,7 +216,10 @@ function publicProfile(profile, secrets) {
     group: typeof profile.group === 'string' ? profile.group : '',
     config: configToPublic(profile.kind, config),
     target: describeTarget(profile.kind, config),
-    hasSecret: Boolean(secret && trimmed(secret.password)),
+    hasSecret: Boolean(secret && SECRET_FIELDS.some((field) => trimmed(secret[field]))),
+    // A secret that no longer opens (the key was replaced or deleted) must be
+    // visible on the row: otherwise the next probe reports a login failure.
+    secretBroken: Boolean(secret && secret.broken === true),
     lastProbe: profile.lastProbe ?? null,
     createdAt: profile.createdAt ?? null,
     updatedAt: profile.updatedAt ?? null,
@@ -373,6 +383,19 @@ async function testProfile(profile, secret, options) {
   }
 
   const password = secret && trimmed(secret.password) ? trimmed(secret.password) : undefined
+  if (secret && secret.broken === true) {
+    // The envelope no longer opens, so there is no password to try. Saying so
+    // beats a login failure the user cannot explain.
+    return {
+      ok: false,
+      message: 'the stored password cannot be decrypted — re-enter it in Edit',
+      detail: null,
+      latencyMs: 0,
+      target: describeTarget(profile.kind, config),
+      hasPassword: false,
+      broken: true,
+    }
+  }
   const target = describeTarget(profile.kind, config)
   const remote = options && options.remote
   if (typeof remote === 'function') {
@@ -939,8 +962,93 @@ export function createHost(options = {}) {
     return { secrets, error: read.error || null }
   }
 
+  /** The key that seals secrets.json, created on first use. */
+  let cachedKey = null
+  async function secretKey() {
+    if (!cachedKey) cachedKey = await secretbox.loadKey(dir)
+    return cachedKey
+  }
+
+  /**
+   * Encrypt every plaintext password in place.
+   *
+   * The file is written by several code paths (save, import, delete), so sealing
+   * happens here rather than at each of them: one place to get the format right.
+   * Values that are already envelopes are left alone, which makes this safe to
+   * run on every write.
+   */
+  async function sealSecrets(secrets) {
+    const source = cleanRecord(secrets) ? secrets : {}
+    const key = await secretKey()
+    let changed = false
+    const next = {}
+    for (const [id, entry] of Object.entries(source)) {
+      if (!cleanRecord(entry)) {
+        next[id] = entry
+        continue
+      }
+      const sealed = { ...entry }
+      for (const field of SECRET_FIELDS) {
+        const value = sealed[field]
+        if (typeof value !== 'string' || value === '' || secretbox.isEnvelope(value)) continue
+        sealed[field] = secretbox.encrypt(key, value, id)
+        changed = true
+      }
+      next[id] = sealed
+    }
+    return { secrets: next, changed }
+  }
+
+  /**
+   * The plaintext view of secrets.json, for the few paths that need a password
+   * (a real login probe). An entry whose envelope will not open is dropped and
+   * flagged, so callers can say so instead of reporting a bogus login failure.
+   */
+  async function plainSecrets() {
+    const { secrets, error } = await readSecrets()
+    let key = null
+    try {
+      key = await secretKey()
+    } catch (failure) {
+      key = null
+    }
+    const next = {}
+    for (const [id, entry] of Object.entries(secrets)) {
+      if (!cleanRecord(entry)) continue
+      const opened = { ...entry }
+      for (const field of SECRET_FIELDS) {
+        const value = opened[field]
+        if (typeof value !== 'string' || value === '' || !secretbox.isEnvelope(value)) continue
+        if (!key) {
+          delete opened[field]
+          opened.broken = true
+          continue
+        }
+        try {
+          opened[field] = secretbox.decrypt(key, value, id)
+        } catch (failure) {
+          delete opened[field]
+          opened.broken = true
+        }
+      }
+      next[id] = opened
+    }
+    return { secrets: next, error }
+  }
+
+  /** Seal what an older build left in plaintext, once per mount. */
+  async function migrateSecrets() {
+    const { secrets } = await readSecrets()
+    const sealed = await sealSecrets(secrets)
+    if (!sealed.changed) return false
+    await writeSecrets(sealed.secrets)
+    return true
+  }
+
   async function writeSecrets(secrets) {
-    await writeJsonAtomic(secretsFile, { schemaVersion: SCHEMA_VERSION, secrets }, 0o600)
+    // Seal on the way out so no caller can accidentally persist plaintext.
+    const sealed = await sealSecrets(secrets)
+    await writeJsonAtomic(secretsFile, { schemaVersion: SCHEMA_VERSION, secrets: sealed.secrets }, 0o600)
   }
 
   const settingsFile = join(dir, SETTINGS_FILE)
@@ -1288,7 +1396,7 @@ export function createHost(options = {}) {
       const script = [
         'import importlib.metadata as m',
         'out = []',
-        "for name in ['mcp', 'psycopg', 'py-opengauss', 'PyMySQL', 'oracledb']:",
+        "for name in ['mcp', 'psycopg', 'py-opengauss', 'PyMySQL', 'oracledb', 'cryptography']:",
         '    try:',
         "        out.append(name + '=' + m.version(name))",
         '    except Exception:',
@@ -1364,6 +1472,7 @@ export function createHost(options = {}) {
         registryMissing: listing.missing,
         registryError: listing.error,
         secretsFile,
+        keyFile: join(dir, SECRET_KEY_FILE),
         dbeaverRoots: dbeaverRoots(),
       },
       datasources: listing.datasources,
@@ -1494,10 +1603,11 @@ export function createHost(options = {}) {
 
     if (action === 'test') {
       const results = []
+      // Open the envelopes once for the whole batch instead of per source.
+      const opened = await plainSecrets()
       for (const id of target) {
         const stored = registry.datasources.find((item) => item.id === id)
-        const { secrets } = await readSecrets()
-        const result = await testProfile(stored, secrets[id] || null, {
+        const result = await testProfile(stored, opened.secrets[id] || null, {
           probeTimeoutMs: Number(config.probeTimeoutMs) || 10_000,
           remote: remoteProbe,
         })
@@ -1724,7 +1834,7 @@ export function createHost(options = {}) {
       return { status: 404, body: { ok: false, error: `unknown datasource: ${id || '(none)'}` } }
     }
 
-    const { secrets } = await readSecrets()
+    const { secrets } = await plainSecrets()
     // An inline probe has no registry entry, so the password typed into the form
     // is the only one available; a saved source keeps using its stored secret.
     const supplied = typeof payload.password === 'string' ? payload.password : ''
@@ -2036,6 +2146,10 @@ export function createHost(options = {}) {
   // Publish the MCP tools as soon as the host half mounts, so the agent can use
   // them even if nobody opens the Database panel.
   void ensureMcp()
+
+  // A runtime directory written by an older build keeps plaintext passwords in
+  // secrets.json; seal them on first mount so the file stops carrying them.
+  void migrateSecrets().catch(() => null)
 
   // Outside clients (VS Code, Cursor, Codex) need a URL rather than stdio, so the
   // HTTP half starts too unless the user switched it off in settings. It only

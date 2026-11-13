@@ -93,7 +93,8 @@ Failures come back as `{ ok: false, error: { code, message, hint? } }` with
 ## Files
 
 All under `$DSH_HOME/db-mcp` (override with the `runtimeDir` option), mode `0600`,
-written atomically via a temporary file plus rename.
+written atomically via a temporary file plus rename. `secret.key` is created once
+and never rewritten by the Host.
 
 `datasources.json`
 
@@ -120,8 +121,26 @@ written atomically via a temporary file plus rename.
 }
 ```
 
-`secrets.json` holds `{ "schemaVersion": 1, "secrets": { "<id>": { "password": "…" } } }`
-and is read only by the Host, never sent to the page.
+`secrets.json` holds `{ "schemaVersion": 1, "secrets": { "<id>": { "password": "v1.…" } } }`
+and is read only by the Host and its Python child, never sent to the page.
+
+Each password is an AES-256-GCM envelope:
+
+```
+v1.<iv base64url>.<tag base64url>.<ciphertext base64url>
+```
+
+The key lives next to it in `secret.key` (32 random bytes, base64url, mode `0600`),
+created on first use and never rotated by the plugin. The data source `id` is the
+additional authenticated data, so an envelope moved to another source fails to
+decrypt instead of quietly returning the wrong password. A plaintext value left by
+an older build still opens, and the next write replaces it with an envelope.
+
+What this protects: a copy of `secrets.json` on its own — a backup, a sync folder,
+a file pasted into an issue — no longer carries any password. What it does not:
+anything that can read both files as your user can still decrypt them. Delete
+`secret.key` to make every stored password unreadable at once; the panel then asks
+for them again instead of reporting a bogus authentication failure.
 
 `settings.json` holds `{ "allowWrite": false, "auditLog": true, "httpEnabled": true, "httpPort": 8765, "disabledTools": [], "updatedAt": "…" }`.
 `limits` holds `{ "sampleRows": 20, "maxRows": 200 }`: the row counts handed to `sample_rows`
@@ -188,9 +207,11 @@ The Python side reads `DB_MCP_RUNTIME`, `DB_MCP_ALLOW_WRITE`, `DB_MCP_MAX_ROWS` 
 - Node 22.5+ on the Host for the in-process SQLite probe (`node:sqlite`). DSH ships
   24.x; if the module is missing the probe falls back to the Python driver and the
   panel reports it instead of failing.
-- A Python 3.10+ interpreter for the MCP server, with the five packages from
+- A Python 3.10+ interpreter for the MCP server, with the packages from
   `server/requirements.txt`. 3.10 is the floor set by `mcp`, `psycopg`, `oracledb`
   and `pydantic`; the panel's one-click install builds the venv for you.
-  `mcp` must stay on 1.x — 2.x renamed `FastMCP`.
+  `mcp` must stay on 1.x — 2.x renamed `FastMCP`. `cryptography` opens the
+  password envelopes: without it every stored password reports as unreadable
+  rather than being sent in the clear.
 - Windows, macOS or Linux. The venv layout (`Scripts/python.exe` vs `bin/python`)
   and the DBeaver workspace path are resolved per platform.

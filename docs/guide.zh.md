@@ -179,6 +179,8 @@ plugin: dsh-db-mcp 0.8.0
 
 Python 服务在启动时读取全局开关，开关一动 Host 就重启它。在引擎允许的地方，只读还会在驱动层再拦一次（SQLite 用 `mode=ro`，PostgreSQL 用 `default_transaction_read_only`，MySQL 用 `SET SESSION TRANSACTION READ ONLY`）。
 
+已存口令是加密落盘的。`secrets.json` 里每个数据源存的是一条 AES-256-GCM 信封，密钥放在旁边的 `secret.key`（`0600`，首次使用时生成）。单拿一份 `secrets.json`——备份、同步盘、贴进 issue 的文件——已经不含任何口令；把信封挪到别的数据源上会解密失败，而不是交出别人的口令。以你的身份运行的进程仍然能同时读这两个文件，所以解不开时面板会在行上标出 **已存口令无法解密** 并请你重填。删掉 `secret.key` 可以一次性让所有已存口令失效，这是最快的一次性吊销办法。
+
 ## 限制单个会话能访问的数据源
 
 可以把这个会话限制在部分数据源上。直接用自然语言说 —— *「本会话只用 pg-demo 和 oracle-demo」* —— 智能体会用这些标识符调用 `mcp__db__session_scope` 工具。不用填表，也不用改文件；标识符就是列表里每个名称下方显示的那一串。
@@ -232,12 +234,13 @@ Claude Desktop 与 Codex 写的是 stdio 条目，不需要监听端口；另外
 ```
 $DSH_HOME/db-mcp/
   datasources.json   # 数据源与分组，从不含口令，0600
-  secrets.json       # 每个数据源的口令，0600，仅 Host 可读
+  secrets.json       # 每个数据源的口令信封，0600，仅 Host 可读
+  secret.key         # 这些信封的密钥，0600，首次使用时生成
   settings.json      # 全局写开关 + 审计开关，0600
   sessions.json      # 按会话的数据源限制，0600
   logs/mcp.log       # 脱敏日志
   logs/audit.jsonl   # 每次 MCP 工具调用一行，512 KiB 轮转
-  .venv/             # 插件内 venv：mcp、psycopg、py-opengauss、PyMySQL、oracledb
+  .venv/             # 插件内 venv：mcp、psycopg、py-opengauss、PyMySQL、oracledb、cryptography
 ```
 
 ### 手工安装 Python 依赖
@@ -264,7 +267,7 @@ python -m venv "$env:USERPROFILE\.dsh\db-mcp\.venv"
 指向 `<源码目录>\server\requirements.txt` 即可 —— venv 仍然在
 `$DSH_HOME\db-mcp` 下。
 
-装完在同一张卡片点 **重启 MCP**（按钮会自动重启），依赖行应显示五个版本号、
+装完在同一张卡片点 **重启 MCP**（按钮会自动重启），依赖行应显示六个版本号、
 没有 `missing`。
 
 ## 用 Docker 起测试库

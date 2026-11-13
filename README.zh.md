@@ -100,7 +100,7 @@ dsh plugin --profile web add dsh-db-mcp       # Web 端
 ## 安全
 
 - **默认只读**，两道互相独立的闸门：全局写开关 + 单源标记，两者都打开才允许写入。
-- **口令不出本机。** 存在 `secrets.json`（`0600`）；任何 HTTP 接口都不返回它，Python 子进程拿到的也只是很短的环境变量白名单，而不是整个 DSH 环境。
+- **口令不出本机，且加密落盘。** 存在 `secrets.json` 里的是一条条 AES-256-GCM 信封（`0600`），密钥在旁边的 `secret.key`；任何 HTTP 接口都不返回口令，Python 子进程拿到的也只是很短的环境变量白名单，而不是整个 DSH 环境。
 - **每次工具调用都有审计**，写入 `logs/audit.jsonl`——工具、数据源、耗时、行数、SQL；结果行永不记录。
 - **面板不会执行 SQL。** 结构浏览只转发 `list_tables` 与 `describe_table`。
 

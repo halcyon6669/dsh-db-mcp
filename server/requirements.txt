@@ -11,3 +11,7 @@ oracledb>=2.0
 # openGauss/GaussDB answer SASL with SHA256, which libpq (and therefore psycopg)
 # cannot negotiate; this pure-Python driver is the only one that can.
 py-opengauss>=1.3.10
+# Opens the AES-256-GCM envelopes the Host writes into secrets.json. oracledb
+# pulls it in indirectly today; naming it keeps that from becoming a silent
+# break if oracledb ever drops the dependency.
+cryptography>=42

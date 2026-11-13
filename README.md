@@ -140,9 +140,10 @@ smaller tool list in the model's context.
 
 - **Read-only by default**, with two independent gates: a global write switch and a
   per-source flag. Both must be open before a statement may write.
-- **Passwords stay local.** They live in `secrets.json` (mode `0600`); no HTTP route
-  ever returns one, and the Python child receives a short environment allowlist
-  rather than the whole DSH environment.
+- **Passwords stay local, encrypted at rest.** They live in `secrets.json` as
+  AES-256-GCM envelopes (mode `0600`), with the key in `secret.key` beside them; no
+  HTTP route ever returns one, and the Python child receives a short environment
+  allowlist rather than the whole DSH environment.
 - **Every tool call is audited** to `logs/audit.jsonl` — tool, source, duration, row
   count, SQL. Result rows are never logged.
 - **Nothing runs from the panel except catalog reads.** The structure browser only

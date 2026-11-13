@@ -10,11 +10,13 @@ index.js            Cordis entry: routes only, plus the cache-busting import of 
 src/host.js         Host half: registry, DBeaver import, probes, settings, audit, MCP bridge wiring
 src/mcp.js          minimal MCP client over stdio (newline-delimited JSON-RPC)
 src/tools.js        spawns the Python server, publishes its tools on the host tools service
+src/secretbox.js    AES-256-GCM envelopes for secrets.json, plus the secret.key file
 client.js           browser half: sidebar entry + panel (React, theme tokens only)
 locale/{en,zh}.json package metadata (title/description) shown by the plugin card
 server/main.py      FastMCP server: eight tools
 server/engines.py   per-engine connect / introspect / query / DDL
-server/store.py     reads the registry written by the Host
+server/store.py     reads the registry written by the Host, opens its password envelopes
+server/secretbox.py the Python half of the envelope format: opens what the Host sealed
 cordis.patch.yml    one Loader row with id "db-mcp"
 dev/                test suites and the version bump script
 docs/               this documentation
@@ -61,13 +63,14 @@ reflects edits immediately; one installed from npm needs a release.
 npm test              # everything below except mcp.test.mjs
 npm run test:ci       # the portable subset the publish workflow runs
 npm run test:mcp      # real Python server, real SQLite; Oracle when its container is up
-npm run test:engines  # server/engines.py against a stub DB-API connection
+npm run test:engines  # the Python suites: engines.py and secretbox.py
 npm run test:docs     # fenced blocks, table widths and relative links in the docs
 ```
 
 | Suite | Covers |
 | ----- | ------ |
 | `dev/engines.test.mjs` + `engines.test.py` | commit/rollback and `affectedRows` contract of `execute_sql`, no database needed |
+| `dev/secretbox.test.py` | the envelope format: key file, round trip, wrong key or source id, plaintext fallback |
 | `dev/gauss.check.py` | openGauss plumbing offline: comma host list, IRI escaping, the `ssl.wrap_socket` shim, no network |
 | `dev/selftest.mjs` | mounts `src/host.js` on a throwaway port: registry, validation, groups, bulk, schema route, DBeaver scan, probes |
 | `dev/shims.test.mjs` | mounts `index.js`, checks both routes, `/reload`, tool publication, and that `package.json` has no BOM |
