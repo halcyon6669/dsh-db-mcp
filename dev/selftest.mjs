@@ -347,6 +347,55 @@ try {
     JSON.stringify(writableOdd.body.datasource?.writableSchemas),
   )
 
+  // DDL is a second permission and defaults to off: a registry written before
+  // the field existed must not start accepting `drop table` on the next load.
+  check(
+    'a source created without the field may not run DDL',
+    writable.body.datasource?.allowDdl === false,
+    JSON.stringify(writable.body.datasource?.allowDdl),
+  )
+  const ddlGranted = await call('POST', '/datasources/save', {
+    id: 'writable-ddl',
+    name: 'Writable with DDL',
+    kind: 'postgres',
+    config: { host: '127.0.0.1', port: 5998, database: 'ddl', user: 'alice' },
+    writableSchemas: ['sales'],
+    allowDdl: true,
+  })
+  check(
+    'DDL is stored when it is asked for',
+    ddlGranted.body.datasource?.allowDdl === true,
+    JSON.stringify(ddlGranted.body.datasource?.allowDdl),
+  )
+  // Omitting the field on a later save means "leave it as it is", not "revoke":
+  // the edit form always sends it, so a caller that does not know the field
+  // must not silently turn DDL off.
+  const ddlKept = await call('POST', '/datasources/save', {
+    id: 'writable-ddl',
+    name: 'Writable with DDL',
+    kind: 'postgres',
+    config: { host: '127.0.0.1', port: 5999, database: 'x', user: 'alice' },
+    writableSchemas: ['sales'],
+  })
+  check(
+    'a save that omits the field keeps the switch',
+    ddlKept.body.datasource?.allowDdl === true,
+    JSON.stringify(ddlKept.body.datasource?.allowDdl),
+  )
+  const ddlRevoked = await call('POST', '/datasources/save', {
+    id: 'writable-ddl',
+    name: 'Writable with DDL',
+    kind: 'postgres',
+    config: { host: '127.0.0.1', port: 5999, database: 'x', user: 'alice' },
+    writableSchemas: ['sales'],
+    allowDdl: false,
+  })
+  check(
+    'DDL is revoked when it is turned off',
+    ddlRevoked.body.datasource?.allowDdl === false,
+    JSON.stringify(ddlRevoked.body.datasource?.allowDdl),
+  )
+
   // Unlocking without an answer is refused: a source that accepts writes and
   // names no schema would let every write through, which is the thing the
   // guard exists to prevent.
@@ -357,6 +406,7 @@ try {
     ids: ['writable-default'],
     readOnly: false,
     writableSchemas: ['main'],
+    allowDdl: true,
   })
   check('unlocking with writable schemas succeeds', named.status === 200, named.body.error)
   const afterUnlock = await call('GET', '/datasources')
@@ -367,6 +417,13 @@ try {
     JSON.stringify(unlockedRow && unlockedRow.writableSchemas) === JSON.stringify(['main']),
     JSON.stringify(unlockedRow && unlockedRow.writableSchemas),
   )
+  // The unlock dialog asks both questions in one call, so the bulk route carries
+  // the DDL answer too.
+  check(
+    'the unlock call carries the DDL switch',
+    unlockedRow && unlockedRow.allowDdl === true,
+    JSON.stringify(unlockedRow && unlockedRow.allowDdl),
+  )
   const relock = await call('POST', '/datasources/bulk', { action: 'readOnly', ids: ['writable-default'], readOnly: true })
   check('going read-only is always allowed', relock.status === 200, relock.body.error)
   const afterRelock = await call('GET', '/datasources')
@@ -376,9 +433,15 @@ try {
     JSON.stringify(relockedRow && relockedRow.writableSchemas) === JSON.stringify(['main']),
     JSON.stringify(relockedRow && relockedRow.writableSchemas),
   )
+  check(
+    'the DDL switch is kept when the source goes read-only again',
+    relockedRow && relockedRow.allowDdl === true,
+    JSON.stringify(relockedRow && relockedRow.allowDdl),
+  )
   await call('POST', '/datasources/delete', { id: 'writable-db' })
   await call('POST', '/datasources/delete', { id: 'writable-default' })
   await call('POST', '/datasources/delete', { id: 'writable-odd' })
+  await call('POST', '/datasources/delete', { id: 'writable-ddl' })
 
   const unknown = await call('GET', '/nope')
   check('unknown route 404', unknown.status === 404)

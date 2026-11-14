@@ -282,7 +282,7 @@ Writes are, and they are chosen on the row itself — see *Writable schemas* bel
 
 ## Safety switches
 
-Three independent gates decide whether a statement may write:
+Four independent gates decide whether a statement may write:
 
 1. **Global switch** — `allowWrite` in `<runtime>/settings.json`, toggled on the
    *Runtime* tab. Off by default; while off every write is refused with
@@ -295,6 +295,14 @@ Three independent gates decide whether a statement may write:
    refused. The row shows that list only while the source is writable: the list
    survives a switch back to read-only, but a pill on a locked row would claim a
    permission that is not in force.
+4. **DDL** — `allowDdl` on the source, off by default. Writing rows and changing
+   the shape of the database are different decisions: a source that is happy to
+   take an `insert` may still be one whose tables belong to somebody else. While
+   it is off, `create`, `alter`, `drop`, `truncate`, `rename`, `grant` and
+   `revoke` are refused before they reach the database; `insert`, `update` and
+   `delete` are unaffected. The switch is asked for in the same unlock dialog,
+   and the row carries a *DDL allowed* or *DDL blocked* pill so the answer is
+   visible without opening anything.
 
 The Python server reads the global flag at start-up and the host restarts it
 whenever the switch flips. Read-only is enforced again at the driver where the
@@ -314,9 +322,17 @@ shows it. Nothing is preselected on a source that never had a list; a source tha
 had one comes back with the same boxes ticked, because switching back to read-only
 keeps the list. **Allow writes** stays disabled until at least one box is ticked.
 
+The same dialog carries one more question: **Also allow DDL**. It is off unless it
+was turned on before, and it means what it says — `create`, `alter`, `drop`,
+`truncate`, `rename`, `grant` and `revoke` are refused on a source that has not
+opted in, before the statement reaches the database. `insert`, `update` and
+`delete` keep working either way. The switch only widens *which statements* may
+run; the schemas ticked above still bound *where* they may land, so a `drop table`
+aimed outside the list is refused even with DDL on.
+
 The same names can be edited later in **Edit** → **More settings** → *Writable
-schemas*, comma separated. They are stored on the source, so the dialog and the
-form always agree.
+schemas*, comma separated; the DDL switch sits next to them as *Allow DDL*. Both
+are stored on the source, so the dialog and the form always agree.
 
 The guard runs in the Python server, which means it covers the agent, the HTTP
 endpoint and the panel alike:
@@ -327,6 +343,9 @@ endpoint and the panel alike:
 - A write is resolved to the schema it lands on — `insert into sales.orders`,
   `update "hr".employees`, `create table audit.log`, `create index i on
   sales.orders`, `grant … on sales.orders`, `call sales.recalc()`.
+- A statement that changes the shape of the database is refused unless the source
+  allows DDL; `truncate` counts, because it empties a table just as thoroughly as
+  `drop` would.
 - An unqualified target takes the source's own default: `main` for SQLite, the
   configured database for MySQL, the configured schema (or the Oracle user) for
   the rest, and `public` for PostgreSQL when nothing is set.

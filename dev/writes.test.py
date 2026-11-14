@@ -26,10 +26,16 @@ writes = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(writes)
 
 
-def profile(kind="postgres", schemas=("sales",), **config):
+def profile(kind="postgres", schemas=("sales",), allow_ddl=False, **config):
     base = {"host": "localhost", "port": 5432, "database": "app", "user": "alice"}
     base.update(config)
-    return {"id": "pg-test", "kind": kind, "config": base, "writableSchemas": list(schemas)}
+    return {
+        "id": "pg-test",
+        "kind": kind,
+        "config": base,
+        "writableSchemas": list(schemas),
+        "allowDdl": allow_ddl,
+    }
 
 
 class Statements(unittest.TestCase):
@@ -155,6 +161,76 @@ class Allowed(unittest.TestCase):
         self.assertEqual(writes.allowed({"id": "x", "writableSchemas": "sales"}), [])
 
 
+class DdlSwitch(unittest.TestCase):
+    """DDL is a second permission: writing rows must not imply changing the shape."""
+
+    def test_create_alter_drop_are_ddl(self):
+        for statement in ("create table t (id int)", "alter table t add c int", "drop table t"):
+            self.assertTrue(writes.is_ddl(statement), statement)
+
+    def test_truncate_is_ddl(self):
+        # It keeps the table but throws every row away: as destructive as a drop.
+        self.assertTrue(writes.is_ddl("truncate table sales.orders"))
+
+    def test_rename_grant_revoke_are_ddl(self):
+        for statement in (
+            "rename table a to b",
+            "grant select on sales.orders to bob",
+            "revoke select on sales.orders from bob",
+        ):
+            self.assertTrue(writes.is_ddl(statement), statement)
+
+    def test_row_writes_are_not_ddl(self):
+        for statement in (
+            "insert into t values (1)",
+            "update t set a = 1",
+            "delete from t",
+            "merge into t using s on 1 = 1 when matched then delete",
+        ):
+            self.assertFalse(writes.is_ddl(statement), statement)
+
+    def test_reads_are_not_ddl(self):
+        self.assertFalse(writes.is_ddl("select * from t"))
+        self.assertFalse(writes.is_ddl("explain create table t (id int)"))
+
+    def test_a_batch_is_ddl_if_any_statement_is(self):
+        self.assertTrue(writes.is_ddl("insert into sales.t values (1); drop table sales.t"))
+
+    def test_a_leading_comment_does_not_hide_ddl(self):
+        self.assertTrue(writes.is_ddl("-- tidy\n/* why not */ drop table sales.t"))
+
+    def test_ddl_absent_means_refused(self):
+        self.assertFalse(writes.allows_ddl({"id": "x"}))
+        self.assertFalse(writes.allows_ddl({"id": "x", "allowDdl": "yes"}))
+        self.assertTrue(writes.allows_ddl({"id": "x", "allowDdl": True}))
+
+    def test_ddl_is_refused_on_a_source_that_did_not_opt_in(self):
+        with self.assertRaises(writes.WriteBlocked) as caught:
+            writes.check("create table sales.orders (id int)", profile())
+        self.assertIn("does not allow DDL", caught.exception.message)
+        self.assertIn("Database panel", caught.exception.hint)
+
+    def test_ddl_passes_once_the_switch_is_on(self):
+        writes.check("create table sales.orders (id int)", profile(allow_ddl=True))
+
+    def test_the_schema_list_still_binds_ddl(self):
+        # The DDL switch widens *what* may run, not *where* it may run.
+        with self.assertRaises(writes.WriteBlocked) as caught:
+            writes.check("create table hr.payroll (id int)", profile(allow_ddl=True))
+        self.assertIn("hr is not a writable schema", caught.exception.message)
+
+    def test_a_row_write_is_unaffected_by_the_ddl_switch(self):
+        writes.check("insert into sales.orders values (1)", profile(allow_ddl=False))
+
+    def test_a_batch_mixing_read_and_ddl_still_needs_the_switch(self):
+        with self.assertRaises(writes.WriteBlocked):
+            writes.check("select 1; drop table sales.orders", profile())
+
+    def test_sqlite_ddl_needs_the_switch_too(self):
+        with self.assertRaises(writes.WriteBlocked):
+            writes.check("create table t (id int)", profile(kind="sqlite", schemas=("main",), file="a.db"))
+
+
 class Check(unittest.TestCase):
     def test_a_read_is_always_allowed(self):
         writes.check("select * from hr.payroll", profile())
@@ -210,7 +286,8 @@ class Check(unittest.TestCase):
             writes.check("create table hr.payroll (id int)", profile())
 
     def test_ddl_to_a_listed_schema_passes(self):
-        writes.check("create table sales.orders (id int)", profile())
+        # Both permissions at once: DDL on, and the target schema is listed.
+        writes.check("create table sales.orders (id int)", profile(allow_ddl=True))
 
     def test_a_leading_comment_does_not_hide_a_write(self):
         with self.assertRaises(writes.WriteBlocked):

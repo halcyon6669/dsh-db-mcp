@@ -88,7 +88,7 @@ CONFIG = {
 DEFAULT_SCHEMA = {"sqlite": "main", "postgres": "public", "gauss": "public", "mysql": "testdb", "oracle": "TEST"}
 
 
-def profile(kind: str, read_only: bool = False) -> dict:
+def profile(kind: str, read_only: bool = False, allow_ddl: bool = False) -> dict:
     """A source that may write, with the schema its unqualified writes land in."""
     return {
         "id": f"{kind}-test",
@@ -96,6 +96,7 @@ def profile(kind: str, read_only: bool = False) -> dict:
         "config": dict(CONFIG[kind]),
         "readOnly": read_only,
         "writableSchemas": [DEFAULT_SCHEMA[kind]],
+        "allowDdl": allow_ddl,
     }
 
 
@@ -162,7 +163,7 @@ class WritePermission(unittest.TestCase):
     def test_unknown_rowcount_omits_affected_rows(self):
         self.allow_write()
         connection = FakeConnection(FakeCursor(rowcount=-1))
-        result = engines.execute_sql(profile("mysql"), connection, "create table t (id int)", 200)
+        result = engines.execute_sql(profile("mysql", allow_ddl=True), connection, "create table t (id int)", 200)
         self.assertEqual(connection.commits, 1)
         self.assertNotIn("affectedRows", result)
 
@@ -215,6 +216,25 @@ class WritePermission(unittest.TestCase):
             engines.execute_sql(profile("mysql"), connection, "insert into t values (1)", 200)
         self.assertEqual(connection.commits, 0, "a failed statement must not be committed")
         self.assertTrue(cursor.closed)
+
+    def test_ddl_without_the_switch_never_reaches_the_driver(self):
+        self.allow_write()
+        cursor = FakeCursor(rowcount=-1)
+        connection = FakeConnection(cursor)
+        with self.assertRaises(engines.DbError) as caught:
+            engines.execute_sql(profile("mysql"), connection, "drop table products", 200)
+        self.assertEqual(caught.exception.code, "user_error")
+        self.assertIn("does not allow DDL", caught.exception.message)
+        self.assertEqual(cursor.executed, [], "a refused drop must not reach the driver")
+        self.assertEqual(connection.commits, 0)
+
+    def test_ddl_reaches_the_driver_once_the_switch_is_on(self):
+        self.allow_write()
+        cursor = FakeCursor(rowcount=-1)
+        connection = FakeConnection(cursor)
+        engines.execute_sql(profile("mysql", allow_ddl=True), connection, "create table t (id int)", 200)
+        self.assertEqual(len(cursor.executed), 1)
+        self.assertEqual(connection.commits, 1)
 
 
 class RenderContract(unittest.TestCase):

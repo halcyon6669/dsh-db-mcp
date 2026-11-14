@@ -119,7 +119,7 @@ const sqliteTree = render(
   'create form (sqlite)',
   () => SourceForm({ t, draft: emptyDraft(), editing: null, takenIds: [], onSaved: noop, onCancel: noop }),
   {
-    inputs: 10,
+    inputs: 11,
     selects: 1,
     details: true,
     labels: ['form.paste', 'form.user', 'form.password', 'form.file', 'form.schemaAccess'],
@@ -131,6 +131,7 @@ if (sqliteTree) {
   check('create form: smart-parsing tag', texts(sqliteTree).includes('form.smart'))
   check('create form: footer hint', texts(sqliteTree).includes('form.autoApply'))
   check('create form: writable schemas are asked for', texts(sqliteTree).includes('form.schemaAccessHint'))
+  check('create form: DDL is its own switch', texts(sqliteTree).includes('form.allowDdl'))
 }
 
 const pgDraft = emptyDraft()
@@ -139,7 +140,7 @@ pgDraft.config = { ...pgDraft.config, host: 'localhost', port: '5432', database:
 render(
   'create form (postgres)',
   () => SourceForm({ t, draft: pgDraft, editing: null, takenIds: ['app'], onSaved: noop, onCancel: noop }),
-  { inputs: 13, selects: 2, details: true, labels: ['form.host', 'form.port', 'form.database'] },
+  { inputs: 14, selects: 2, details: true, labels: ['form.host', 'form.port', 'form.database'] },
 )
 
 const oracleDraft = emptyDraft()

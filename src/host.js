@@ -216,6 +216,9 @@ function publicProfile(profile, secrets) {
     group: typeof profile.group === 'string' ? profile.group : '',
     config: configToPublic(profile.kind, config),
     writableSchemas: normalizeWritableSchemas(profile.writableSchemas),
+    // DDL is its own permission: a source can be perfectly happy to take an
+    // `insert` and still be one whose tables belong to somebody else.
+    allowDdl: profile.allowDdl === true,
     target: describeTarget(profile.kind, config),
     hasSecret: Boolean(secret && SECRET_FIELDS.some((field) => trimmed(secret[field]))),
     // A secret that no longer opens (the key was replaced or deleted) must be
@@ -330,6 +333,12 @@ function normalizeInput(input, existing) {
     ? normalizeWritableSchemas(existing && existing.writableSchemas)
     : normalizeWritableSchemas(raw.writableSchemas)
 
+  // DDL is granted, never assumed: an older registry has no field, and a source
+  // that has not been asked must not silently start accepting `drop table`.
+  const allowDdl = raw.allowDdl === undefined || raw.allowDdl === null
+    ? (existing ? existing.allowDdl === true : false)
+    : raw.allowDdl === true
+
   const profile = {
     id,
     name,
@@ -340,6 +349,7 @@ function normalizeInput(input, existing) {
     tags,
     group,
     writableSchemas,
+    allowDdl,
     createdAt: (existing && existing.createdAt) || isoNow(),
     updatedAt: isoNow(),
     lastProbe: existing ? existing.lastProbe ?? null : null,
@@ -1725,6 +1735,9 @@ export function createHost(options = {}) {
       const requested = payload.writableSchemas === undefined || payload.writableSchemas === null
         ? null
         : normalizeWritableSchemas(payload.writableSchemas)
+      // The unlock dialog asks both questions at once, so the DDL switch rides
+      // along with the schema list. Absent means "leave it as it is".
+      const ddl = payload.allowDdl === undefined || payload.allowDdl === null ? null : payload.allowDdl === true
       if (writable && requested !== null && requested.length === 0) {
         return { status: 400, body: { ok: false, error: 'a writable source needs at least one writable schema' } }
       }
@@ -1732,6 +1745,7 @@ export function createHost(options = {}) {
         if (!target.includes(item.id)) continue
         if (requested !== null) item.writableSchemas = requested
         else item.writableSchemas = normalizeWritableSchemas(item.writableSchemas)
+        if (ddl !== null) item.allowDdl = ddl
         if (writable && item.writableSchemas.length === 0) {
           return {
             status: 400,

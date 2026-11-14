@@ -30,7 +30,7 @@ are `GET`; every mutation is `POST` (the same-origin check compares `Origin` wit
 | `POST /datasources/save` | create or update a source (`id` immutable); a second row for the same host + port + database + user is refused with `409` |
 | `POST /datasources/delete` | remove a source and its stored secret |
 | `POST /datasources/test` | real login probe (accepts `id`, or an inline `kind` + `config` + `password`) |
-| `POST /datasources/bulk` | `action: test \| readOnly \| group \| delete` over `ids`; `readOnly: false` also takes `writableSchemas` |
+| `POST /datasources/bulk` | `action: test \| readOnly \| group \| delete` over `ids`; `readOnly: false` also takes `writableSchemas` and `allowDdl` |
 | `POST /datasources/reorder` | rewrite the row order given `ids`; sources it does not name keep their place at the end |
 | `POST /groups/save` · `POST /groups/delete` | create, rename (`from`) or delete a group |
 | `POST /dbeaver/import` | copy selected DBeaver connections into the registry |
@@ -224,17 +224,25 @@ carries a `writableSchemas` list, and a statement that would write anywhere else
 is refused before it reaches the database.
 
 ```json
-"writableSchemas": ["public", "sales"]
+"writableSchemas": ["public", "sales"],
+"allowDdl": false
 ```
 
 | Field | Meaning |
 | ----- | ------- |
 | `writableSchemas` | up to 32 schema names, each ≤ 64 characters; quotes are stripped, duplicates folded, names with spaces dropped |
+| `allowDdl` | `true` lets this source run `create`, `alter`, `drop`, `truncate`, `rename`, `grant` and `revoke`; absent or `false` refuses them |
 
 The list is stored on the source, so switching back to read-only keeps it and the
 next unlock dialog preselects it. A source may not be writable with an empty list:
 `POST /datasources/bulk` with `{ "action": "readOnly", "readOnly": false }` returns
 400 unless the source already has one, and the panel asks first.
+
+`allowDdl` is independent of the list: the list bounds *where* a statement may
+land, the switch bounds *what kind* of statement may run. `truncate` counts as DDL
+— it keeps the table but empties it. A save that omits the field keeps the stored
+value rather than revoking it, so a caller that does not know about the switch
+cannot silently turn it off.
 
 The guard runs in the Python child (`server/writes.py`), inside
 `ensure_readable`, so the agent, the HTTP endpoint and the panel all hit it:
@@ -249,6 +257,9 @@ The guard runs in the Python child (`server/writes.py`), inside
 - An unqualified target takes the source's default schema: `main` for SQLite, the
   configured database for MySQL, `config.schema` (or the Oracle user, upper-cased)
   otherwise, and `public` for PostgreSQL when nothing is set.
+- A statement that changes the shape of the database is refused unless the source
+  has `allowDdl: true`. The check runs before the target is resolved, so a DDL
+  statement is refused even when its schema would have been allowed.
 - A statement whose target cannot be read is refused rather than allowed.
 - Names compare case-insensitively.
 

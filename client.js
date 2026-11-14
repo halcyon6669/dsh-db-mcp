@@ -181,6 +181,8 @@ window.__ModuleLoader__.load({
         'form.readOnlyHint': 'blocks writes for this source unless the global write switch is on',
         'form.schemaAccess': 'Writable schemas',
         'form.schemaAccessHint': 'chosen when you allow writes; reads stay unrestricted',
+        'form.allowDdl': 'Allow DDL',
+        'form.allowDdlHint': 'lets this source run create, alter, drop and truncate inside the writable schemas',
         'form.schemaNames': 'Schemas',
         'form.schemaNamesHint': 'comma separated, for example sales, billing',
         'form.schemaBroken': 'The stored password cannot be decrypted any more. Type it again to save it with the current key.',
@@ -250,6 +252,12 @@ window.__ModuleLoader__.load({
         'unlock.selected': '{n} selected',
         'unlock.confirm': 'Allow writes',
         'unlock.cancel': 'Cancel',
+        'unlock.ddl': 'Also allow DDL (create / alter / drop)',
+        'unlock.ddlHint': 'Off means the tables keep their shape: only insert, update and delete go through. Either way the target schema must be one of the schemas ticked above.',
+        'sources.ddl': 'DDL allowed',
+        'sources.ddlHint': 'This source accepts create, alter and drop inside the schemas it may write to.',
+        'sources.ddlBlocked': 'DDL blocked',
+        'sources.ddlBlockedHint': 'This source accepts insert, update and delete, but refuses create, alter and drop.',
         'action.schema': 'Structure',
         'action.backToSources': 'Data sources',
         'tab.list': 'Data source list',
@@ -443,6 +451,8 @@ window.__ModuleLoader__.load({
         'form.readOnlyHint': '未打开全局写开关时，此数据源拒绝写操作',
         'form.schemaAccess': '可写模式',
         'form.schemaAccessHint': '允许写入时才需要选择；读取不受限制',
+        'form.allowDdl': '允许 DDL',
+        'form.allowDdlHint': '允许此数据源在可写模式内执行 create、alter、drop、truncate',
         'form.schemaNames': '模式名',
         'form.schemaNamesHint': '用逗号分隔，例如 sales, billing',
         'form.schemaBroken': '已存口令无法再用当前密钥解密，请重新输入一次口令以按新密钥保存。',
@@ -512,6 +522,12 @@ window.__ModuleLoader__.load({
         'unlock.selected': '已选 {n} 个',
         'unlock.confirm': '允许写',
         'unlock.cancel': '取消',
+        'unlock.ddl': '同时允许 DDL（create / alter / drop）',
+        'unlock.ddlHint': '关闭时表结构保持不变，只放行 insert、update、delete。无论开关如何，目标模式都必须在上方勾选的模式里。',
+        'sources.ddl': '允许 DDL',
+        'sources.ddlHint': '此数据源在其可写模式内接受 create、alter、drop。',
+        'sources.ddlBlocked': '禁止 DDL',
+        'sources.ddlBlockedHint': '此数据源接受 insert、update、delete，但拒绝 create、alter、drop。',
         'action.schema': '结构',
         'action.backToSources': '数据源',
         'tab.list': '数据源列表',
@@ -834,6 +850,18 @@ window.__ModuleLoader__.load({
       .dbmcp-pill.is-broken {
         color: var(--dsw-alias-state-warn-primary);
         border-color: var(--dsw-alias-state-warn-primary);
+      }
+      /* DDL on a writable source is the widest permission the panel hands out,
+         so it reads differently from "writable" and its opposite is visible
+         too: the row should say which of the two is in force, not stay silent. */
+      .dbmcp-pill.is-ddl {
+        color: var(--dsw-alias-brand-primary);
+        border-color: color-mix(in srgb, var(--dsw-alias-brand-primary) 32%, transparent);
+        font-weight: 600;
+      }
+      .dbmcp-pill.is-ddl-off {
+        color: var(--dsw-alias-label-secondary);
+        border-style: dashed;
       }
       .dbmcp-hint.is-warn {
         color: var(--dsw-alias-state-warn-primary);
@@ -2149,6 +2177,21 @@ window.__ModuleLoader__.load({
       .dbmcp-unlock-foot .dbmcp-hint {
         margin-right: auto;
       }
+      /* The DDL switch sits between the schema list and the footer: it is the
+         second half of the same answer, so it reads as one block with the list. */
+      .dbmcp-unlock-ddl {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        padding: 10px 12px;
+        border: 1px solid var(--dsw-alias-border-l1);
+        border-radius: 8px;
+        background: var(--dsw-alias-bg-layer-2);
+      }
+      .dbmcp-unlock-ddl .dbmcp-hint {
+        font-size: 12px;
+        padding-left: 22px;
+      }
       .dbmcp-help {
         display: inline-flex;
         align-items: center;
@@ -2864,6 +2907,9 @@ window.__ModuleLoader__.load({
         // Only consulted once writes are allowed: a writable source may write to
         // these schemas and no others. Reads are never restricted.
         writableSchemas: '',
+        // DDL is a separate permission from writing rows: `create table` and
+        // `drop table` change what everybody else reads, so they are opted into.
+        allowDdl: false,
         password: '',
         hasSecret: false,
         secretBroken: false,
@@ -2885,6 +2931,7 @@ window.__ModuleLoader__.load({
       draft.secretBroken = source.secretBroken === true
       const declared = Array.isArray(source && source.writableSchemas) ? source.writableSchemas : []
       draft.writableSchemas = declared.join(', ')
+      draft.allowDdl = source.allowDdl === true
       draft.config = {
         ...fallback,
         file: config.file || '',
@@ -3026,6 +3073,7 @@ window.__ModuleLoader__.load({
               .split(',')
               .map((name) => name.trim())
               .filter(Boolean),
+            allowDdl: draft.allowDdl === true,
             password: saveSecret && draft.password !== '' ? draft.password : undefined,
           }
           if (!body.id) delete body.id
@@ -3343,6 +3391,19 @@ window.__ModuleLoader__.load({
                     onChange: (value) => patch({ writableSchemas: value }),
                   }),
                 ),
+              ),
+              // The unlock dialog asks the same question; both write `allowDdl`,
+              // so a source created as writable can still be given DDL later.
+              h(
+                'label',
+                { className: 'dbmcp-check' },
+                h('input', {
+                  type: 'checkbox',
+                  checked: draft.allowDdl === true,
+                  onChange: (event) => patch({ allowDdl: event.target.checked }),
+                }),
+                h('span', null, t('form.allowDdl')),
+                h('span', { className: 'dbmcp-help', title: t('form.allowDdlHint'), 'aria-hidden': 'true' }, '?'),
               ),
             ),
             h(
@@ -4192,12 +4253,13 @@ function groupTables(tables) {
       }
 
       /** POST the flag; `writableSchemas` rides along when unlocking. */
-      const setReadOnly = async (source, readOnly, writableSchemas) => {
+      const setReadOnly = async (source, readOnly, writableSchemas, allowDdl) => {
         const name = source.name || source.id
         setBusy(true)
         try {
           const body = { action: 'readOnly', ids: [source.id], readOnly }
           if (writableSchemas !== undefined) body.writableSchemas = writableSchemas
+          if (allowDdl !== undefined) body.allowDdl = allowDdl === true
           await apiPost('/datasources/bulk', body)
           const globalOpen = Boolean(settings && settings.allowWrite)
           const message = readOnly
@@ -4226,7 +4288,9 @@ function groupTables(tables) {
 
       /** Read the schema list once, when the dialog opens. */
       const openUnlock = (source) => {
-        setUnlock({ source, picked: {}, catalog: null, busy: true, error: null })
+        // The DDL switch is preselected from what the source already allows, so
+        // reopening the dialog shows the choice that is in force, not a default.
+        setUnlock({ source, picked: {}, catalog: null, busy: true, error: null, ddl: source.allowDdl === true })
         ;(async () => {
           try {
             const data = await apiGet(`/schema?datasource=${encodeURIComponent(source.id)}`)
@@ -4730,6 +4794,14 @@ function groupTables(tables) {
                       : null,
                     source.secretBroken === true
                       ? h('span', { className: 'dbmcp-pill is-broken' }, t('sources.secretBroken'))
+                      : null,
+                    // The DDL switch only means something while the source is
+                    // writable; on a locked row it would read as a permission
+                    // that is not in force, exactly like the schema list.
+                    showsWritable(source)
+                      ? source.allowDdl === true
+                        ? h('span', { className: 'dbmcp-pill is-ddl', title: t('sources.ddlHint') }, t('sources.ddl'))
+                        : h('span', { className: 'dbmcp-pill is-ddl-off', title: t('sources.ddlBlockedHint') }, t('sources.ddlBlocked'))
                       : null,
                   ),
               h(
@@ -5447,9 +5519,10 @@ function groupTables(tables) {
             const confirm = async () => {
               if (names.length === 0) return
               const source = unlock.source
+              const ddl = unlock.ddl === true
               setUnlock(null)
               try {
-                await setReadOnly(source, false, names)
+                await setReadOnly(source, false, names, ddl)
               } catch (error) {
                 /* setReadOnly already raised the banner */
               }
@@ -5502,6 +5575,24 @@ function groupTables(tables) {
                             ),
                           ),
                         ),
+                !unlock.busy && !unlock.error && (unlock.catalog || []).length > 0
+                  ? h(
+                      'div',
+                      { className: 'dbmcp-unlock-ddl' },
+                      h(
+                        'label',
+                        { className: 'dbmcp-check' },
+                        h('input', {
+                          type: 'checkbox',
+                          checked: unlock.ddl === true,
+                          onChange: (event) =>
+                            setUnlock((prev) => (prev ? { ...prev, ddl: event.target.checked } : prev)),
+                        }),
+                        h('span', null, t('unlock.ddl')),
+                      ),
+                      h('span', { className: 'dbmcp-hint' }, t('unlock.ddlHint')),
+                    )
+                  : null,
                 h(
                   'div',
                   { className: 'dbmcp-unlock-foot' },

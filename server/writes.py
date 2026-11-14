@@ -42,6 +42,20 @@ READ_STARTERS = (
     "comment",
 )
 
+# Statements that change the shape of the database rather than its rows. They are
+# a switch of their own on the source: a source may be perfectly happy to take an
+# `insert` and still be one where the tables belong to somebody else, so DDL is
+# opted into per source instead of riding along with the write switch.
+DDL_STARTERS = (
+    "create",
+    "alter",
+    "drop",
+    "truncate",
+    "rename",
+    "grant",
+    "revoke",
+)
+
 # Object kinds that can follow CREATE/ALTER/DROP before the name.
 _OBJECT_KINDS = (
     "table",
@@ -207,6 +221,19 @@ def keyword(sql: str) -> str:
     return match.group(0).lower() if match else ""
 
 
+def is_ddl(sql: str) -> bool:
+    """True when any statement in `sql` changes the shape of the database."""
+    for statement in statements(sql):
+        if keyword(statement) in DDL_STARTERS:
+            return True
+    return False
+
+
+def allows_ddl(profile: dict) -> bool:
+    """Whether this source opted into DDL. Absent means no."""
+    return profile.get("allowDdl") is True
+
+
 def _identifier(text: str) -> tuple[str | None, str | None]:
     """Read `schema.table`, `table` or a quoted form of either."""
     match = _QUALIFIED.match(text)
@@ -295,6 +322,11 @@ def allowed(profile: dict) -> list[str]:
 
 def check(sql: str, profile: dict) -> None:
     """Raise WriteBlocked unless every write in `sql` targets a writable schema."""
+    if is_ddl(sql) and not allows_ddl(profile):
+        raise WriteBlocked(
+            f"datasource {profile.get('id')} does not allow DDL; the schema was left untouched",
+            "turn on DDL for this source in the Database panel, or run the statement in a client that is not guarded",
+        )
     names = allowed(profile)
     if not names:
         raise WriteBlocked(
