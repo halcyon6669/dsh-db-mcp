@@ -166,4 +166,4 @@ backup: if `.git/objects` itself is missing, restore from a bundle instead
    `SourceForm`; extend `parseConnectionText` with the scheme and JDBC prefix.
 4. `server/requirements.txt`: the driver, and `docs/reference.md`: the field table.
 5. Tests: `dev/parse.test.mjs` for the string, `dev/selftest.mjs` for validation and
-   the probe, and a demo container in `docs/guide.md`.
+   the probe, and a demo container in `docs/runtime.md`.

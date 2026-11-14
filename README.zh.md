@@ -49,7 +49,7 @@
 | Claude Desktop | `claude_desktop_config.json` 里的 stdio 条目 |
 | Codex CLI | `~/.codex/config.toml` 里的 `[mcp_servers.dsh-db-mcp]` |
 
-JetBrains AI 或任何支持 MCP 的客户端，把这个地址填进去同样能用。数据源与只读规则是共享的；审计日志与会话级限制只存在于 DSH 内。详见[使用指南](docs/guide.zh.md#接入其它客户端)。
+JetBrains Air 或任何支持 MCP 的客户端，把这个地址填进去同样能用。数据源、只读标记、可写模式与 DDL 开关是共享的；审计日志、工具清单与会话级限制只存在于 DSH 内。[安全](docs/safety.zh.md#哪些规则在-dsh-之外仍然生效) 一页有逐项对照表，[接入其它客户端](docs/clients.zh.md) 讲端点怎么配。
 
 ## 运行要求
 
@@ -110,7 +110,10 @@ dsh plugin --profile web add dsh-db-mcp       # Web 端
 
 | 文档 | 内容 |
 | ---- | ---- |
-| [docs/guide.zh.md](docs/guide.zh.md) | 面板操作、连接串、分组、Docker 测试库、排错（中文） |
+| [docs/guide.zh.md](docs/guide.zh.md) | 面板操作：安装、连接串、导入、分组、结构浏览（中文） |
+| [docs/safety.zh.md](docs/safety.zh.md) | 四道闸门、可写模式，以及外部客户端仍受哪些约束（中文） |
+| [docs/clients.zh.md](docs/clients.zh.md) | HTTP 端点、接入其它客户端、工具清单（中文） |
+| [docs/runtime.zh.md](docs/runtime.zh.md) | 运行时目录、Python 依赖、Docker 测试库、排错（中文） |
 | [docs/reference.md](docs/reference.md) | HTTP 接口、工具契约、注册表与设置文件、插件配置（英文） |
 | [docs/development.md](docs/development.md) | 目录结构、热重载、测试套件、发布流程（英文） |
 | [docs/design-notes.md](docs/design-notes.md) | 设计日志（P1 → P7）与决策记录（英文） |

@@ -2,7 +2,13 @@
 
 # 使用指南
 
-面板能做的事，按你会遇到的顺序排列。协议与文件格式见 [reference.md](reference.md)（英文）；构建与发布见 [development.md](development.md)（英文）。
+面板能做的事，按你会遇到的顺序排列。其余内容各有独立页面：
+
+- [safety.zh.md](safety.zh.md) —— 谁能写、写到哪，以及哪些规则在离开 DSH 后仍然生效
+- [clients.zh.md](clients.zh.md) —— HTTP 端点、工具清单、自己跑这个服务
+- [runtime.zh.md](runtime.zh.md) —— 磁盘上的文件、Python 依赖、Docker 测试库、排错
+- [reference.md](reference.md)（英文）—— 协议与文件格式
+- [development.md](development.md)（英文）—— 构建、测试与发布
 
 ## 流程总览
 
@@ -60,7 +66,7 @@ foreach ($p in $profiles) {
 
 你配置的东西不会有风险：数据源、已存口令、设置与审计日志都在 `~/.dsh/db-mcp`，不在包目录里。
 
-如果重启后侧栏入口消失，见 [排错](#排错)。
+如果重启后侧栏入口消失，见 [排错](runtime.zh.md#排错)。
 
 ## 面板
 
@@ -71,8 +77,8 @@ foreach ($p in $profiles) {
 | 数据源列表 | 注册表：状态条、搜索、分组筛选、分组列表、批量操作、刷新 |
 | 新建数据源 | 一条连接串、用户、口令；编辑也复用这个表单 |
 | 从 DBeaver 导入 | 扫描、过滤、勾选、导入 |
-| 运行时诊断 | Host 与 Python 的实时状态、工具数量、全局写开关、venv 与驱动版本；**重启 MCP** 按钮也在这里 |
 | 接入其它客户端 | HTTP 端点，以及可以一键写进配置的客户端 |
+| 运行时诊断 | Host 与 Python 的实时状态、工具数量、全局写开关、venv 与驱动版本；**重启 MCP** 按钮也在这里 |
 | 工具 | Python 服务发布的每个工具，带开关 |
 | 审计日志 | 最近十几次工具调用，按你的时区显示 |
 
@@ -174,174 +180,4 @@ plugin: dsh-db-mcp 0.8.0
 
 目录里的名字可能比左侧栏还长——光 GaussDB 就有 `global_plancache_status` 这类视图。过长的名字会截断并显示省略号，完整值放在悬停提示里；右边的类型药丸宽度不缩。面板窄到放不下两栏时，树会移到列清单上方，而不是把名字挤成两三个字。
 
-树的下方没有开关：读取从不按模式限制。限制的是写入，而且就在数据源行上选择 —— 见下面的 *可写模式*。
-
-## 四道安全闸门
-
-四条独立的闸门决定一条语句能不能写入：
-
-1. **全局开关** —— `<runtime>/settings.json` 里的 `allowWrite`，在 *运行时诊断* 标签切换。默认关闭；关闭期间所有写入都会以 `user_error` 拒绝，并提示去打开开关。
-2. **单源开关** —— 数据源上的 `readOnly`，默认开启。行上的开关可一键切换，开关旁边的字说明当前朝向。它是整行唯一的控件：模式名单、DDL 状态、密码损坏提示都只是普通文字，所以能点的东西和看起来能点的东西是同一件。
-3. **可写模式** —— 可写的数据源还要说明能写哪些模式。切换成可写时先问一遍，写到别处会被拒绝。这一行只在数据源确实可写时才显示模式名单：名单在切回只读后会保留，但锁着的行上挂着它，会让人以为那条权限正在生效。
-4. **DDL** —— 数据源上的 `allowDdl`，默认关闭。写数据和改结构是两件事：愿意接受 `insert` 的数据源，它的表结构可能并不归你管。关闭期间 `create`、`alter`、`drop`、`truncate`、`rename`、`grant`、`revoke` 在到达数据库之前就被拒绝，`insert`、`update`、`delete` 不受影响。这个开关和模式名单在同一个解锁对话框里一起问，行上还会用 *允许 DDL* 或 *禁止 DDL* 的文字标出答案，不打开任何东西就能看见。
-
-Python 服务在启动时读取全局开关，开关一动 Host 就重启它。在引擎允许的地方，只读还会在驱动层再拦一次（SQLite 用 `mode=ro`，PostgreSQL 用 `default_transaction_read_only`，MySQL 用 `SET SESSION TRANSACTION READ ONLY`）。
-
-## 可写模式
-
-读取不受限制：智能体能看登录有权限看到的每一个模式。写入不同 —— 接受写入的数据源必须点名它能写哪些模式。
-
-把某行从 *只读* 切到 *读写* 时会弹出对话框问它可以写到哪里。里面列出该数据源的模式，每个一个复选框，不需要手填。数据源已经在写的模式会一直留在列表里，即使目录里暂时查不到它。从没有过名单的数据源一开始一个都不勾；有过名单的会带着原来的勾选回来，因为切回只读会保留名单。至少勾选一个之前，**允许写** 按钮保持禁用。
-
-同一个对话框还会多问一句：**同时允许 DDL**。除非之前打开过，否则它是关闭的，而且含义就是字面意思 —— 没开启的数据源上 `create`、`alter`、`drop`、`truncate`、`rename`、`grant`、`revoke` 在到达数据库之前就被拒绝；`insert`、`update`、`delete` 无论开关如何都照常。这个开关只放宽*能跑哪些语句*，能落到哪里仍由上面勾选的模式决定，所以 DDL 开着时，指向名单之外的 `drop table` 照样被拒。
-
-之后也可以在 **编辑** → **更多设置** → *可写模式* 里改，用逗号分隔；DDL 开关就在旁边，叫 *允许 DDL*。两者都存在数据源上，所以对话框和表单始终一致。
-
-拦截发生在 Python 服务里，因此对智能体、HTTP 接口和面板都同样生效：
-
-- 一批语句里每一条都会检查；前面加 `--` 注释或用 `;` 拼接都藏不住。
-- 读取（`select`、`with`、`show`、`explain` 等）永远放行。
-- 写入会解析到它落到哪个模式 —— `insert into sales.orders`、`update "hr".employees`、`create table audit.log`、`create index i on sales.orders`、`grant … on sales.orders`、`call sales.recalc()`。
-- 改变数据库结构的语句在数据源没有开启 DDL 时一律拒绝；`truncate` 也算，因为它清空整张表，破坏力和 `drop` 一样彻底。
-- 不带模式名的目标按数据源自己的默认模式算：SQLite 是 `main`，MySQL 是配置的 database，其余是配置的 schema（Oracle 用用户名），PostgreSQL 没配时是 `public`。
-- 解析不出目标模式的语句一律拒绝，而不是放行。
-- 可写但没有名单的数据源拒绝一切写入；面板不会让它进入这种状态，但手改注册表可以。
-
-这是守卫，不是授权。它拦住智能体写到给定模式之外，真正的边界仍在数据库：能写 `hr.employees` 的登录，换个客户端照样能写。要硬限制，请同时给这个数据源一个更窄的 `GRANT`。
-
-已存口令是加密落盘的。`secrets.json` 里每个数据源存的是 AES-256-GCM 信封，密钥就在旁边的 `secret.key`（0600，首次使用时生成）。单独一份 `secrets.json` —— 备份、同步目录、贴进工单的文件 —— 不再带任何口令；把信封挪到别的数据源上也解不开，不会悄悄返回错的口令。以你的账号运行的程序仍能同时读到两个文件，所以面板在口令解不开时会在行上标 *已存口令无法解密*，让你重新输入。删掉 `secret.key` 可一次性让所有已存口令失效，这是最快的整体撤销方式。
-
-## 限制单个会话能访问的数据源
-
-可以把这个会话限制在部分数据源上。直接用自然语言说 —— *「本会话只用 pg-demo 和 oracle-demo」* —— 智能体会用这些标识符调用 `mcp__db__session_scope` 工具。不用填表，也不用改文件；标识符就是列表里每个名称下方显示的那一串。
-
-该会话存在限制时：
-
-- `list_datasources` 只返回允许的那几条；
-- 调用里写了别的数据源，会以 `user_error` 拒绝；
-- 调用里不写 `datasource`，会在只有一个允许项时自动用它，否则提示可用的标识符；
-- `test_connection` 不能用内联的连接串，否则会绕过名单。
-
-说 *「取消本会话的限制」*（或让工具用 `all: true`）即可解除。没有保存限制的会话仍然能访问全部数据源；*运行时诊断* 标签会列出被限制的会话，一眼可见。这个限制是会话级的便利开关，不是安全边界：运行时目录里的文件对你自己的账号始终可读。
-
-## 接入其它客户端
-
-Python 服务是标准 MCP stdio 服务，DSH 只是它的一个客户端。面板里的 **接入其它客户端** 标签会展示可用的连接地址，并替你把配置写进对方的配置文件。
-
-默认地址是 `http://127.0.0.1:8765/dsh-db-mcp`，随插件启动；端口可在该标签里改，地址带复制按钮。如果 Windows 拒绝首选端口，服务会自动换到下一个可用端口，标签里显示实际地址。
-
-**它只监听回环地址，而且没有鉴权。** 绑定地址写死为 `127.0.0.1`——启动动作只接受端口，不接受 host——所以别的机器连不上。但在本机上，任何能开 TCP 连接的进程都能调用 Python 服务发布的所有工具，包括 `execute_sql`。这就是本设计假定的信任边界，也正因如此，面板自己的请求才不需要 token。因此：不写数据时把全局写入开关关着，没有外部客户端连着时就在该标签里把端点停掉。只读标记与可写模式清单对从这里进来的调用照样生效，因为两者都在 Python 服务里强制执行。
-
-点一次「自动配置」，就会写入对应的配置文件：
-
-| 客户端 | 文件 | 写入内容 |
-| --- | --- | --- |
-| Visual Studio Code | Windows `%APPDATA%\Code\User\mcp.json`、macOS `~/Library/Application Support/Code/User/mcp.json`、Linux `~/.config/Code/User/mcp.json` | `servers` 下的 HTTP 条目 |
-| VS Code Insiders | 同上，目录换成 `Code - Insiders` | `servers` 下的 HTTP 条目 |
-| Cursor | `~/.cursor/mcp.json` | `mcpServers` 下的 HTTP 条目 |
-| JetBrains Air | `~/.jetbrains/mcp/mcp.json` | `mcpServers` 下的 HTTP 条目 |
-| Claude Code | `~/.claude.json` | `mcpServers` 下的 HTTP 条目 |
-| Claude Desktop | `%APPDATA%\Claude\claude_desktop_config.json` | stdio 条目（python + `server/main.py`） |
-| Codex CLI | `~/.codex/config.toml` | `[mcp_servers.dsh-db-mcp]` stdio 条目 |
-
-面板只列出「这个平台上确实有配置文件」的客户端，所以在 Linux 上不会出现 Claude Desktop，VS Code 的路径落在 `~/.config` 下。
-
-Claude Desktop 与 Codex 写的是 stdio 条目，不需要监听端口；其余几个用 HTTP 地址，看到的就是面板管理的同一个进程。所有客户端读同一份 `datasources.json` 与 `secrets.json`，在面板里加的数据源不用在客户端里重填（但要让 MCP 服务重启一次才会读到）。
-
-有两样东西只属于 DSH、这些客户端拿不到：审计日志（由插件的宿主半边写入）与会话级访问限制（依赖 DSH 的会话 id）。只读限制照旧生效，因为它写在 Python 里。
-
-**工具** 标签里有一张 **AI 可用的工具** 卡片：一个工具一行、带勾选框。取消勾选后插件就不再把它发布给模型，模型完全看不到它；Python 服务本身仍然通过 stdio/HTTP 提供这些工具，所以这个开关收窄的是 DSH 智能体的工具列表，而不是数据库的能力。`mcp__db__session_scope` 不在列表里：关掉它会让已经有范围限制的会话没法再解除限制。
-
-其中两行右侧带一个小数字框：`sample_rows` 与 `execute_sql`，表示模型没指定行数时的默认值（出厂 `20` 与 `200`，上限 `200` 与 `2000`）。模型仍然可以按上限之内要更大的数字，所以这是默认值而不是硬限制——硬上限在 Python 服务里（`DB_MCP_MAX_ROWS_HARD`）。
-
-想自己跑服务时，`server/main.py` 支持 `--stdio`（默认）、`--http`、`--sse`、`--host`、`--port`、`--path`（streamable-HTTP 路径，默认 `/dsh-db-mcp`），也认 `DB_MCP_TRANSPORT`、`DB_MCP_HOST`、`DB_MCP_PORT`、`DB_MCP_PATH`。
-
-## 审计日志
-
-每次 MCP 工具调用都会往 `<runtime>/logs/audit.jsonl`（0600）追加一行 JSON：时间、工具、数据源、耗时、行数、截断到 2000 字符的 SQL，以及失败时的错误。结果行本身从不记录。文件到 512 KiB 会轮转为 `audit.1.jsonl`，日志可用 `auditLog: false` 关闭。
-
-面板按 **你本机的时钟** 显示最近十几次记录，**带日期**，昨天和一小时前的调用不会混在一起；文件里保存的是 UTC，以便跨机器比较。悬停时显示同一时刻与时区。
-
-## 运行时目录
-
-```
-$DSH_HOME/db-mcp/
-  datasources.json   # 数据源与分组，从不含口令，0600
-  secrets.json       # 每个数据源的口令信封，0600，仅 Host 可读
-  secret.key         # 这些信封的密钥，0600，首次使用时生成
-  settings.json      # 全局写开关 + 审计开关，0600
-  sessions.json      # 按会话的数据源限制，0600
-  logs/mcp.log       # 脱敏日志
-  logs/audit.jsonl   # 每次 MCP 工具调用一行，512 KiB 轮转
-  .venv/             # 插件内 venv：mcp、psycopg、py-opengauss、PyMySQL、oracledb、cryptography
-```
-
-### 手工安装 Python 依赖
-
-*运行时诊断* 卡片里的 **安装 / 修复依赖** 按钮执行的就是下面两步。如果 Host
-访问不了包索引（比如代理只配在了你自己的终端里），或者你想看完整的 `pip`
-输出而不是最后几行，就自己跑这两条命令。
-
-```bat
-REM cmd.exe —— venv 只需建一次，之后重复执行 pip 安装
-python -m venv %USERPROFILE%\.dsh\db-mcp\.venv
-%USERPROFILE%\.dsh\db-mcp\.venv\Scripts\python.exe -m pip install --disable-pip-version-check -r %USERPROFILE%\.dsh\profiles\desktop\node_modules\dsh-db-mcp\server\requirements.txt
-```
-
-```powershell
-# PowerShell —— 同样两步
-python -m venv "$env:USERPROFILE\.dsh\db-mcp\.venv"
-& "$env:USERPROFILE\.dsh\db-mcp\.venv\Scripts\python.exe" -m pip install --disable-pip-version-check -r "$env:USERPROFILE\.dsh\profiles\desktop\node_modules\dsh-db-mcp\server\requirements.txt"
-```
-
-第一行每台机器只需要跑一次；升级之后值得重跑的是 `pip install` 那行。装在
-`web` profile 下就把路径里的 `desktop` 换成 `web`。如果你是用
-`dsh plugin add <源码目录>` 链接的开发版本，包目录就是那个源码目录，把 `-r`
-指向 `<源码目录>\server\requirements.txt` 即可 —— venv 仍然在
-`$DSH_HOME\db-mcp` 下。
-
-装完在同一张卡片点 **重启 MCP**（按钮会自动重启），依赖行应显示六个版本号、
-没有 `missing`。
-
-## 用 Docker 起测试库
-
-本机什么都不用装；下面每个引擎都是一个用完即弃的容器，带演示账号（`demo` / `dbmcp-demo`）。
-
-```sh
-# PostgreSQL —— 镜像最小、启动最快，推荐先试它
-docker run -d --name dbmcp-pg -p 5432:5432 \
-  -e POSTGRES_USER=demo -e POSTGRES_PASSWORD=dbmcp-demo -e POSTGRES_DB=demo \
-  postgres:15-alpine
-
-# MySQL
-docker run -d --name dbmcp-mysql -p 3306:3306 \
-  -e MYSQL_USER=demo -e MYSQL_PASSWORD=dbmcp-demo -e MYSQL_DATABASE=demo \
-  -e MYSQL_ROOT_PASSWORD=dbmcp-root mysql:8.0-debian
-
-# Oracle Free —— 几个 GB，需要一两分钟才健康
-docker run -d --name dbmcp-oracle -p 1521:1521 -e ORACLE_PASSWORD=dbmcp-demo \
-  gvenzl/oracle-free:23-slim
-```
-
-在 Windows 上，1521 常常落在 Hyper-V 的保留端口段里，`docker run` 会报 *"An attempt was made to access a socket in a way forbidden by its access permissions"*。用 `netsh interface ipv4 show excludedportrange protocol=tcp` 确认，然后映射到别的宿主端口，例如 `-p 11521:1521`，再把数据源指向 11521。
-
-然后用对应的连接串导入或新建数据源：
-
-```
-postgresql://demo:dbmcp-demo@127.0.0.1:5432/demo
-mysql://demo:dbmcp-demo@127.0.0.1:3306/demo
-oracle://system:dbmcp-demo@127.0.0.1:1521/FREEPDB1
-```
-
-## 排错
-
-| 现象 | 原因 | 处理 |
-| ---- | ---- | ---- |
-| 侧栏入口消失，插件卡片显示 *未安装* | `package.json` 带 UTF-8 BOM，Host 的 `JSON.parse` 失败，整个 bundle 被静默跳过 | 用编辑器另存为「UTF-8 无 BOM」，再到 **插件** 面板把插件关掉再打开 |
-| 面板显示 *Host 接口未连接* | Host 半边没挂载（插件被禁用，或 bundle 加载失败） | 检查插件卡片，然后刷新页面 |
-| 改了 `src/host.js` 但没有变化 | Cordis 入口在每个进程里只导入一次 | `POST /plugins/db-mcp/api/reload`；改过 `index.js` 则需重启 DSH |
-| 智能体看不到工具 | Python 服务没起来 | *运行时诊断* 里看工具数与错误，然后点 **重启 MCP** |
-| 重启后立刻报 `unknown tool "mcp__db__…"` | 工具注册随旧进程被释放 | 重启一次 DSH，之后的重启都用 **重启 MCP** |
-| Oracle 登录报 `DPY-6005` | 监听不可达，或主机/端口不对 | `docker ps` 确认容器，再点 *测试* |
-| 首次写入报 `ORA-01950` | Oracle 用户没有表空间配额 | `alter user <用户> quota unlimited on users` |
-| 导入行标红：*incomplete host/database* | 该 DBeaver 条目既没有字段也没有可解析的 URL | 先用 DBeaver 打开一次这个连接，或手工新建数据源 |
+树的下方没有开关：读取从不按模式限制。限制的是写入，而且就在数据源行上选择 —— 见 *[可写模式](safety.zh.md#可写模式)*。

@@ -2,9 +2,16 @@ English | [中文](guide.zh.md)
 
 # Guide
 
-Everything the panel can do, in the order you meet it. For the wire protocol and
-file formats see [reference.md](reference.md); for build and release see
-[development.md](development.md).
+Everything the panel can do, in the order you meet it. The rest is on its own page:
+
+- [safety.md](safety.md) — what may write, where, and which of those rules follow you
+  out of DSH
+- [clients.md](clients.md) — the HTTP endpoint, the tools list, running the server
+  yourself
+- [runtime.md](runtime.md) — the files on disk, the Python dependencies, Docker test
+  databases, troubleshooting
+- [reference.md](reference.md) — the wire protocol and the file formats
+- [development.md](development.md) — build, test and release
 
 ## The whole path, on one page
 
@@ -84,7 +91,8 @@ If pnpm answers `Already up to date`, name the version to force the move:
 Nothing you configured is at risk: sources, saved passwords, settings and the audit
 log live in `~/.dsh/db-mcp`, outside the package.
 
-If the sidebar entry disappears after a restart, see [Troubleshooting](#troubleshooting).
+If the sidebar entry disappears after a restart, see
+[Troubleshooting](runtime.md#troubleshooting).
 
 ## The panel
 
@@ -98,8 +106,8 @@ the source all live there. Below the masthead, seven tabs:
 | Data source list | the registry: health strip, search, group chips, rows grouped by label, bulk actions, refresh |
 | New data source | one connection string, user, password; also used for editing |
 | Import from DBeaver | scan, tick, import |
-| Runtime | Host facts, tool count, global write switch, venv and driver versions |
 | Connect | the HTTP endpoint and the outside agents it can be written into |
+| Runtime | Host facts, tool count, global write switch, venv and driver versions |
 | Tools | every tool the Python server publishes, with its on/off switch |
 | Audit log | the last dozen tool calls, converted to your time zone |
 
@@ -278,279 +286,5 @@ panel is too narrow for two columns, the tree moves above the column list instea
 of squeezing the names.
 
 Below the tree there is nothing to switch: reads are never limited by schema.
-Writes are, and they are chosen on the row itself — see *Writable schemas* below.
-
-## Safety switches
-
-Four independent gates decide whether a statement may write:
-
-1. **Global switch** — `allowWrite` in `<runtime>/settings.json`, toggled on the
-   *Runtime* tab. Off by default; while off every write is refused with
-   `user_error` and a hint pointing at the switch.
-2. **Per-source flag** — `readOnly` on the source, on by default. A switch on the
-   row flips it in one click, and the word beside the switch says which way it is
-   set. It is the only control on a row: everything else there — the schema list,
-   the DDL state, a broken secret — is plain text, so the thing that can be
-   operated is the thing that looks operable.
-3. **Writable schemas** — a writable source also says which schemas it may write
-   to. Turning it writable asks first, and a statement aimed anywhere else is
-   refused. The row shows that list only while the source is writable: the list
-   survives a switch back to read-only, but a note on a locked row would claim a
-   permission that is not in force.
-4. **DDL** — `allowDdl` on the source, off by default. Writing rows and changing
-   the shape of the database are different decisions: a source that is happy to
-   take an `insert` may still be one whose tables belong to somebody else. While
-   it is off, `create`, `alter`, `drop`, `truncate`, `rename`, `grant` and
-   `revoke` are refused before they reach the database; `insert`, `update` and
-   `delete` are unaffected. The switch is asked for in the same unlock dialog,
-   and the row carries a *DDL allowed* or *DDL blocked* note so the answer is
-   visible without opening anything.
-
-The Python server reads the global flag at start-up and the host restarts it
-whenever the switch flips. Read-only is enforced again at the driver where the
-engine allows it (`mode=ro` for SQLite, `default_transaction_read_only` for
-PostgreSQL, `SET SESSION TRANSACTION READ ONLY` for MySQL).
-
-## Writable schemas
-
-Reads stay unrestricted: the agent can look at every schema the login can see. A
-write is different — a source that accepts writes has to name the schemas it may
-write to.
-
-Flip a row from *read-only* to *writable* and a dialog asks where it may write. It
-lists the schemas of that source with one checkbox each — nothing to type. A schema
-the source already writes to stays on the list even when the catalog no longer
-shows it. Nothing is preselected on a source that never had a list; a source that
-had one comes back with the same boxes ticked, because switching back to read-only
-keeps the list. **Allow writes** stays disabled until at least one box is ticked.
-
-The same dialog carries one more question: **Also allow DDL**. It is off unless it
-was turned on before, and it means what it says — `create`, `alter`, `drop`,
-`truncate`, `rename`, `grant` and `revoke` are refused on a source that has not
-opted in, before the statement reaches the database. `insert`, `update` and
-`delete` keep working either way. The switch only widens *which statements* may
-run; the schemas ticked above still bound *where* they may land, so a `drop table`
-aimed outside the list is refused even with DDL on.
-
-The same names can be edited later in **Edit** → **More settings** → *Writable
-schemas*, comma separated; the DDL switch sits next to them as *Allow DDL*. Both
-are stored on the source, so the dialog and the form always agree.
-
-The guard runs in the Python server, which means it covers the agent, the HTTP
-endpoint and the panel alike:
-
-- Every statement in a batch is checked; a leading `--` comment or a `;` does not
-  hide one.
-- Reads (`select`, `with`, `show`, `explain`, …) always pass.
-- A write is resolved to the schema it lands on — `insert into sales.orders`,
-  `update "hr".employees`, `create table audit.log`, `create index i on
-  sales.orders`, `grant … on sales.orders`, `call sales.recalc()`.
-- A statement that changes the shape of the database is refused unless the source
-  allows DDL; `truncate` counts, because it empties a table just as thoroughly as
-  `drop` would.
-- An unqualified target takes the source's own default: `main` for SQLite, the
-  configured database for MySQL, the configured schema (or the Oracle user) for
-  the rest, and `public` for PostgreSQL when nothing is set.
-- A statement whose target cannot be read is refused, not allowed through.
-- A source that is writable with no list at all refuses every write; the panel
-  will not put it in that state, but a hand-edited registry can.
-
-This is a guard, not a grant. It keeps the agent from writing outside the schemas
-it was given, but the real boundary stays in the database: a login that can write
-`hr.employees` can still do it over any other client. For a hard limit, give the
-source a narrower `GRANT` as well.
-
-Stored passwords are encrypted at rest. `secrets.json` holds an AES-256-GCM
-envelope per source and the key lives beside it in `secret.key` (mode `0600`,
-created on first use). A copy of `secrets.json` alone — a backup, a sync folder, a
-file pasted into an issue — no longer carries any password, and an envelope moved
-onto another source fails to decrypt instead of handing back the wrong one.
-Anything running as your user can still read both files, so the panel tells you
-when a stored password cannot be decrypted (*stored password unreadable* on the
-row) and asks you to type it again. Deleting `secret.key` makes every stored
-password unreadable at once, which is the fastest way to revoke them all.
-
-## Limiting one conversation
-
-A conversation can be narrowed to a subset of sources. Ask the assistant in plain
-words — *"in this conversation only use pg-demo and oracle-demo"* — and it calls the
-`mcp__db__session_scope` tool with those identifiers. Nothing new to fill in, no file
-to edit; the identifiers are the ones the list shows under each name.
-
-While a limit is saved for that conversation:
-
-- `list_datasources` only returns the allowed rows;
-- a call that names another source is refused with `user_error`;
-- a call that leaves `datasource` out either uses the single allowed source or
-  reports which identifiers are available;
-- `test_connection` cannot be used with an inline connection string, because that
-  would go around the list.
-
-Say *"stop limiting this conversation"* (or call the tool with `all: true`) and the
-limit is removed. Conversations with no saved limit keep access to every source, and
-the *Runtime* tab lists the conversations that are limited so you can see it at a
-glance. The limit is a per-conversation convenience, not a security boundary: the
-files under the runtime directory stay readable by your account.
-
-## Connect another agent
-
-The Python server speaks MCP over stdio, so DSH is only one of the clients that can
-use it. The **Connect** tab in the panel shows the address other agents can point at
-and writes their configuration for you.
-
-The endpoint is `http://127.0.0.1:8765/dsh-db-mcp` by default. It starts with the plugin, the
-port can be changed in that tab, and the address has a copy button. If Windows refuses
-the preferred port, the server moves to the next free one and the tab shows where it
-landed.
-
-**It listens on loopback and has no authentication.** The bind address is fixed at
-`127.0.0.1` — the start action takes a port, never a host — so no other machine can
-reach it. On this machine, though, any process that can open a TCP socket can call
-every tool the Python server publishes, `execute_sql` included. That is the trust
-boundary this design assumes, and it is the same one that lets the panel's own requests
-through without a token. So: keep the global write switch closed while you are not
-using writes, and stop the endpoint from that tab when no outside client is connected.
-The read-only flag and the writable-schema list still apply to everything that arrives
-this way, because both are enforced in the Python server.
-
-One click writes the entry into each client's own configuration file:
-
-| Client | File | What is written |
-| --- | --- | --- |
-| Visual Studio Code | `%APPDATA%\Code\User\mcp.json` (Windows), `~/Library/Application Support/Code/User/mcp.json` (macOS), `~/.config/Code/User/mcp.json` (Linux) | HTTP entry under `servers` |
-| VS Code Insiders | the same path with `Code - Insiders` | HTTP entry under `servers` |
-| Cursor | `~/.cursor/mcp.json` | HTTP entry under `mcpServers` |
-| JetBrains Air | `~/.jetbrains/mcp/mcp.json` | HTTP entry under `mcpServers` |
-| Claude Code | `~/.claude.json` | HTTP entry under `mcpServers` |
-| Claude Desktop | `%APPDATA%\Claude\claude_desktop_config.json` | stdio entry (python + `server/main.py`) |
-| Codex CLI | `~/.codex/config.toml` | `[mcp_servers.dsh-db-mcp]` stdio entry |
-
-The panel only lists a client when this platform has a configuration file for it,
-so on Linux Claude Desktop is absent and VS Code resolves under `~/.config`.
-
-Claude Desktop and Codex get a stdio entry instead of a URL because that form needs no
-listening port; the rest take the HTTP address so they always see the same
-process the panel manages. Every client reads the same `datasources.json` and
-`secrets.json`, so a source added in the panel shows up everywhere without a restart
-of the client — only of the MCP server itself.
-
-Two things are DSH-only and are **not** available to those clients: the audit log
-(written by the plugin's host half) and the per-conversation limit (it keys off the
-DSH conversation id). Read-only enforcement still applies, because it lives in Python.
-
-The **Tools** tab shows **Tools the agent sees** — one row per tool with
-a checkbox. Unchecking a tool stops the plugin from publishing it, so the model never
-sees it; the Python server still offers it over stdio/HTTP, which means the switch trims
-the DSH agent's tool list rather than the database's capabilities. `mcp__db__session_scope`
-is not on the list: switching it off would strand a conversation that already has a limit.
-
-Two rows carry a small number box: `sample_rows` and `execute_sql`. It is the row count the
-agent gets when it does not ask for one (`20` and `200` out of the box, capped at `200` and
-`2000`). The model can still pass a larger number up to that cap, so this is a default, not
-a hard limit — the hard cap lives in the Python server (`DB_MCP_MAX_ROWS_HARD`).
-
-To run the server yourself, `server/main.py` accepts `--stdio` (default), `--http`,
-`--sse`, `--host`, `--port` and `--path` (the streamable-HTTP path, `/dsh-db-mcp` by
-default), and the same values through `DB_MCP_TRANSPORT`, `DB_MCP_HOST`, `DB_MCP_PORT`
-and `DB_MCP_PATH`.
-
-## Audit log
-
-Every MCP tool call appends one JSON line to `<runtime>/logs/audit.jsonl` (0600):
-time, tool, source, duration, row count, the SQL truncated to 2000 characters, and
-the error when it failed. Result rows are never logged. The file rotates to
-`audit.1.jsonl` at 512 KiB and logging can be switched off with `auditLog: false`.
-
-The panel shows the last dozen entries **on your own clock**, date included, so a
-call from yesterday is not mistaken for one from an hour ago; the file keeps UTC so
-it stays comparable across machines. Each stamp carries the same instant with its
-zone in the tooltip.
-
-## Runtime layout
-
-```
-$DSH_HOME/db-mcp/
-  datasources.json   # sources and groups, never passwords, 0600
-  secrets.json       # per-source password envelope, 0600, Host-only
-  secret.key         # key for those envelopes, 0600, created on first use
-  settings.json      # global write switch + audit switch, 0600
-  sessions.json      # per-conversation source limits, 0600
-  logs/mcp.log       # masked log
-  logs/audit.jsonl   # one line per MCP tool call, rotates at 512 KiB
-  .venv/             # plugin-local venv: mcp, psycopg, py-opengauss, PyMySQL, oracledb, cryptography
-```
-
-### Installing the Python dependencies by hand
-
-**Install / repair dependencies** in the *Runtime* card runs exactly two
-commands. Run them yourself when the Host cannot reach the package index
-(a proxy only your shell knows), or when you want the full `pip` output instead
-of the last few lines.
-
-```bat
-REM cmd.exe — create the venv once, then install / repair
-python -m venv %USERPROFILE%\.dsh\db-mcp\.venv
-%USERPROFILE%\.dsh\db-mcp\.venv\Scripts\python.exe -m pip install --disable-pip-version-check -r %USERPROFILE%\.dsh\profiles\desktop\node_modules\dsh-db-mcp\server\requirements.txt
-```
-
-```powershell
-# PowerShell — same two steps
-python -m venv "$env:USERPROFILE\.dsh\db-mcp\.venv"
-& "$env:USERPROFILE\.dsh\db-mcp\.venv\Scripts\python.exe" -m pip install --disable-pip-version-check -r "$env:USERPROFILE\.dsh\profiles\desktop\node_modules\dsh-db-mcp\server\requirements.txt"
-```
-
-Only the first line is once-per-machine; the `pip install` line is the one worth
-re-running after an upgrade. Swap `desktop` for `web` if you installed into the
-web profile. If you linked a source checkout with `dsh plugin add <path>`, the
-package lives in that directory instead, so point `-r` at
-`<path>\server\requirements.txt` — the venv stays under `$DSH_HOME\db-mcp`.
-
-When it finishes, press **Restart MCP** in the same card (the button does this
-for you) and the dependency line should read six versions with no `missing`.
-
-## Test databases in Docker
-
-Nothing has to be installed on the host; each engine below is a throwaway
-container with a demo account (`demo` / `dbmcp-demo`).
-
-```sh
-# PostgreSQL — smallest and fastest, the recommended first target
-docker run -d --name dbmcp-pg -p 5432:5432 \
-  -e POSTGRES_USER=demo -e POSTGRES_PASSWORD=dbmcp-demo -e POSTGRES_DB=demo \
-  postgres:15-alpine
-
-# MySQL
-docker run -d --name dbmcp-mysql -p 3306:3306 \
-  -e MYSQL_USER=demo -e MYSQL_PASSWORD=dbmcp-demo -e MYSQL_DATABASE=demo \
-  -e MYSQL_ROOT_PASSWORD=dbmcp-root mysql:8.0-debian
-
-# Oracle Free — several GB, a minute or two to become healthy
-docker run -d --name dbmcp-oracle -p 1521:1521 -e ORACLE_PASSWORD=dbmcp-demo \
-  gvenzl/oracle-free:23-slim
-```
-
-On Windows, 1521 often falls inside a Hyper-V reserved port block and `docker run`
-fails with *"An attempt was made to access a socket in a way forbidden by its access
-permissions"*. Check `netsh interface ipv4 show excludedportrange protocol=tcp` and
-publish another host port, e.g. `-p 11521:1521`; point the datasource at 11521.
-
-Then import or create a source with the matching string:
-
-```
-postgresql://demo:dbmcp-demo@127.0.0.1:5432/demo
-mysql://demo:dbmcp-demo@127.0.0.1:3306/demo
-oracle://system:dbmcp-demo@127.0.0.1:1521/FREEPDB1
-```
-
-## Troubleshooting
-
-| Symptom | Cause | Fix |
-| ------- | ----- | --- |
-| Sidebar entry gone, plugin card says *not installed* | `package.json` carries a UTF-8 BOM, so the host's `JSON.parse` fails and the bundle is skipped silently | rewrite the file without a BOM (any editor's "UTF-8 without BOM"), then toggle the plugin off and on in the **Plugins** panel |
-| Panel says *Host interface disconnected* | the Host half is not mounted (plugin disabled, or bundle failed to load) | check the plugin card, then reload the page |
-| Edited `src/host.js` but nothing changed | the Cordis entry is imported once per process | `POST /plugins/db-mcp/api/reload`, or restart DSH after changing `index.js` |
-| Tools missing from the agent | the Python server never started | *Runtime* → tools count and error; then **Restart MCP** in that card |
-| `unknown tool "mcp__db__…"` right after a restart | tool registration was disposed with the old process | restart DSH once, then drive restarts from **Restart MCP** under *Runtime* |
-| Oracle login fails with `DPY-6005` | listener unreachable, or host/port wrong | `docker ps`, then *Test* again |
-| `ORA-01950` on first write | Oracle user has no tablespace quota | `alter user <user> quota unlimited on users` |
-| Import row red: *incomplete host/database* | the DBeaver entry has neither fields nor a parsable URL | open the connection in DBeaver once, or create the source by hand |
+Writes are, and they are chosen on the row itself — see
+*[Writable schemas](safety.md#writable-schemas)*.
