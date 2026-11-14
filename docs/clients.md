@@ -55,7 +55,7 @@ Two things are DSH-only and are **not** available to those clients: the audit lo
 DSH conversation id). Read-only enforcement still applies, because it lives in Python.
 
 The **Tools** tab shows **Tools the agent sees** — one row per tool with
-a checkbox. Unchecking a tool stops the plugin from publishing it, so the model never
+a switch. Switching a tool off stops the plugin from publishing it, so the model never
 sees it; the Python server still offers it over stdio/HTTP, which means the switch trims
 the DSH agent's tool list rather than the database's capabilities. `mcp__db__session_scope`
 is not on the list: switching it off would strand a conversation that already has a limit.

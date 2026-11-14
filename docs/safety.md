@@ -55,7 +55,7 @@ the host half can apply to one. That line is the whole table:
 | Per-conversation limit (`mcp__db__session_scope`) | Host, keyed by the DSH conversation id | yes | no — an outside client has no conversation to key off |
 | Audit log | Host, written by the wrapper around each tool call | yes | no — outside calls leave no line in `logs/audit.jsonl` |
 | Row-count defaults (`sample_rows`, `execute_sql` in the panel) | Host, injected into the arguments before the call | yes | no — but the server's own hard cap still applies |
-| Unchecked rows on the *Tools* tab | Host, filtered when the tools are registered | yes | no — the Python server still publishes every tool |
+| Rows switched off on the *Tools* tab | Host, filtered when the tools are registered | yes | no — the Python server still publishes every tool |
 
 Two consequences worth knowing:
 

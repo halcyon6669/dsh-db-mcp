@@ -448,6 +448,34 @@ check('audit sql: it reads as primary ink, not a hint', /color: var\(--dsw-alias
 check('audit sql: a brand rule marks the left edge', /border-left: 3px solid color-mix\(in srgb, var\(--dsw-alias-brand-primary\)/.test(auditSqlRule))
 check('audit sql: a failed call turns that rule red', /\.is-error \{[^}]*border-left-color: color-mix\(in srgb, var\(--dsw-alias-state-error-primary\)/.test(auditSqlRule))
 
+// The tools card used to answer with a checkbox while every other on/off in the
+// panel was a track switch. Same control now, so "on" looks the same everywhere;
+// the checkbox class is gone rather than left behind unused.
+const toolRule = source.slice(source.indexOf('      .dbmcp-tool {'), source.indexOf('      .dbmcp-card-head {'))
+check('tools card: the checkbox styling is gone', !/\.dbmcp-tool-pick\s*\{/.test(source))
+check(
+  'tools card: the row switch reuses the panel switch',
+  /\.dbmcp-tool \.dbmcp-switch \{/.test(toolRule),
+  (toolRule.match(/\.dbmcp-tool \.dbmcp-switch \{[^}]*\}/) || [''])[0].replace(/\s+/g, ' '),
+)
+check('tools card: rows are the height of one line of text', /padding: 4px 9px/.test(toolRule), toolRule.slice(0, 60))
+const toolsCard = source.slice(source.indexOf('const renderTools = ()'), source.indexOf('let body'))
+check('tools card: each row flips through the switch component', /h\(Switch, \{/.test(toolsCard), toolsCard.slice(0, 60))
+check('tools card: no checkbox input is left in the row', !/className: 'dbmcp-tool-pick'/.test(source))
+// The list is the one setting on this page that an outside client never feels:
+// the filter runs in the Host, so HTTP clients still see every tool. The card
+// has to say that itself rather than rely on the safety page.
+check(
+  'tools card: it says the list is DSH-only',
+  /className: 'dbmcp-hint is-scope' \}, t\('tools\.dshOnly'\)/.test(toolsCard),
+)
+check(
+  'tools card: the DSH-only note names the other path',
+  /tools\.dshOnly'/.test(source) &&
+    /HTTP endpoint still sees every tool/.test(source) &&
+    /接入 HTTP 端点的客户端仍然能看到全部工具/.test(source),
+)
+
 check(
   'import filter matches name/host/user',
   connectionMatches({ name: 'mysql', target: '127.0.0.1:3306 / demo', user: 'demo' }, 'demo') === true &&

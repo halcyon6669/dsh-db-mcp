@@ -114,10 +114,13 @@ window.__ModuleLoader__.load({
         'clients.noFile': 'not detected',
         'clients.stdioNote': 'Claude Desktop and Codex get a stdio entry (python + this server), so they keep working even when the HTTP endpoint is stopped.',
         'tools.title': 'Tools the agent sees',
-        'tools.hint': 'Uncheck a tool to take it away from the model; the switch applies on the next restart of the MCP server.',
+        'tools.hint': 'Switch a tool off to take it away from the agent; the change applies on the next restart of the MCP server.',
+        'tools.dshOnly': 'This list is DSH only. A client connected to the HTTP endpoint still sees every tool — the Python server publishes all of them, and the filter lives in the plugin.',
         'tools.offCount': '{n} tool(s) switched off.',
         'tools.on': '{name} is on.',
         'tools.off': '{name} is off.',
+      'tools.enable': 'Turn on',
+      'tools.disable': 'Turn off',
       'tools.rows': 'rows',
       'tools.limitLabel': 'Default rows for {argument}',
       'tools.limitHint': 'Rows used when the agent does not ask for a number (1-{max}).',
@@ -392,10 +395,13 @@ window.__ModuleLoader__.load({
         'clients.noFile': '未检测到',
         'clients.stdioNote': 'Claude Desktop 与 Codex 写入的是 stdio 配置（python + 本服务），所以即使 HTTP 端点停掉它们也能用。',
         'tools.title': 'AI 可用的工具',
-        'tools.hint': '取消勾选就把这个工具从模型的工具列表里摘掉，下次重启 MCP 服务后生效。',
+        'tools.hint': '把工具关掉就从智能体看到的工具列表里摘掉它，下次重启 MCP 服务后生效。',
+        'tools.dshOnly': '这份清单只对 DSH 生效。接入 HTTP 端点的客户端仍然能看到全部工具 —— Python 服务照旧发布它们，过滤发生在插件这一侧。',
         'tools.offCount': '已关闭 {n} 个工具。',
         'tools.on': '已开启 {name}。',
         'tools.off': '已关闭 {name}。',
+      'tools.enable': '打开',
+      'tools.disable': '关掉',
       'tools.rows': '行',
       'tools.limitLabel': '{argument} 的默认行数',
       'tools.limitHint': '模型没指定行数时默认返回多少行（1-{max}）。',
@@ -1090,8 +1096,8 @@ window.__ModuleLoader__.load({
         display: flex;
         flex-wrap: wrap;
         align-items: center;
-        gap: 8px;
-        padding: 6px 10px 8px;
+        gap: 6px 8px;
+        padding: 4px 10px 5px;
         border: 1px solid var(--dsw-alias-border-l1);
         border-radius: 10px;
         background: var(--dsw-alias-bg-layer-1);
@@ -1131,14 +1137,14 @@ window.__ModuleLoader__.load({
       .dbmcp-audit-sql {
         display: block;
         width: 100%;
-        margin-top: 2px;
-        padding: 7px 10px;
+        margin-top: 1px;
+        padding: 5px 9px;
         border-left: 3px solid color-mix(in srgb, var(--dsw-alias-brand-primary) 55%, transparent);
         border-radius: 4px 8px 8px 4px;
         background: var(--dsw-alias-bg-base);
         font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
         font-size: 12.5px;
-        line-height: 1.6;
+        line-height: 1.45;
         color: var(--dsw-alias-label-primary);
         white-space: pre-wrap;
         overflow-wrap: anywhere;
@@ -1473,9 +1479,9 @@ window.__ModuleLoader__.load({
       }
       .dbmcp-tool {
         display: flex;
-        align-items: flex-start;
-        gap: 10px;
-        padding: 6px 9px;
+        align-items: center;
+        gap: 9px;
+        padding: 4px 9px;
         border: 1px solid var(--dsw-alias-border-l1);
         border-radius: 9px;
         background: var(--dsw-alias-bg-layer-1);
@@ -1487,12 +1493,14 @@ window.__ModuleLoader__.load({
         border-color: var(--dsw-alias-border-l2);
         background: var(--dsw-alias-bg-layer-2);
       }
-      .dbmcp-tool.is-off {
+      .dbmcp-tool.is-off .dbmcp-tool-main {
         opacity: 0.6;
       }
-      .dbmcp-tool-pick {
-        margin: 2px 0 0;
-        flex: 0 0 auto;
+      /* Same control as the global write switch, so "on" looks the same on both
+         pages. It sits where the checkbox used to, and the row itself still
+         toggles: the switch stops propagation, so a click on it is one flip. */
+      .dbmcp-tool .dbmcp-switch {
+        margin-left: 1px;
       }
       .dbmcp-tool-limit {
         flex: 0 0 96px;
@@ -1504,7 +1512,7 @@ window.__ModuleLoader__.load({
       }
       .dbmcp-tool-limit .dbmcp-limit {
         width: 72px;
-        padding: 3px 6px;
+        padding: 2px 6px;
         font-size: 12px;
         text-align: center;
         font-variant-numeric: tabular-nums;
@@ -1513,17 +1521,19 @@ window.__ModuleLoader__.load({
       .dbmcp-tool-main {
         display: flex;
         flex-direction: column;
-        gap: 1px;
+        gap: 0;
         min-width: 0;
         flex: 1 1 auto;
       }
       .dbmcp-tool-name {
         font-family: var(--dbmcp-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
         font-size: 12px;
+        line-height: 1.4;
         color: var(--dsw-alias-label-primary);
       }
       .dbmcp-tool-desc {
         font-size: 12px;
+        line-height: 1.35;
         color: var(--dsw-alias-label-secondary);
         overflow: hidden;
         text-overflow: ellipsis;
@@ -2584,6 +2594,14 @@ window.__ModuleLoader__.load({
         font-size: 12px;
         color: var(--dsw-alias-label-secondary);
         line-height: 1.4;
+      }
+      /* The tools list is the one switch on this page that an outside client
+         never feels, so it says so where the switch is rather than only in the
+         safety page. A hanging rule keeps it readable as a caveat. */
+      .dbmcp-hint.is-scope {
+        margin: 8px 0 10px;
+        padding-left: 8px;
+        border-left: 2px solid var(--dsw-alias-border-l2);
       }
       .dbmcp-check {
         display: flex;
@@ -5592,23 +5610,29 @@ function groupTables(tables) {
             ),
           },
           h('p', { className: 'dbmcp-hint' }, t('tools.hint')),
+          h('p', { className: 'dbmcp-hint is-scope' }, t('tools.dshOnly')),
           h(
             'div',
             { className: 'dbmcp-tools' },
             (tools && tools.tools ? tools.tools : []).map((tool) =>
               h(
-                'label',
+                'div',
                 {
                   key: tool.name,
                   className: tool.enabled ? 'dbmcp-tool' : 'dbmcp-tool is-off',
                   title: tool.description || tool.name,
+                  /* The whole row flips, the way the old label did. The switch
+                     stops its own click, and the number box stops its, so a
+                     click either lands on exactly one control or on the row. */
+                  onClick: () => {
+                    if (!busy) void toggleTool(tool.name, tool.enabled === false)
+                  },
                 },
-                h('input', {
-                  type: 'checkbox',
-                  className: 'dbmcp-tool-pick',
+                h(Switch, {
                   checked: tool.enabled !== false,
+                  title: tool.enabled !== false ? t('tools.disable') : t('tools.enable'),
                   disabled: busy,
-                  onChange: (event) => toggleTool(tool.name, event.target.checked),
+                  onChange: (next) => toggleTool(tool.name, next),
                 }),
                 h(
                   'div',
@@ -5632,6 +5656,7 @@ function groupTables(tables) {
                         value: limitDraft[tool.limit.key] !== undefined ? limitDraft[tool.limit.key] : tool.limit.value,
                         'aria-label': fmt(t('tools.limitLabel'), { argument: tool.limit.argument }),
                         disabled: busy,
+                        onClick: (event) => event.stopPropagation(),
                         onChange: (event) => setLimitDraft({ ...limitDraft, [tool.limit.key]: event.target.value }),
                         onBlur: () => commitLimit(tool.limit),
                         onKeyDown: (event) => {
