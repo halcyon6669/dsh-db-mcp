@@ -139,10 +139,10 @@ try {
   const clients = await get('/clients')
   const ids = (clients.body?.clients || []).map((item) => item.id)
   // Only the clients this platform can actually write are listed.
-  const portable = ['cursor', 'claude-code', 'codex']
+  const portable = ['cursor', 'jetbrains-air', 'claude-code', 'codex']
   const expected =
     process.platform === 'win32' || process.platform === 'darwin'
-      ? ['vscode', 'vscode-insiders', ...portable.slice(0, 2), 'claude-desktop', portable[2]]
+      ? ['vscode', 'vscode-insiders', ...portable.slice(0, 3), 'claude-desktop', portable[3]]
       : ['vscode', 'vscode-insiders', ...portable]
   check(
     'the client list covers the supported agents',
@@ -153,6 +153,12 @@ try {
     'Claude Code and Codex are both offered',
     ids.includes('claude-code') && ids.includes('codex'),
     ids.join(','),
+  )
+  const air = (clients.body?.clients || []).find((item) => item.id === 'jetbrains-air')
+  check(
+    'JetBrains Air is offered and points at its own mcp.json',
+    Boolean(air) && air.file.endsWith(join('.jetbrains', 'mcp', 'mcp.json')) && air.shape === 'mcpServers',
+    JSON.stringify(air),
   )
   check(
     'each client knows its config file',

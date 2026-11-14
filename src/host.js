@@ -1292,6 +1292,14 @@ export function createHost(options = {}) {
     }
 
     list.push({ id: 'cursor', label: 'Cursor', shape: 'mcpServers', file: join(home, '.cursor', 'mcp.json') })
+    // JetBrains Air keeps every agent's servers in one file under the JetBrains
+    // home, and takes the same { type, url } entry as Cursor.
+    list.push({
+      id: 'jetbrains-air',
+      label: 'JetBrains Air',
+      shape: 'mcpServers',
+      file: join(home, '.jetbrains', 'mcp', 'mcp.json'),
+    })
     list.push({ id: 'claude-code', label: 'Claude Code', shape: 'mcpServers', file: join(home, '.claude.json') })
 
     // Claude Desktop ships on Windows and macOS only.

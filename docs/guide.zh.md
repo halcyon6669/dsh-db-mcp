@@ -235,13 +235,14 @@ Python 服务是标准 MCP stdio 服务，DSH 只是它的一个客户端。面�
 | Visual Studio Code | Windows `%APPDATA%\Code\User\mcp.json`、macOS `~/Library/Application Support/Code/User/mcp.json`、Linux `~/.config/Code/User/mcp.json` | `servers` 下的 HTTP 条目 |
 | VS Code Insiders | 同上，目录换成 `Code - Insiders` | `servers` 下的 HTTP 条目 |
 | Cursor | `~/.cursor/mcp.json` | `mcpServers` 下的 HTTP 条目 |
+| JetBrains Air | `~/.jetbrains/mcp/mcp.json` | `mcpServers` 下的 HTTP 条目 |
 | Claude Code | `~/.claude.json` | `mcpServers` 下的 HTTP 条目 |
 | Claude Desktop | `%APPDATA%\Claude\claude_desktop_config.json` | stdio 条目（python + `server/main.py`） |
 | Codex CLI | `~/.codex/config.toml` | `[mcp_servers.dsh-db-mcp]` stdio 条目 |
 
 面板只列出「这个平台上确实有配置文件」的客户端，所以在 Linux 上不会出现 Claude Desktop，VS Code 的路径落在 `~/.config` 下。
 
-Claude Desktop 与 Codex 写的是 stdio 条目，不需要监听端口；另外三个用 HTTP 地址，看到的就是面板管理的同一个进程。所有客户端读同一份 `datasources.json` 与 `secrets.json`，在面板里加的数据源不用在客户端里重填（但要让 MCP 服务重启一次才会读到）。
+Claude Desktop 与 Codex 写的是 stdio 条目，不需要监听端口；其余几个用 HTTP 地址，看到的就是面板管理的同一个进程。所有客户端读同一份 `datasources.json` 与 `secrets.json`，在面板里加的数据源不用在客户端里重填（但要让 MCP 服务重启一次才会读到）。
 
 有两样东西只属于 DSH、这些客户端拿不到：审计日志（由插件的宿主半边写入）与会话级访问限制（依赖 DSH 的会话 id）。只读限制照旧生效，因为它写在 Python 里。
 
