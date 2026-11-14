@@ -38,6 +38,26 @@ are `GET`; every mutation is `POST` (the same-origin check compares `Origin` wit
 | `POST /mcp/call` | dev helper: call one MCP tool through the panel |
 | `POST /reload` | dev helper: re-import `src/host.js` without restarting DSH |
 
+### The MCP HTTP endpoint
+
+`POST /http/start` takes `{ port }` only. The host is fixed at `127.0.0.1` in
+`startHttp` (`src/tools.js`), so the endpoint is unreachable from another machine and
+cannot be widened through the panel or through `settings.json`.
+
+It has no authentication. Every route above sits behind the same-origin check, but
+the MCP endpoint does not: any process on this machine that can open a TCP socket to
+the port can speak JSON-RPC to it and call every tool the Python server publishes,
+`execute_sql` included. Treat loopback as the boundary.
+
+What still applies is everything the Python server enforces on arrival: the read-only
+flag, `writableSchemas`, the row caps (`DB_MCP_MAX_ROWS`, `DB_MCP_MAX_ROWS_HARD`) and
+`DB_MCP_ALLOW_WRITE`, which the Host passes at spawn time from the global write switch.
+What does **not** apply is the disabled-tool list: `disabledTools` is filtered in the
+Host when it registers `mcp__db__*` with DSH, so it narrows the agent's tool list only
+and an outside client still sees every tool. Stopping the endpoint (`POST /http/stop`)
+or setting `httpEnabled: false` closes it without affecting the stdio path DSH itself
+uses.
+
 ### Status codes
 
 | Code | Meaning |
