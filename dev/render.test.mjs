@@ -303,6 +303,78 @@ check(
   showsWritable({ readOnly: false, writableSchemas: ['', '  '] }) === false,
 )
 
+// A row carries several status words and exactly one control. The control is a
+// track switch, because a bordered pill with "read-only" on it read as one more
+// label: nothing told the pointer where it could press until hover.
+const { Switch } = mod.__test
+const offSwitch = Switch({ t, checked: false, label: 'read-only', onChange: () => {} })
+check(
+  'row switch: off is announced as a switch',
+  offSwitch.props.role === 'switch' && offSwitch.props['aria-checked'] === 'false',
+  JSON.stringify([offSwitch.props.role, offSwitch.props['aria-checked']]),
+)
+check(
+  'row switch: it is a button, not a pill',
+  offSwitch.type === 'button' && !String(offSwitch.props.className).includes('dbmcp-pill'),
+  String(offSwitch.props.className),
+)
+check(
+  'row switch: the track and the knob are drawn',
+  collect(offSwitch, (node) => node.props.className === 'dbmcp-switch-track').length === 1 &&
+    collect(offSwitch, (node) => node.props.className === 'dbmcp-switch-knob').length === 1,
+)
+check(
+  'row switch: the state word stays beside it',
+  texts(offSwitch).join('') === 'read-only',
+  texts(offSwitch).join(''),
+)
+
+const onSwitch = Switch({ t, checked: true, label: 'writable', onChange: () => {} })
+check(
+  'row switch: on carries the is-on class',
+  String(onSwitch.props.className).includes('is-on') && onSwitch.props['aria-checked'] === 'true',
+  String(onSwitch.props.className),
+)
+
+const clicks = []
+Switch({ t, checked: false, label: 'read-only', onChange: (next) => clicks.push(next) }).props.onClick({
+  stopPropagation: () => {},
+})
+Switch({ t, checked: true, label: 'writable', onChange: (next) => clicks.push(next) }).props.onClick({
+  stopPropagation: () => {},
+})
+check('row switch: clicking asks for the opposite state', clicks.join(',') === 'true,false', clicks.join(','))
+
+const frozen = []
+Switch({ t, checked: false, disabled: true, onChange: (next) => frozen.push(next) }).props.onClick({
+  stopPropagation: () => {},
+})
+check('row switch: a disabled switch ignores clicks', frozen.length === 0 && String(Switch({ t, checked: false, disabled: true }).props.disabled) === 'true')
+
+// Style assertions: the track has to be visibly a switch, and the state words
+// must not keep the bordered-pill look that made them read as buttons.
+check(
+  'row switch: the knob slides the width of the track',
+  /\.dbmcp-switch\.is-on \.dbmcp-switch-knob \{[^}]*transform: translateX\(10px\)/.test(source),
+)
+check(
+  'row switch: a keyboard focus ring lands on the track',
+  /\.dbmcp-switch:focus-visible \.dbmcp-switch-track \{[^}]*outline: 2px solid/.test(source),
+)
+check(
+  'row switch: the track is a 22x12 capsule',
+  /\.dbmcp-switch-track \{[^}]*width: 22px[^}]*height: 12px/.test(source),
+)
+check(
+  'row notes: state words are frameless text',
+  /\.dbmcp-note \{[^}]*border: 0/.test(source) || !/\.dbmcp-note \{[^}]*border: 1px/.test(source),
+)
+check(
+  'row notes: adjacent state words are separated by a middot',
+  /\.dbmcp-item-name \.dbmcp-note \+ \.dbmcp-note::before \{[^}]*content: '·'/.test(source),
+)
+check('row pills: no clickable pill rule is left', !/button\.dbmcp-pill \{/.test(source))
+
 check(
   'import filter matches name/host/user',
   connectionMatches({ name: 'mysql', target: '127.0.0.1:3306 / demo', user: 'demo' }, 'demo') === true &&

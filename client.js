@@ -810,20 +810,6 @@ window.__ModuleLoader__.load({
         font-size: 12px;
         color: var(--dsw-alias-label-secondary);
       }
-      button.dbmcp-pill {
-        font-family: inherit;
-        background: transparent;
-        cursor: pointer;
-        transition: color 120ms ease, border-color 120ms ease;
-      }
-      button.dbmcp-pill:hover {
-        color: var(--dsw-alias-brand-primary);
-        border-color: var(--dsw-alias-brand-primary);
-      }
-      button.dbmcp-pill.is-open {
-        color: var(--dsw-alias-state-warn-primary);
-        border-color: var(--dsw-alias-state-warn-primary);
-      }
       /* An anchor styled as a pill: the star sits next to the connection state,
          and the whole thing is a link out to the repository. */
       a.dbmcp-pill.dbmcp-star {
@@ -841,27 +827,94 @@ window.__ModuleLoader__.load({
         font-size: 13px;
         line-height: 1;
       }
-      /* A writable-schema list and a broken secret are states worth noticing,
-         not buttons: they are plain spans and never take a click. */
-      .dbmcp-pill.is-writable {
-        color: var(--dsw-alias-brand-primary);
-        border-color: color-mix(in srgb, var(--dsw-alias-brand-primary) 32%, transparent);
+      /* A row used to carry half a dozen bordered pills, one of which was the
+         only thing that could be clicked and looked exactly like the rest. The
+         state words are plain text now; the switch below is the only chrome on
+         the row, so what can be operated is what looks operable. */
+      .dbmcp-note {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        border: 0;
+        padding: 0;
+        font-size: 12px;
+        font-weight: 400;
+        color: var(--dsw-alias-label-secondary);
       }
-      .dbmcp-pill.is-broken {
+      .dbmcp-note.is-writable {
+        color: var(--dsw-alias-brand-primary);
+      }
+      .dbmcp-note.is-broken {
         color: var(--dsw-alias-state-warn-primary);
-        border-color: var(--dsw-alias-state-warn-primary);
       }
       /* DDL on a writable source is the widest permission the panel hands out,
          so it reads differently from "writable" and its opposite is visible
          too: the row should say which of the two is in force, not stay silent. */
-      .dbmcp-pill.is-ddl {
+      .dbmcp-note.is-ddl {
         color: var(--dsw-alias-brand-primary);
-        border-color: color-mix(in srgb, var(--dsw-alias-brand-primary) 32%, transparent);
         font-weight: 600;
       }
-      .dbmcp-pill.is-ddl-off {
+      .dbmcp-note.is-ddl-off {
         color: var(--dsw-alias-label-secondary);
-        border-style: dashed;
+      }
+      .dbmcp-item-name .dbmcp-note + .dbmcp-note::before {
+        content: '·';
+        margin-right: 2px;
+        color: var(--dsw-alias-border-l1);
+      }
+      /* The read-only / writable flip. A 22x12 track reads as a control at a
+         glance, which is the one thing a pill with a status word on it never
+         did — the word beside it still spells out which way the switch is. */
+      .dbmcp-switch {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        flex: 0 0 auto;
+        padding: 0;
+        border: 0;
+        background: transparent;
+        font-family: inherit;
+        font-size: 12px;
+        font-weight: 400;
+        color: var(--dsw-alias-label-secondary);
+        cursor: pointer;
+      }
+      .dbmcp-switch-track {
+        position: relative;
+        flex: 0 0 auto;
+        width: 22px;
+        height: 12px;
+        border-radius: 999px;
+        background: color-mix(in srgb, var(--dsw-alias-label-secondary) 40%, transparent);
+        transition: background 140ms ease;
+      }
+      .dbmcp-switch-knob {
+        position: absolute;
+        top: 2px;
+        left: 2px;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--dsw-alias-bg-base);
+        transition: transform 140ms ease;
+      }
+      .dbmcp-switch:hover:not(:disabled),
+      .dbmcp-switch.is-on {
+        color: var(--dsw-alias-brand-primary);
+      }
+      .dbmcp-switch.is-on .dbmcp-switch-track {
+        background: var(--dsw-alias-brand-primary);
+      }
+      .dbmcp-switch.is-on .dbmcp-switch-knob {
+        transform: translateX(10px);
+      }
+      .dbmcp-switch:disabled {
+        cursor: default;
+        opacity: 0.55;
+      }
+      .dbmcp-switch:focus-visible .dbmcp-switch-track {
+        outline: 2px solid var(--dsw-alias-brand-primary);
+        outline-offset: 2px;
       }
       .dbmcp-hint.is-warn {
         color: var(--dsw-alias-state-warn-primary);
@@ -2595,6 +2648,41 @@ window.__ModuleLoader__.load({
       )
     }
 
+    /**
+     * A track switch, for the one setting on a source row that can be flipped.
+     *
+     * The row used to carry a line of identical bordered pills, and the only
+     * clickable one was a status word among status words: nothing said where to
+     * press until the pointer happened to rest on it. A track reads as something
+     * to operate before it is touched, and the state word stays beside it so the
+     * direction is spelled out rather than inferred from the knob's position.
+     */
+    function Switch(props) {
+      const on = props.checked === true
+      return h(
+        'button',
+        {
+          type: 'button',
+          className: 'dbmcp-switch' + (on ? ' is-on' : ''),
+          role: 'switch',
+          'aria-checked': on ? 'true' : 'false',
+          title: props.title || undefined,
+          disabled: props.disabled === true,
+          onClick: (event) => {
+            event.stopPropagation()
+            if (props.disabled === true) return
+            props.onChange(!on)
+          },
+        },
+        h(
+          'span',
+          { className: 'dbmcp-switch-track', 'aria-hidden': 'true' },
+          h('span', { className: 'dbmcp-switch-knob' }),
+        ),
+        props.label == null ? null : h('span', null, props.label),
+      )
+    }
+
     function TextInput(props) {
       return h('input', {
         className: 'dbmcp-input' + (props.invalid ? ' is-invalid' : ''),
@@ -4238,7 +4326,7 @@ function groupTables(tables) {
       }
 
       /**
-       * Flip one source between read-only and writable by clicking its pill.
+       * Flip one source between read-only and writable from its row switch.
        *
        * Going read-only is immediate. Going writable first asks which schemas
        * may be written to: a source that accepts writes without saying where is
@@ -4763,45 +4851,41 @@ function groupTables(tables) {
                       },
                       source.name || source.id,
                     ),
-                    h('span', { className: 'dbmcp-pill' }, source.kind),
-                    h(
-                      'button',
-                      {
-                        type: 'button',
-                        className: 'dbmcp-pill is-toggle ' + (source.readOnly === false ? 'is-open' : 'is-locked'),
-                        title: source.readOnly === false ? t('action.lockSource') : t('action.unlockSource'),
-                        'aria-pressed': source.readOnly === false,
-                        onClick: (event) => {
-                          event.stopPropagation()
-                          void toggleReadOnly(source)
-                        },
+                    /* The engine already shows as the kind badge to the left of
+                       the row, so the name line no longer repeats it. */
+                    h(Switch, {
+                      checked: source.readOnly === false,
+                      label: source.readOnly === false ? t('sources.readwrite') : t('sources.readonly'),
+                      title: source.readOnly === false ? t('action.lockSource') : t('action.unlockSource'),
+                      disabled: busy,
+                      onChange: () => {
+                        void toggleReadOnly(source)
                       },
-                      source.readOnly === false ? t('sources.readwrite') : t('sources.readonly'),
-                    ),
+                    }),
                     // The list is kept on a read-only source (it is the next
                     // unlock's starting point), but showing it there reads as a
-                    // permission that is not in force: it only earns a pill once
+                    // permission that is not in force: it only earns a note once
                     // the source is actually writable.
                     showsWritable(source)
                       ? h(
                           'span',
                           {
-                            className: 'dbmcp-pill is-writable',
+                            className: 'dbmcp-note is-writable',
                             title: fmt(t('sources.writableHint'), { names: writableNames(source).join(', ') }),
                           },
                           fmt(t('sources.writable'), { names: writableNames(source).join(', ') }),
                         )
                       : null,
                     source.secretBroken === true
-                      ? h('span', { className: 'dbmcp-pill is-broken' }, t('sources.secretBroken'))
+                      ? h('span', { className: 'dbmcp-note is-broken' }, t('sources.secretBroken'))
                       : null,
                     // The DDL switch only means something while the source is
                     // writable; on a locked row it would read as a permission
                     // that is not in force, exactly like the schema list.
                     showsWritable(source)
                       ? source.allowDdl === true
-                        ? h('span', { className: 'dbmcp-pill is-ddl', title: t('sources.ddlHint') }, t('sources.ddl'))
-                        : h('span', { className: 'dbmcp-pill is-ddl-off', title: t('sources.ddlBlockedHint') }, t('sources.ddlBlocked'))
+                        ? h('span', { className: 'dbmcp-note is-ddl', title: t('sources.ddlHint') }, t('sources.ddl'))
+                        : h('span', { className: 'dbmcp-note is-ddl-off', title: t('sources.ddlBlockedHint') }, t('sources.ddlBlocked'))
                       : null,
                   ),
               h(
@@ -5705,6 +5789,7 @@ function groupTables(tables) {
         localClock,
         localStamp,
         TextInput,
+        Switch,
         Breadcrumbs,
         MainPanel,
         IdChip,

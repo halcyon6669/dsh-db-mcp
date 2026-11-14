@@ -287,13 +287,15 @@ Four independent gates decide whether a statement may write:
 1. **Global switch** — `allowWrite` in `<runtime>/settings.json`, toggled on the
    *Runtime* tab. Off by default; while off every write is refused with
    `user_error` and a hint pointing at the switch.
-2. **Per-source flag** — `readOnly` on the source, on by default. Click the
-   *read-only* / *writable* pill on a row to flip it in one click; the pill turns
-   amber while that source accepts writes.
+2. **Per-source flag** — `readOnly` on the source, on by default. A switch on the
+   row flips it in one click, and the word beside the switch says which way it is
+   set. It is the only control on a row: everything else there — the schema list,
+   the DDL state, a broken secret — is plain text, so the thing that can be
+   operated is the thing that looks operable.
 3. **Writable schemas** — a writable source also says which schemas it may write
    to. Turning it writable asks first, and a statement aimed anywhere else is
    refused. The row shows that list only while the source is writable: the list
-   survives a switch back to read-only, but a pill on a locked row would claim a
+   survives a switch back to read-only, but a note on a locked row would claim a
    permission that is not in force.
 4. **DDL** — `allowDdl` on the source, off by default. Writing rows and changing
    the shape of the database are different decisions: a source that is happy to
@@ -301,7 +303,7 @@ Four independent gates decide whether a statement may write:
    it is off, `create`, `alter`, `drop`, `truncate`, `rename`, `grant` and
    `revoke` are refused before they reach the database; `insert`, `update` and
    `delete` are unaffected. The switch is asked for in the same unlock dialog,
-   and the row carries a *DDL allowed* or *DDL blocked* pill so the answer is
+   and the row carries a *DDL allowed* or *DDL blocked* note so the answer is
    visible without opening anything.
 
 The Python server reads the global flag at start-up and the host restarts it
