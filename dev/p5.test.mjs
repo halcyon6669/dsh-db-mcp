@@ -134,6 +134,36 @@ try {
     String(startedUrl || '').endsWith('/dsh-db-mcp'),
     String(startedUrl),
   )
+
+  /* The Python child reads the global write switch at start-up, so flipping it
+     has to replace that process. Restarting only the stdio one used to leave
+     every outside client on the old answer — the endpoint kept allowing writes
+     after the switch was turned off. */
+  const firstPid = (started.body?.http || httpAfter.body?.http || {}).pid
+  if (firstPid) {
+    await post('/settings', { allowWrite: true })
+    let secondPid = null
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      const state = await get('/http/status')
+      secondPid = state.body?.pid ?? state.body?.http?.pid ?? null
+      if (secondPid && secondPid !== firstPid) break
+      await new Promise((resolve) => setTimeout(resolve, 250))
+    }
+    check(
+      'flipping the write switch replaces the HTTP child',
+      Boolean(secondPid) && secondPid !== firstPid,
+      `${firstPid} -> ${secondPid}`,
+    )
+    const samePort = await get('/http/status')
+    check(
+      'the restarted endpoint keeps its port',
+      samePort.body?.port === (started.body?.http || httpAfter.body?.http || {}).port,
+      `${(started.body?.http || httpAfter.body?.http || {}).port} -> ${samePort.body?.port}`,
+    )
+    await post('/settings', { allowWrite: false })
+  } else {
+    check('flipping the write switch replaces the HTTP child', true, 'skipped: no endpoint on this machine')
+  }
   await post('/http/stop', {})
 
   const clients = await get('/clients')

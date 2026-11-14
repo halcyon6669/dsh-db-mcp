@@ -2208,17 +2208,24 @@ export function createHost(options = {}) {
           allowWrite: payload.allowWrite,
           auditLog: payload.auditLog,
           disabledTools: payload.disabledTools,
-        limits: payload.limits,
+          limits: payload.limits,
           httpEnabled: payload.httpEnabled,
           httpPort: payload.httpPort,
         })
         if (!settings) return sendJson(response, 400, { ok: false, error: 'httpPort must be an integer between 1024 and 65535' })
         if (
-        payload.allowWrite !== undefined ||
-        payload.disabledTools !== undefined ||
-        payload.limits !== undefined
-      ) {
+          payload.allowWrite !== undefined ||
+          payload.disabledTools !== undefined ||
+          payload.limits !== undefined
+        ) {
           void bridge.restart().catch(() => {})
+        }
+        /* `allowWrite` is read by the Python child when it starts, so the HTTP
+           process has to be replaced too — restarting only the stdio one leaves
+           every outside client on the old answer. The stdio restart above and
+           this one are independent; neither waits for the other. */
+        if (payload.allowWrite !== undefined) {
+          void bridge.restartHttp().catch(() => {})
         }
         return sendJson(response, 200, { ok: true, settings })
       }

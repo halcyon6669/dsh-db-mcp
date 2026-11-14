@@ -609,6 +609,21 @@ export function createBridge({
     return httpStatus();
   }
 
+  /** Resolve true when this process can bind host:port right now. */
+  function canBind(host, port) {
+    return new Promise((resolve) => {
+      const server = createServer();
+      server.unref();
+      server.once('error', () => resolve(false));
+      server.once('listening', () => server.close(() => resolve(true)));
+      try {
+        server.listen(port, host);
+      } catch {
+        resolve(false);
+      }
+    });
+  }
+
   /**
    * Find a port this machine will actually let us bind. Windows can refuse a
    * seemingly free port (WinError 10013) when it falls in a reserved range, so
@@ -619,20 +634,19 @@ export function createBridge({
     for (let offset = 0; offset <= 20; offset += 1) {
       const candidate = first + offset;
       if (candidate > 65535) break;
-      const free = await new Promise((resolve) => {
-        const server = createServer();
-        server.unref();
-        server.once('error', () => resolve(false));
-        server.once('listening', () => server.close(() => resolve(true)));
-        try {
-          server.listen(candidate, host);
-        } catch {
-          resolve(false);
-        }
-      });
-      if (free) return candidate;
+      if (await canBind(host, candidate)) return candidate;
     }
     return null;
+  }
+
+  /** Resolve once host:port is free again, or false after the timeout. */
+  async function waitForRelease(host, port, timeoutMs) {
+    const startedAt = Date.now();
+    for (;;) {
+      if (await canBind(host, port)) return true;
+      if (Date.now() - startedAt > timeoutMs) return false;
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
   }
 
   /** Resolve once something accepts connections on host:port, or reject. */
@@ -711,21 +725,40 @@ export function createBridge({
       }
     });
     try {
-      await waitForPort(host, wanted, 20_000);
+      await waitForPort(host, bindPort, 20_000);
     } catch (error) {
       if (httpState.child === child) stopHttp();
       httpState = {
         ...httpState,
         child: null,
         startedAt: null,
-        error: `HTTP server did not answer on ${host}:${wanted} (${error?.message ?? error})`,
+        error: `HTTP server did not answer on ${host}:${bindPort} (${error?.message ?? error})`,
         stderr,
       };
       return httpStatus();
     }
     httpState = { ...httpState, startedAt: new Date().toISOString(), error: null };
-    log(`HTTP MCP listening on http://${host}:${wanted}${HTTP_PATH}`);
+    log(`HTTP MCP listening on http://${host}:${bindPort}${HTTP_PATH}`);
     return httpStatus();
+  }
+
+  /**
+   * Restart the HTTP process in place, so a settings change that the child reads
+   * at start-up (`allowWrite`) takes effect there too. Only does anything when an
+   * endpoint is already running: a stopped one stays stopped, because the panel
+   * decides when to listen, not a settings write.
+   */
+  async function restartHttp() {
+    const previous = httpState;
+    if (!previous.child) return httpStatus();
+    const port = previous.port;
+    const host = previous.host || '127.0.0.1';
+    stopHttp();
+    // The old child may hold the port for a moment after the signal. Without
+    // this the replacement would drift to the next free port and every outside
+    // client would keep talking to a URL that no longer exists.
+    await waitForRelease(host, port, 5_000);
+    return startHttp({ port, host });
   }
 
   async function dispose() {
@@ -740,5 +773,5 @@ export function createBridge({
     state = { ...state, phase: 'idle', tools: [] };
   }
 
-  return { ensure, restart, dispose, status, call, startHttp, stopHttp, httpStatus, toolCatalog };
+  return { ensure, restart, dispose, status, call, startHttp, stopHttp, restartHttp, httpStatus, toolCatalog };
 }
