@@ -191,6 +191,25 @@ if (panel) {
   )
   const back = collect(panel, (node) => node.type === 'button' && node.props.className === 'dbmcp-back')
   check('main panel: back-to-chat button', back.length === 1, String(back.length))
+  const star = collect(panel, (node) => node.type === 'a' && String(node.props.className).includes('dbmcp-star'))
+  check('main panel: star link next to the status pill', star.length === 1, String(star.length))
+  check(
+    'main panel: the star link points at the repository',
+    star.length === 1 && star[0].props.href === 'https://github.com/halcyon6669/dsh-db-mcp',
+    JSON.stringify(star.length === 1 ? star[0].props.href : null),
+  )
+  check(
+    'main panel: the star link opens in a new tab without handing over the referrer',
+    star.length === 1 && star[0].props.target === '_blank' && String(star[0].props.rel).includes('noopener'),
+    JSON.stringify(star.length === 1 ? star[0].props.rel : null),
+  )
+  check(
+    'main panel: the star link shows the star glyph beside the word',
+    star.length === 1 &&
+      collect(star[0], (node) => node.props.className === 'dbmcp-star-mark').length === 1 &&
+      texts(collect(star[0], (node) => node.props.className === 'dbmcp-star-mark')[0]).join('') === '★',
+    JSON.stringify(star.length === 1 ? texts(star[0]).join('') : null),
+  )
   const crumbs = collect(panel, (node) => node.props.className === 'dbmcp-crumbs')
   check('main panel: tabs replace the breadcrumb trail', crumbs.length === 0, String(crumbs.length))
   const toolbar = collect(panel, (node) => node.props.className === 'dbmcp-toolbar')

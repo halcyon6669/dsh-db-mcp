@@ -88,8 +88,10 @@ If the sidebar entry disappears after a restart, see [Troubleshooting](#troubles
 
 ## The panel
 
-Sidebar → **Database**. The masthead carries **‹ Back to chat**, the title, and the
-connection and version pills. Below it, five tabs:
+Sidebar → **Database**. The masthead carries **‹ Back to chat**, the title, the
+connection and version pills, and a **Star** link to the
+[repository](https://github.com/halcyon6669/dsh-db-mcp) — the docs, the issues and
+the source all live there. Below the masthead, seven tabs:
 
 | Tab | What it does |
 | ---- | ------------ |
@@ -97,6 +99,8 @@ connection and version pills. Below it, five tabs:
 | New data source | one connection string, user, password; also used for editing |
 | Import from DBeaver | scan, tick, import |
 | Runtime | Host facts, tool count, global write switch, venv and driver versions |
+| Connect | the HTTP endpoint and the outside agents it can be written into |
+| Tools | every tool the Python server publishes, with its on/off switch |
 | Audit log | the last dozen tool calls, converted to your time zone |
 
 **New data source** and **Import from DBeaver** swap only the card under the tabs —

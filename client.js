@@ -51,6 +51,9 @@ window.__ModuleLoader__.load({
       return 'list'
     }
     const API = '/plugins/db-mcp/api'
+    // Kept in step with `repository.url` in package.json: the masthead links here
+    // for the docs, the issues and the star button alike.
+    const REPO_URL = 'https://github.com/halcyon6669/dsh-db-mcp'
     const KINDS = ['sqlite', 'postgres', 'gauss', 'mysql', 'oracle']
     const DEFAULT_PORTS = { postgres: '5432', gauss: '5432', mysql: '3306', oracle: '1521' }
 
@@ -64,6 +67,8 @@ window.__ModuleLoader__.load({
         'panel.title': 'Database',
         'panel.subtitle': 'Manage the database connections this agent can reach through MCP tools.',
         'action.refresh': 'Refresh',
+        'action.star': 'Star',
+        'action.starHint': 'Star dsh-db-mcp on GitHub — the docs and the issues live there too',
         'action.restartMcp': 'Restart MCP',
         'action.restartMcpHint': 'Restart the Python MCP server and re-publish its tools',
         'action.new': 'New data source',
@@ -325,6 +330,8 @@ window.__ModuleLoader__.load({
         'panel.title': '数据库',
         'panel.subtitle': '管理 AI 可以通过 MCP 工具访问的数据库连接。',
         'action.refresh': '刷新',
+        'action.star': 'Star',
+        'action.starHint': '在 GitHub 上给 dsh-db-mcp 加星——文档和 issue 也都在那里',
         'action.restartMcp': '重启 MCP',
         'action.restartMcpHint': '重启 Python MCP 服务并重新发布工具',
         'action.new': '新建数据源',
@@ -800,6 +807,23 @@ window.__ModuleLoader__.load({
       button.dbmcp-pill.is-open {
         color: var(--dsw-alias-state-warn-primary);
         border-color: var(--dsw-alias-state-warn-primary);
+      }
+      /* An anchor styled as a pill: the star sits next to the connection state,
+         and the whole thing is a link out to the repository. */
+      a.dbmcp-pill.dbmcp-star {
+        text-decoration: none;
+        cursor: pointer;
+        transition: color 120ms ease, border-color 120ms ease;
+      }
+      a.dbmcp-pill.dbmcp-star:hover {
+        color: var(--dsw-alias-brand-primary);
+        border-color: var(--dsw-alias-brand-primary);
+      }
+      /* The star glyph carries the meaning; the word stays so the pill still
+         reads as a link when the glyph is missing from the font. */
+      .dbmcp-star-mark {
+        font-size: 13px;
+        line-height: 1;
       }
       /* A writable-schema list and a broken secret are states worth noticing,
          not buttons: they are plain spans and never take a click. */
@@ -5523,6 +5547,18 @@ function groupTables(tables) {
             { className: 'dbmcp-pill' },
             h('span', { className: 'dbmcp-dot ' + (apiOk ? 'is-ok' : state.status === 'error' ? 'is-error' : '') }),
             apiOk ? t('state.connected') : state.status === 'loading' ? t('state.loading') : t('state.failed'),
+          ),
+          h(
+            'a',
+            {
+              className: 'dbmcp-pill dbmcp-star',
+              href: REPO_URL,
+              target: '_blank',
+              rel: 'noreferrer noopener',
+              title: t('action.starHint'),
+            },
+            h('span', { className: 'dbmcp-star-mark', 'aria-hidden': 'true' }, '★'),
+            t('action.star'),
           ),
           data && data.plugin ? h('span', { className: 'dbmcp-pill' }, `${data.plugin.name} ${data.plugin.version}`) : null,
         ),
