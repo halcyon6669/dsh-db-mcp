@@ -105,7 +105,7 @@ again (that releases the running app's hold on the bundle).
 
 Then:
 
-1. Sidebar → **Database**.
+1. Sidebar → **Data sources**.
 2. **Import from DBeaver** → tick the connections → **Import selected**.
 3. Ask the agent something like *"which tables does my Chinook database have?"*
 

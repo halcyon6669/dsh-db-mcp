@@ -64,7 +64,11 @@ window.__ModuleLoader__.load({
 
     const DICT = {
       en: {
-        'panel.title': 'Database',
+        /* The panel registers connections, not databases: it does not browse
+           a server's contents or run SQL. Naming it after the thing it holds
+           also matches the two tabs right below it ("Data source list", "New
+           data source") and the subtitle, which still says what a source is. */
+        'panel.title': 'Data sources',
         'panel.subtitle': 'Manage the database connections this agent can reach through MCP tools.',
         'action.refresh': 'Refresh',
         'action.star': 'Star',
@@ -345,7 +349,7 @@ window.__ModuleLoader__.load({
         'action.copyErrorHint': 'Copy the whole failure report',
       },
       zh: {
-        'panel.title': '数据库',
+        'panel.title': '数据源',
         'panel.subtitle': '管理 AI 可以通过 MCP 工具访问的数据库连接。',
         'action.refresh': '刷新',
         'action.star': 'Star',
@@ -716,14 +720,13 @@ window.__ModuleLoader__.load({
         white-space: nowrap;
         transition: color 120ms ease, background 120ms ease;
       }
-      /* The first label should still line up with the heading above it, but
-         zeroing its padding — the trick from when the active tab was only an
-         underline — now that the tab can be a filled pill simply jams the word
-         against the fill's edge with two square corners. Pulling the whole pill
-         left by exactly one padding keeps the text on the heading's axis and
-         lets the fill keep its shape; the 26px page gutter swallows the offset. */
+      /* The first pill sits on the same left edge as the masthead, the notices
+         and the cards: its box is the thing that lines up, and the word inside
+         keeps its own 11px inset. Pulling the pill left so the *text* landed on
+         the heading's axis was the other way round, and it left the fill hanging
+         11px outside every other box on the page. */
       .dbmcp-tab:first-child {
-        margin-left: -11px;
+        margin-left: 0;
       }
       .dbmcp-tab:hover:not(.is-active) {
         color: var(--dsw-alias-label-primary);
@@ -2902,19 +2905,22 @@ window.__ModuleLoader__.load({
       )
     }
 
+    /* The header is skipped entirely when the card carries no title, aside or
+       actions. The list card passes title: null and draws its own header, and a
+       header that renders empty still took its min-height plus its margin —
+       thirty pixels of nothing above the list, measured. */
     function Card(props) {
-      return h(
-        'section',
-        { className: 'dbmcp-card' },
-        h(
-          'header',
-          { className: 'dbmcp-card-head' },
-          props.title == null ? null : h('h2', { className: 'dbmcp-card-title' }, props.title),
-          props.aside == null ? null : h('span', { className: 'dbmcp-pill' }, props.aside),
-          props.actions == null ? null : h('div', { className: 'dbmcp-card-actions' }, props.actions),
-        ),
-        props.children,
-      )
+      const head =
+        props.title == null && props.aside == null && props.actions == null
+          ? null
+          : h(
+              'header',
+              { className: 'dbmcp-card-head' },
+              props.title == null ? null : h('h2', { className: 'dbmcp-card-title' }, props.title),
+              props.aside == null ? null : h('span', { className: 'dbmcp-pill' }, props.aside),
+              props.actions == null ? null : h('div', { className: 'dbmcp-card-actions' }, props.actions),
+            )
+      return h('section', { className: 'dbmcp-card' }, head, props.children)
     }
 
     /** One card per line, matching the audit entries below it. */
@@ -6131,6 +6137,7 @@ function groupTables(tables) {
         localStamp,
         TextInput,
         Switch,
+        Card,
         Breadcrumbs,
         MainPanel,
         IdChip,

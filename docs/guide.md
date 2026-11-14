@@ -96,7 +96,7 @@ If the sidebar entry disappears after a restart, see
 
 ## The panel
 
-Sidebar → **Database**. The masthead carries **‹ Back to chat**, the title, the
+Sidebar → **Data sources**. The masthead carries **‹ Back to chat**, the title, the
 connection and version pills, and a **Star** link to the
 [repository](https://github.com/halcyon6669/dsh-db-mcp) — the docs, the issues and
 the source all live there. Below the masthead, seven tabs:

@@ -79,5 +79,19 @@ for (const locale of ['en', 'zh']) {
   }
 }
 
+// The panel is named in three places that a reader sees as one name: the
+// heading and sidebar entry (panel.title), the plugin card in the Plugins panel
+// (locale/*.json meta.title). They drifted apart once, so they are checked
+// together: renamed panel, renamed card.
+for (const [locale, block] of [['en', enBlock], ['zh', zhBlock]]) {
+  const panelTitle = (block.match(/'panel\.title': '([^']+)'/) || [])[1]
+  const metaTitle = JSON.parse(readFileSync(join(root, 'locale', `${locale}.json`), 'utf8')).meta.title
+  check(
+    `${locale} panel title matches the plugin card title`,
+    Boolean(panelTitle) && panelTitle === metaTitle,
+    `panel.title ${JSON.stringify(panelTitle)} vs locale/${locale}.json ${JSON.stringify(metaTitle)}`,
+  )
+}
+
 console.log(`\ni18n.test: ${pass}/${pass + fail} passed`)
 process.exit(fail === 0 ? 0 : 1)

@@ -325,13 +325,13 @@ def check(sql: str, profile: dict) -> None:
     if is_ddl(sql) and not allows_ddl(profile):
         raise WriteBlocked(
             f"datasource {profile.get('id')} does not allow DDL; the schema was left untouched",
-            "turn on DDL for this source in the Database panel, or run the statement in a client that is not guarded",
+            "turn on DDL for this source in the Data sources panel, or run the statement in a client that is not guarded",
         )
     names = allowed(profile)
     if not names:
         raise WriteBlocked(
             f"datasource {profile.get('id')} is writable but names no writable schema",
-            "pick at least one writable schema for this source in the Database panel",
+            "pick at least one writable schema for this source in the Data sources panel",
         )
     permitted = {name.casefold() for name in names}
     listing = ", ".join(names)
@@ -355,5 +355,5 @@ def check(sql: str, profile: dict) -> None:
             if effective.casefold() not in permitted:
                 raise WriteBlocked(
                     f"{effective} is not a writable schema of {profile.get('id')}",
-                    f"this source may only write to {listing}; allow the schema in the Database panel",
+                    f"this source may only write to {listing}; allow the schema in the Data sources panel",
                 )

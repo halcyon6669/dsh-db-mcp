@@ -428,13 +428,15 @@ check(
   /gap: 6px 8px/.test(tabsRule),
   (tabsRule.match(/gap: [^;]+/) || [''])[0],
 )
-// The first tab zeroed its left padding so its word lined up with the heading —
-// correct while the active state was a bare underline, wrong once that word sits
-// inside a filled pill, where it jammed the text against a square-cornered edge.
-// The pill is pulled left by one padding instead: same axis, intact fill.
+// The first tab used to zero its left padding so its word lined up with the
+// heading — correct while the active state was a bare underline, wrong once that
+// word sat inside a filled pill, where it jammed the text against a square edge.
+// It was then pulled left by one padding, which moved the word onto the axis but
+// hung the pill's fill 11px outside every other box on the page. The box aligns
+// now; the word keeps its inset.
 check(
-  'panel tabs: the first pill keeps its padding and shifts left instead',
-  /\.dbmcp-tab:first-child \{[^}]*margin-left: -11px/.test(tabRule) &&
+  'panel tabs: the first pill box sits on the page axis',
+  /\.dbmcp-tab:first-child \{[^}]*margin-left: 0/.test(tabRule) &&
     !/\.dbmcp-tab:first-child \{[^}]*padding-left: 0/.test(tabRule),
   (tabRule.match(/\.dbmcp-tab:first-child \{[^}]*\}/) || [''])[0].replace(/\s+/g, ' '),
 )
@@ -626,6 +628,27 @@ if (stripTree) {
   // The masthead already carries the version, so the strip must not repeat it.
   const versionPill = collect(stripTree, (node) => node.props.className === 'dbmcp-pill')
   check('strip: no repeated version pill', versionPill.length === 0, `got ${versionPill.length}`)
+}
+
+// A card that carries no title draws its own header (the list card does), and
+// the component's own header still took a min-height plus a bottom margin when
+// it rendered empty — about thirty pixels of nothing above the list.
+const { Card } = mod.__test
+if (typeof Card !== 'function') {
+  check('card: exported for testing', false, 'Card missing')
+} else {
+  const bare = Card({ title: null, children: 'body' })
+  const bareHeads = collect(bare, (node) => node.props.className === 'dbmcp-card-head')
+  check('card: no header at all when it has nothing to say', bareHeads.length === 0, `got ${bareHeads.length}`)
+  const titled = Card({ title: 'Audit', children: 'body' })
+  const titledHeads = collect(titled, (node) => node.props.className === 'dbmcp-card-head')
+  const titledNames = collect(titled, (node) => node.props.className === 'dbmcp-card-title')
+  check('card: a titled card still gets its header', titledHeads.length === 1 && titledNames.length === 1)
+  const asideOnly = Card({ title: null, aside: '3', children: 'body' })
+  check(
+    'card: an aside alone still earns the header',
+    collect(asideOnly, (node) => node.props.className === 'dbmcp-card-head').length === 1,
+  )
 }
 
 // Palette assertions: custom themes may hand us translucent tokens (a wallpaper

@@ -73,7 +73,7 @@ dsh plugin --profile web add dsh-db-mcp       # Web 端
 
 然后：
 
-1. 侧栏 → **数据库**。
+1. 侧栏 → **数据源**。
 2. **从 DBeaver 导入** → 勾选连接 → **导入所选**。
 3. 问智能体一句：*「我的 Chinook 库里有哪些表？」*
 

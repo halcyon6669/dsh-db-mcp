@@ -407,7 +407,7 @@ export function createBridge({
     disposeTools();
     disposers = tools.map((tool) => {
       const name = `${TOOL_PREFIX}${tool.name}`;
-      const description = `${tool.description || tool.name}\n\n(PostgreSQL/MySQL/Oracle/SQLite via the DSH Database panel; source is chosen with the \`datasource\` argument.)`;
+      const description = `${tool.description || tool.name}\n\n(PostgreSQL/MySQL/Oracle/SQLite via the DSH Data sources panel; source is chosen with the \`datasource\` argument.)`;
       return service.register({
         name,
         description,

@@ -75,13 +75,13 @@ def ensure_readable(sql: str, profile: dict) -> None:
         raise DbError(
             "user_error",
             f"writes are disabled for the whole plugin; `{keyword or 'this'} ` statements are refused",
-            "turn on the global write switch in the Database panel first",
+            "turn on the global write switch in the Data sources panel first",
         )
     if profile.get("readOnly"):
         raise DbError(
             "user_error",
             f"datasource {profile.get('id')} is read-only; `{keyword or 'this'} ` statements are refused",
-            "uncheck read-only for this source in the Database panel to allow writes",
+            "uncheck read-only for this source in the Data sources panel to allow writes",
         )
     # The source is writable, so it also names the schemas it may write to.
     try:

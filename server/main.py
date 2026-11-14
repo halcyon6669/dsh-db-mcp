@@ -105,7 +105,7 @@ ARGS = _transport_args(sys.argv[1:])
 mcp = FastMCP(
     "db-mcp",
     instructions=(
-        "Work with the databases the user registered in the DSH Database panel. "
+        "Work with the databases the user registered in the DSH Data sources panel. "
         "Start with list_datasources, then list_tables, describe_table and finally "
         "execute_sql. execute_sql runs any single statement: SELECT and EXPLAIN when "
         "the source is read-only, INSERT/UPDATE/DELETE/DDL only when writes are "

@@ -39,7 +39,7 @@ def load_key(runtime: Path) -> bytes:
     except FileNotFoundError:
         raise SecretError(
             f"{path} is missing: the stored passwords cannot be decrypted. "
-            "Open the Database panel once to recreate it, then re-enter the passwords."
+            "Open the Data sources panel once to recreate it, then re-enter the passwords."
         )
     except OSError as error:
         raise SecretError(f"cannot read {path}: {error}")

@@ -2300,7 +2300,7 @@ export function createHost(options = {}) {
   }
 
   // Publish the MCP tools as soon as the host half mounts, so the agent can use
-  // them even if nobody opens the Database panel.
+  // them even if nobody opens the Data sources panel.
   void ensureMcp()
 
   // A runtime directory written by an older build keeps plaintext passwords in

@@ -208,7 +208,7 @@ class DdlSwitch(unittest.TestCase):
         with self.assertRaises(writes.WriteBlocked) as caught:
             writes.check("create table sales.orders (id int)", profile())
         self.assertIn("does not allow DDL", caught.exception.message)
-        self.assertIn("Database panel", caught.exception.hint)
+        self.assertIn("Data sources panel", caught.exception.hint)
 
     def test_ddl_passes_once_the_switch_is_on(self):
         writes.check("create table sales.orders (id int)", profile(allow_ddl=True))

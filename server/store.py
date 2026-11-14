@@ -73,7 +73,7 @@ def password_of(profile: dict, secrets: dict | None = None) -> str | None:
         raise StoreError(
             "infra_error",
             str(error),
-            "re-enter the password in the Database panel, or delete secret.key and set the passwords again",
+            "re-enter the password in the Data sources panel, or delete secret.key and set the passwords again",
         ) from error
 
 
@@ -88,7 +88,7 @@ def resolve(name: str | None) -> tuple[dict, dict]:
         raise StoreError(
             "user_error",
             "no datasource is configured yet",
-            "open the Database panel in DSH and add one, or import from DBeaver",
+            "open the Data sources panel in DSH and add one, or import from DBeaver",
         )
     if name:
         wanted = name.strip()
