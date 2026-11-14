@@ -106,6 +106,23 @@ The workflow refuses to publish when the tag and `package.json` disagree, runs
 version appears. Local `npm publish` still works for the very first release, before
 a trusted publisher exists.
 
+Pushing the tag publishes to npm and nothing else: it does **not** open a page
+under *Releases*, so the repository keeps its notes in `docs/release-<version>.md`
+and the release is created from that file:
+
+```sh
+gh release create v0.8.0 \
+  --title "v0.8.0 - <one line summary>" \
+  --notes-file docs/release-0.8.0.md \
+  --verify-tag
+```
+
+`--verify-tag` makes the command fail instead of creating a tag that was never
+pushed. The notes file is the single source: the GitHub release body is a copy of
+it, so correcting the file afterwards means editing the release page too. Only the
+most recent release pages have such a file — older tags carry their notes in the
+annotated tag object, which `git tag -l --format='%(contents)' v0.9.6` prints.
+
 Keep `src/host.js`'s `PLUGIN_VERSION` in step with `package.json` — the panel and
 `/health` read it, and a mismatch ships a package that reports the previous version.
 
