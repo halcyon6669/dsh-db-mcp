@@ -190,6 +190,17 @@ if (panel) {
     'main panel: the tools tab is its own step',
     mod.__test.TABS.some((tab) => tab.id === 'tools') && mod.__test.tabLabel((key) => key, 'tools') === 'tab.tools',
   )
+  const order = mod.__test.TABS.map((tab) => tab.id)
+  check(
+    'main panel: the endpoint tab sits before the runtime tab',
+    order.indexOf('clients') + 1 === order.indexOf('runtime'),
+    order.join(','),
+  )
+  check(
+    'main panel: the tabs line up left to right',
+    tabs.length === 7 && tabs.map((node) => texts(node).join('')).join(',') === order.map((id) => `tab.${id}`).join(','),
+    tabs.map((node) => texts(node).join('')).join(','),
+  )
   const back = collect(panel, (node) => node.type === 'button' && node.props.className === 'dbmcp-back')
   check('main panel: back-to-chat button', back.length === 1, String(back.length))
   const star = collect(panel, (node) => node.type === 'a' && String(node.props.className).includes('dbmcp-star'))
@@ -246,6 +257,16 @@ check('schema list: the name carries the full value as a title', source.includes
 check(
   'schema list: one column when the panel is narrow',
   source.includes('@container (max-width: 560px)') && source.includes('container-type: inline-size'),
+)
+// The form row sizes itself against the panel, not the viewport: before the
+// container query below existed, the two- and three-column rows ran past the
+// right edge of a narrow sidebar and their right-hand fields were cut off.
+const formRule = source.slice(source.indexOf('.dbmcp-form.is-page {'), source.indexOf('.dbmcp-form.is-page {') + 700)
+check('source form: it is its own container', formRule.includes('container-type: inline-size'), formRule.slice(0, 90))
+check(
+  'source form: wide rows fold to one column',
+  /@container \(max-width: 560px\) \{\s*\.dbmcp-form-section\.is-two,\s*\.dbmcp-form-section\.is-three \{\s*grid-template-columns: minmax\(0, 1fr\)/
+    .test(source),
 )
 
 // Required-field marking only shows up after a save attempt, so check the input
@@ -355,15 +376,19 @@ check('row switch: a disabled switch ignores clicks', frozen.length === 0 && Str
 // must not keep the bordered-pill look that made them read as buttons.
 check(
   'row switch: the knob slides the width of the track',
-  /\.dbmcp-switch\.is-on \.dbmcp-switch-knob \{[^}]*transform: translateX\(10px\)/.test(source),
+  /\.dbmcp-switch\.is-on \.dbmcp-switch-knob \{[^}]*transform: translateX\(16px\)/.test(source),
 )
 check(
   'row switch: a keyboard focus ring lands on the track',
   /\.dbmcp-switch:focus-visible \.dbmcp-switch-track \{[^}]*outline: 2px solid/.test(source),
 )
 check(
-  'row switch: the track is a 22x12 capsule',
-  /\.dbmcp-switch-track \{[^}]*width: 22px[^}]*height: 12px/.test(source),
+  'row switch: the track is a 36x20 capsule',
+  /\.dbmcp-switch-track \{[^}]*width: 36px[^}]*height: 20px/.test(source),
+)
+check(
+  'row switch: the on-track is ink, not the brand colour',
+  /\.dbmcp-switch\.is-on \.dbmcp-switch-track \{[^}]*background: var\(--dsw-alias-label-primary\)/.test(source),
 )
 check(
   'row notes: state words are frameless text',
@@ -374,6 +399,54 @@ check(
   /\.dbmcp-item-name \.dbmcp-note \+ \.dbmcp-note::before \{[^}]*content: '·'/.test(source),
 )
 check('row pills: no clickable pill rule is left', !/button\.dbmcp-pill \{/.test(source))
+
+// A 2px underline under one of eight same-coloured words was too weak a signal
+// for "this is the page you are on", so the active tab fills in as well.
+const tabRule = source.slice(source.indexOf('      .dbmcp-tab {'), source.indexOf('      .dbmcp-sub {'))
+check(
+  'panel tabs: the active tab is filled, not just underlined',
+  /\.dbmcp-tab\.is-active \{[^}]*background: color-mix\(in srgb, var\(--dsw-alias-brand-primary\)/.test(tabRule),
+)
+check(
+  'panel tabs: the active tab takes brand ink and weight',
+  /\.dbmcp-tab\.is-active \{[^}]*color: var\(--dsw-alias-brand-primary\)[^}]*font-weight: 600/.test(tabRule),
+)
+check('panel tabs: the old underline is gone', !/\.dbmcp-tab \{[^}]*border-bottom: 2px solid transparent/.test(tabRule))
+check(
+  'panel tabs: hovering a tab tints it without borrowing the active fill',
+  /\.dbmcp-tab:hover:not\(\.is-active\) \{[^}]*background: color-mix\(in srgb, var\(--dsw-alias-label-primary\) 6%/.test(
+    tabRule,
+  ),
+)
+// Scrolling sideways hid the last tab instead of clipping it, and a partly
+// scrolled strip cut the active pill in half. The row wraps so nothing is lost.
+const tabsRule = source.slice(source.indexOf('      .dbmcp-tabs {'), source.indexOf('      .dbmcp-tab {'))
+check('panel tabs: the row wraps instead of scrolling', /flex-wrap: wrap/.test(tabsRule), tabsRule.slice(0, 80))
+check('panel tabs: nothing can scroll out of view', !/overflow-x: auto/.test(tabsRule))
+check(
+  'panel tabs: the pills keep a gap so two fills never touch',
+  /gap: 6px 8px/.test(tabsRule),
+  (tabsRule.match(/gap: [^;]+/) || [''])[0],
+)
+// The first tab zeroed its left padding so its word lined up with the heading —
+// correct while the active state was a bare underline, wrong once that word sits
+// inside a filled pill, where it jammed the text against a square-cornered edge.
+// The pill is pulled left by one padding instead: same axis, intact fill.
+check(
+  'panel tabs: the first pill keeps its padding and shifts left instead',
+  /\.dbmcp-tab:first-child \{[^}]*margin-left: -11px/.test(tabRule) &&
+    !/\.dbmcp-tab:first-child \{[^}]*padding-left: 0/.test(tabRule),
+  (tabRule.match(/\.dbmcp-tab:first-child \{[^}]*\}/) || [''])[0].replace(/\s+/g, ' '),
+)
+
+// The audit statement is the payload of a row, not a caption beside the facts.
+// These three keep it that way: its own surface, ink text, and a rule down the
+// left edge that turns red when the call failed.
+const auditSqlRule = source.slice(source.indexOf('      .dbmcp-audit-sql {'), source.indexOf('      .dbmcp-schema-wrap {'))
+check('audit sql: it gets its own recessed block', /background: var\(--dsw-alias-bg-base\)/.test(auditSqlRule), auditSqlRule.slice(0, 120))
+check('audit sql: it reads as primary ink, not a hint', /color: var\(--dsw-alias-label-primary\)/.test(auditSqlRule))
+check('audit sql: a brand rule marks the left edge', /border-left: 3px solid color-mix\(in srgb, var\(--dsw-alias-brand-primary\)/.test(auditSqlRule))
+check('audit sql: a failed call turns that rule red', /\.is-error \{[^}]*border-left-color: color-mix\(in srgb, var\(--dsw-alias-state-error-primary\)/.test(auditSqlRule))
 
 check(
   'import filter matches name/host/user',

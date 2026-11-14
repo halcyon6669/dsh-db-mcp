@@ -23,8 +23,8 @@ window.__ModuleLoader__.load({
       { id: 'list' },
       { id: 'create' },
       { id: 'import' },
-      { id: 'runtime' },
       { id: 'clients' },
+      { id: 'runtime' },
       { id: 'tools' },
       { id: 'audit' },
     ]
@@ -130,7 +130,13 @@ window.__ModuleLoader__.load({
         'sources.default': 'default',
         'sources.hasPassword': 'password saved',
         'sources.noPassword': 'no password',
-        'sources.writable': 'writable {names}',
+        // The switch beside this note already says "writable", so the note only
+        // has to say where. ", writable gaussdb" next to a switch labelled
+        // "writable" read as two switches arguing about the same thing; naming
+        // the note after the field it repeats ("Writable schemas") keeps it a
+        // label with values instead of a second state word. Capitalised to
+        // match `form.schemaAccess`, the field this note is a short form of.
+        'sources.writable': 'Writable schemas: {names}',
         'sources.writableHint': 'May only write to: {names}',
         'sources.secretBroken': 'stored password unreadable',
         'sources.neverProbed': 'never tested',
@@ -197,6 +203,7 @@ window.__ModuleLoader__.load({
         'import.searchPlaceholder': 'Filter by name, host or user',
         'import.noMatch': 'No DBeaver connection matches this filter.',
         'import.matches': '{n} of {total}',
+        'import.selectAll': 'Select all',
         'import.credentialsMissing': 'not present — the password has to be typed in manually later',
         'diag.title': 'Runtime diagnostics',
         'diag.hostApi': 'Host API',
@@ -401,7 +408,7 @@ window.__ModuleLoader__.load({
         'sources.default': '默认',
         'sources.hasPassword': '已存密码',
         'sources.noPassword': '无密码',
-        'sources.writable': '可写 {names}',
+        'sources.writable': '写入模式：{names}',
         'sources.writableHint': '仅可写：{names}',
         'sources.secretBroken': '已存口令无法解密',
         'sources.neverProbed': '尚未测试',
@@ -467,6 +474,7 @@ window.__ModuleLoader__.load({
         'import.searchPlaceholder': '按名称、主机或用户过滤',
         'import.noMatch': '没有匹配该过滤条件的 DBeaver 连接。',
         'import.matches': '{n} / {total}',
+        'import.selectAll': '全选',
         'import.credentialsMissing': '不存在——口令需要稍后手动填写',
         'diag.title': '运行时诊断',
         'diag.hostApi': 'Host 接口',
@@ -611,10 +619,13 @@ window.__ModuleLoader__.load({
         height: 100%;
         overflow: auto;
         box-sizing: border-box;
-        padding: 24px 28px 40px;
+        padding: 22px 26px 40px;
         color: var(--dsw-alias-label-primary);
         background: var(--dsw-alias-bg-base);
         font: inherit;
+        font-size: 13px;
+        line-height: 1.5;
+        -webkit-font-smoothing: antialiased;
       }
       .dbmcp-head h1 {
         margin: 0;
@@ -623,18 +634,22 @@ window.__ModuleLoader__.load({
         line-height: 1.4;
         letter-spacing: 0.01em;
       }
+      /* The masthead is the panel's identity: title, then the state pills, then
+         the two links. It sits on the page's own background, separated from the
+         content below by the tab rule rather than by a box of its own. */
       .dbmcp-masthead {
         display: flex;
-        align-items: baseline;
+        align-items: center;
         flex-wrap: wrap;
-        gap: 10px;
-        margin: 0 0 4px;
+        gap: 9px;
+        margin: 0;
+        min-height: 28px;
       }
       .dbmcp-masthead h1 {
         margin: 0;
         font-size: 19px;
-        font-weight: 600;
-        letter-spacing: 0.01em;
+        font-weight: 650;
+        letter-spacing: -0.005em;
         color: var(--dsw-alias-label-primary);
       }
       .dbmcp-masthead-spacer {
@@ -661,34 +676,62 @@ window.__ModuleLoader__.load({
         font-size: 15px;
         line-height: 1;
       }
+      /* Seven tabs do not fit a sidebar. They used to be clipped, then they
+         scrolled sideways with the bar hidden — which only traded one clipped tab
+         for a half-cut pill whenever the active tab was the last one. The row
+         wraps to a second line instead: nothing is hidden, and every pill stays
+         whole. */
       .dbmcp-tabs {
         display: flex;
+        flex-wrap: wrap;
         align-items: stretch;
-        gap: 22px;
-        margin: 14px 0 0;
+        gap: 6px 8px;
+        margin: 16px 0 0;
         border-bottom: 1px solid var(--dsw-alias-border-l1);
       }
+      /* The active tab used to be a 2px underline and nothing else, which is the
+         weakest possible signal on a row of eight words in the same colour. It now
+         carries a filled pill and brand ink; the row keeps its rule so the tabs
+         still read as a strip rather than as loose buttons. The gap above is the
+         margin these pills need: at 2px a hovering tab touched the active one and
+         the two fills read as a single blob. */
       .dbmcp-tab {
         appearance: none;
         border: 0;
         background: none;
-        padding: 0 0 9px;
-        margin-bottom: -1px;
+        padding: 5px 11px 7px;
+        margin-bottom: 5px;
+        border-radius: 7px;
         font: inherit;
         font-size: 13px;
         line-height: 1.4;
         color: var(--dsw-alias-label-secondary);
         cursor: pointer;
-        border-bottom: 2px solid transparent;
         white-space: nowrap;
+        transition: color 120ms ease, background 120ms ease;
       }
-      .dbmcp-tab:hover {
+      /* The first label should still line up with the heading above it, but
+         zeroing its padding — the trick from when the active tab was only an
+         underline — now that the tab can be a filled pill simply jams the word
+         against the fill's edge with two square corners. Pulling the whole pill
+         left by exactly one padding keeps the text on the heading's axis and
+         lets the fill keep its shape; the 26px page gutter swallows the offset. */
+      .dbmcp-tab:first-child {
+        margin-left: -11px;
+      }
+      .dbmcp-tab:hover:not(.is-active) {
         color: var(--dsw-alias-label-primary);
+        background: color-mix(in srgb, var(--dsw-alias-label-primary) 6%, transparent);
+      }
+      .dbmcp-tab:focus-visible {
+        outline: 2px solid var(--dsw-alias-brand-primary);
+        outline-offset: -1px;
+        border-radius: 7px;
       }
       .dbmcp-tab.is-active {
-        color: var(--dsw-alias-label-primary);
-        font-weight: 500;
-        border-bottom-color: var(--dsw-alias-brand-primary);
+        color: var(--dsw-alias-brand-primary);
+        font-weight: 600;
+        background: color-mix(in srgb, var(--dsw-alias-brand-primary) 13%, transparent);
       }
       .dbmcp-sub {
         margin: 6px 0 0;
@@ -759,23 +802,45 @@ window.__ModuleLoader__.load({
         color: var(--dsw-alias-label-primary);
         font: inherit;
         font-size: 13px;
+        line-height: 1.4;
         padding: 6px 14px;
         cursor: pointer;
+        transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
       }
-      .dbmcp-btn:hover {
+      .dbmcp-btn:hover:not(:disabled) {
         border-color: var(--dsw-alias-border-l2);
+        background: color-mix(in srgb, var(--dsw-alias-label-primary) 6%, var(--dsw-alias-bg-layer-2));
+      }
+      .dbmcp-btn:active:not(:disabled) {
+        background: color-mix(in srgb, var(--dsw-alias-label-primary) 10%, var(--dsw-alias-bg-layer-2));
+      }
+      .dbmcp-btn:focus-visible {
+        outline: 2px solid var(--dsw-alias-brand-primary);
+        outline-offset: 2px;
       }
       .dbmcp-btn:disabled {
         opacity: 0.6;
         cursor: default;
       }
+      /* The primary action is the one filled control on the page: an outlined
+         button was indistinguishable from every secondary one next to it. */
       .dbmcp-btn.is-primary {
         border-color: var(--dsw-alias-brand-primary);
-        color: var(--dsw-alias-brand-primary);
+        background: var(--dsw-alias-brand-primary);
+        color: var(--dsw-alias-bg-base);
+        font-weight: 500;
+      }
+      .dbmcp-btn.is-primary:hover:not(:disabled) {
+        border-color: var(--dsw-alias-brand-primary);
+        background: color-mix(in srgb, var(--dsw-alias-brand-primary) 86%, var(--dsw-alias-label-primary));
       }
       .dbmcp-btn.is-danger {
-        border-color: var(--dsw-alias-state-error-primary);
+        border-color: color-mix(in srgb, var(--dsw-alias-state-error-primary) 45%, transparent);
         color: var(--dsw-alias-state-error-primary);
+      }
+      .dbmcp-btn.is-danger:hover:not(:disabled) {
+        border-color: var(--dsw-alias-state-error-primary);
+        background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 10%, transparent);
       }
       .dbmcp-btn.is-small {
         font-size: 12px;
@@ -841,20 +906,34 @@ window.__ModuleLoader__.load({
         font-weight: 400;
         color: var(--dsw-alias-label-secondary);
       }
+      /* Where a writable source may write is a detail of the state the switch
+         already states, so it stays quiet: secondary colour, tabular names. It
+         was brand-coloured before, which put it on the same footing as the
+         switch and made the row read as two contradictory controls. */
       .dbmcp-note.is-writable {
-        color: var(--dsw-alias-brand-primary);
+        color: var(--dsw-alias-label-secondary);
+        font-variant-numeric: tabular-nums;
       }
       .dbmcp-note.is-broken {
         color: var(--dsw-alias-state-warn-primary);
       }
       /* DDL on a writable source is the widest permission the panel hands out,
-         so it reads differently from "writable" and its opposite is visible
-         too: the row should say which of the two is in force, not stay silent. */
+         so it is the one thing on the row that gets a box — the opposite state
+         is spelled out too, so the row never leaves the question unanswered. */
+      .dbmcp-note.is-ddl,
+      .dbmcp-note.is-ddl-off {
+        padding: 1px 7px;
+        border-radius: 999px;
+        font-size: 11px;
+        letter-spacing: 0.02em;
+      }
       .dbmcp-note.is-ddl {
+        border: 1px solid color-mix(in srgb, var(--dsw-alias-brand-primary) 32%, transparent);
         color: var(--dsw-alias-brand-primary);
         font-weight: 600;
       }
       .dbmcp-note.is-ddl-off {
+        border: 1px dashed var(--dsw-alias-border-l2);
         color: var(--dsw-alias-label-secondary);
       }
       .dbmcp-item-name .dbmcp-note + .dbmcp-note::before {
@@ -862,9 +941,18 @@ window.__ModuleLoader__.load({
         margin-right: 2px;
         color: var(--dsw-alias-border-l1);
       }
-      /* The read-only / writable flip. A 22x12 track reads as a control at a
+      /* A boxed note carries its own edge, so the middle dot before it would
+         sit on top of that edge. */
+      .dbmcp-item-name .dbmcp-note.is-ddl::before,
+      .dbmcp-item-name .dbmcp-note.is-ddl-off::before {
+        content: none;
+      }
+      /* The read-only / writable flip. A 36x20 track reads as a control at a
          glance, which is the one thing a pill with a status word on it never
-         did — the word beside it still spells out which way the switch is. */
+         did — the word beside it still spells out which way the switch is.
+         The filled track uses the ink token rather than the brand colour: at
+         this size the brand read as a link, while ink reads as "this is
+         switched on" in both themes (near-black on light, near-white on dark). */
       .dbmcp-switch {
         display: inline-flex;
         align-items: center;
@@ -882,31 +970,34 @@ window.__ModuleLoader__.load({
       .dbmcp-switch-track {
         position: relative;
         flex: 0 0 auto;
-        width: 22px;
-        height: 12px;
+        width: 36px;
+        height: 20px;
         border-radius: 999px;
-        background: color-mix(in srgb, var(--dsw-alias-label-secondary) 40%, transparent);
+        background: color-mix(in srgb, var(--dsw-alias-label-secondary) 32%, transparent);
         transition: background 140ms ease;
       }
       .dbmcp-switch-knob {
         position: absolute;
         top: 2px;
         left: 2px;
-        width: 8px;
-        height: 8px;
+        width: 16px;
+        height: 16px;
         border-radius: 50%;
         background: var(--dsw-alias-bg-base);
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
         transition: transform 140ms ease;
       }
-      .dbmcp-switch:hover:not(:disabled),
+      .dbmcp-switch:hover:not(:disabled) {
+        color: var(--dsw-alias-label-primary);
+      }
       .dbmcp-switch.is-on {
-        color: var(--dsw-alias-brand-primary);
+        color: var(--dsw-alias-label-primary);
       }
       .dbmcp-switch.is-on .dbmcp-switch-track {
-        background: var(--dsw-alias-brand-primary);
+        background: var(--dsw-alias-label-primary);
       }
       .dbmcp-switch.is-on .dbmcp-switch-knob {
-        transform: translateX(10px);
+        transform: translateX(16px);
       }
       .dbmcp-switch:disabled {
         cursor: default;
@@ -978,29 +1069,35 @@ window.__ModuleLoader__.load({
       .dbmcp-grid.is-single {
         grid-template-columns: minmax(0, 1fr);
       }
+      /* A card sits one step above the page: a hairline border, a faint lift and
+         a slightly tighter header. Without the shadow every card and every row
+         shared the same plane, which is what made the panel read as a wireframe
+         rather than a surface. */
       .dbmcp-card {
         border: 1px solid var(--dsw-alias-border-l1);
         border-radius: 12px;
         background: var(--dsw-alias-bg-layer-1);
-        padding: 8px 12px 10px;
+        padding: 10px 14px 12px;
         min-width: 0;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
       }
       .dbmcp-audit-list {
         display: flex;
         flex-direction: column;
-        gap: 3px;
+        gap: 6px;
       }
       .dbmcp-audit {
         display: flex;
         flex-wrap: wrap;
         align-items: center;
-        gap: 6px;
-        padding: 3px 8px;
+        gap: 8px;
+        padding: 6px 10px 8px;
         border: 1px solid var(--dsw-alias-border-l1);
-        border-radius: 8px;
+        border-radius: 10px;
         background: var(--dsw-alias-bg-layer-1);
         font-size: 13px;
         min-width: 0;
+        box-sizing: border-box;
       }
       .dbmcp-audit-time {
         color: var(--dsw-alias-label-secondary);
@@ -1026,15 +1123,36 @@ window.__ModuleLoader__.load({
       .dbmcp-audit-ok.is-error {
         color: var(--dsw-alias-state-error-primary);
       }
+      /* The statement is the payload of an audit row: the one thing you come to
+         this tab to read. It used to be secondary-coloured text inline with the
+         metadata, which made a query look like a caption. It now gets its own
+         recessed block, ink on the base surface with a brand rule down the left,
+         so the row reads as "these facts about that statement". */
       .dbmcp-audit-sql {
         display: block;
         width: 100%;
+        margin-top: 2px;
+        padding: 7px 10px;
+        border-left: 3px solid color-mix(in srgb, var(--dsw-alias-brand-primary) 55%, transparent);
+        border-radius: 4px 8px 8px 4px;
+        background: var(--dsw-alias-bg-base);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 12.5px;
+        line-height: 1.6;
+        color: var(--dsw-alias-label-primary);
         white-space: pre-wrap;
         overflow-wrap: anywhere;
-        font-size: 12px;
-        color: var(--dsw-alias-label-secondary);
+        tab-size: 2;
+        user-select: text;
+        /* The Host keeps up to 2000 characters of a statement. Rendering all of
+           it inline would let one long query push the rest of the audit out of
+           sight; the block scrolls instead, and the text stays selectable. */
+        max-height: 240px;
+        overflow-y: auto;
       }
       .dbmcp-audit-sql.is-error {
+        border-left-color: color-mix(in srgb, var(--dsw-alias-state-error-primary) 65%, transparent);
+        background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 7%, var(--dsw-alias-bg-base));
         color: var(--dsw-alias-state-error-primary);
       }
       .dbmcp-schema-wrap {
@@ -1069,7 +1187,7 @@ window.__ModuleLoader__.load({
         min-width: 0;
         padding: 12px;
         border: 1px solid var(--dsw-alias-border-l1);
-        border-radius: 10px;
+        border-radius: 12px;
         background: var(--dsw-alias-bg-layer-1);
       }
       .dbmcp-schema-main {
@@ -1139,19 +1257,21 @@ window.__ModuleLoader__.load({
         align-items: center;
         gap: 6px;
         width: 100%;
-        padding: 4px 6px;
+        padding: 5px 6px;
         border: 0;
-        border-radius: 6px;
+        border-radius: 7px;
         background: transparent;
         color: var(--dsw-alias-label-secondary);
         font: inherit;
         font-size: 12px;
-        font-weight: 600;
+        font-weight: 650;
+        letter-spacing: 0.01em;
         text-align: left;
         cursor: pointer;
+        transition: background 100ms ease;
       }
       .dbmcp-schema-group-head:hover {
-        background: var(--dsw-alias-bg-layer-1);
+        background: var(--dsw-alias-bg-layer-2);
       }
       .dbmcp-schema-caret {
         width: 12px;
@@ -1171,7 +1291,7 @@ window.__ModuleLoader__.load({
         gap: 8px;
         width: 100%;
         padding: 6px 8px;
-        border: 1px solid var(--dsw-alias-border-l1);
+        border: 1px solid transparent;
         border-radius: 8px;
         background: var(--dsw-alias-bg-base);
         color: var(--dsw-alias-label-primary);
@@ -1179,6 +1299,7 @@ window.__ModuleLoader__.load({
         font-size: 13px;
         text-align: left;
         cursor: pointer;
+        transition: background 100ms ease, border-color 100ms ease;
       }
       /* A GaussDB catalog hands out names like
          global_plancache_status_global_recovery_status — longer than the rail is
@@ -1205,17 +1326,31 @@ window.__ModuleLoader__.load({
         width: 100%;
         border-collapse: collapse;
         font-size: 13px;
-        margin-top: 6px;
+        margin-top: 8px;
         border: 1px solid var(--dsw-alias-border-l1);
         border-radius: 10px;
         overflow: hidden;
       }
+      /* Five columns of column names, types and defaults do not fit a narrow
+         sidebar. The wrapper scrolls rather than letting the rightmost columns
+         fall off the panel edge; the table keeps a readable floor so the type
+         column still wraps in words instead of one character per line. */
+      .dbmcp-schema-tablewrap {
+        overflow-x: auto;
+        border-radius: 10px;
+      }
+      .dbmcp-schema-tablewrap .dbmcp-schema-tablegrid {
+        min-width: 320px;
+      }
       .dbmcp-schema-tablegrid th,
       .dbmcp-schema-tablegrid td {
         text-align: left;
-        padding: 4px 8px;
+        padding: 5px 9px;
         border-bottom: 1px solid var(--dsw-alias-border-l1);
         vertical-align: top;
+      }
+      .dbmcp-schema-tablegrid tbody tr:hover {
+        background: var(--dsw-alias-bg-layer-1);
       }
       .dbmcp-schema-tablegrid tr:last-child td {
         border-bottom: none;
@@ -1238,38 +1373,68 @@ window.__ModuleLoader__.load({
         align-items: center;
         gap: 8px;
         flex-wrap: wrap;
-        margin: 6px 0 10px;
+        margin: 8px 0 12px;
       }
+      /* The URL and its three controls share one line. The URL grows into the
+         leftover space but keeps a basis wide enough to stay readable; when the
+         panel is too narrow for both, the controls wrap underneath instead of
+         squeezing the address into a stub. */
       .dbmcp-endpoint-url {
-        flex: 1 1 240px;
+        flex: 1 1 260px;
         min-width: 0;
-        padding: 5px 10px;
+        padding: 6px 10px;
         border: 1px solid var(--dsw-alias-border-l1);
         border-radius: 8px;
-        background: var(--dsw-alias-bg-layer-1);
+        background: var(--dsw-alias-bg-base);
         font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
         font-size: 12px;
+        color: var(--dsw-alias-label-primary);
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+        user-select: all;
+      }
+      /* The port used to be a bare box between two buttons with only an
+         aria-label: on screen nothing said what it held. It carries a visible
+         label now, so the row reads "copy · port 8765 · stop". */
+      .dbmcp-port-label {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 12px;
+        color: var(--dsw-alias-label-secondary);
       }
       .dbmcp-port {
-        flex: 0 0 92px;
-        width: 92px;
+        flex: 0 0 78px;
+        width: 78px;
+        text-align: center;
+        font-variant-numeric: tabular-nums;
+      }
+      /* The three controls travel as one group so they wrap as a unit under the
+         URL rather than splitting across two lines. */
+      .dbmcp-endpoint-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex: 0 0 auto;
       }
       .dbmcp-clients {
         display: flex;
         flex-direction: column;
-        gap: 4px;
+        gap: 5px;
       }
       .dbmcp-client {
         display: flex;
         align-items: center;
         gap: 10px;
-        padding: 5px 8px;
+        padding: 6px 9px;
         border: 1px solid var(--dsw-alias-border-l1);
-        border-radius: 8px;
+        border-radius: 10px;
         background: var(--dsw-alias-bg-layer-1);
+        transition: border-color 120ms ease;
+      }
+      .dbmcp-client:hover {
+        border-color: var(--dsw-alias-border-l2);
       }
       .dbmcp-client-main {
         display: flex;
@@ -1291,32 +1456,35 @@ window.__ModuleLoader__.load({
         display: flex;
         align-items: baseline;
         gap: 10px;
-        margin: 14px 0 6px;
+        margin: 16px 0 8px;
         flex-wrap: wrap;
       }
       .dbmcp-tools-title {
         margin: 0;
         font-size: 13px;
-        font-weight: 600;
+        font-weight: 650;
+        letter-spacing: -0.003em;
         color: var(--dsw-alias-label-primary);
       }
       .dbmcp-tools {
         display: flex;
         flex-direction: column;
-        gap: 2px;
+        gap: 3px;
       }
       .dbmcp-tool {
         display: flex;
         align-items: flex-start;
-        gap: 8px;
-        padding: 5px 8px;
+        gap: 10px;
+        padding: 6px 9px;
         border: 1px solid var(--dsw-alias-border-l1);
-        border-radius: 8px;
+        border-radius: 9px;
         background: var(--dsw-alias-bg-layer-1);
         cursor: pointer;
         min-width: 0;
+        transition: border-color 120ms ease, background 120ms ease;
       }
       .dbmcp-tool:hover {
+        border-color: var(--dsw-alias-border-l2);
         background: var(--dsw-alias-bg-layer-2);
       }
       .dbmcp-tool.is-off {
@@ -1326,7 +1494,7 @@ window.__ModuleLoader__.load({
         margin: 2px 0 0;
         flex: 0 0 auto;
       }
-          .dbmcp-tool-limit {
+      .dbmcp-tool-limit {
         flex: 0 0 96px;
         display: inline-flex;
         align-items: center;
@@ -1342,7 +1510,7 @@ window.__ModuleLoader__.load({
         font-variant-numeric: tabular-nums;
       }
       .dbmcp-limit-unit { font-size: 12px; color: var(--dsw-alias-label-secondary); }
-  .dbmcp-tool-main {
+      .dbmcp-tool-main {
         display: flex;
         flex-direction: column;
         gap: 1px;
@@ -1366,12 +1534,15 @@ window.__ModuleLoader__.load({
         align-items: center;
         justify-content: space-between;
         gap: 10px;
-        margin-bottom: 6px;
+        margin-bottom: 10px;
+        min-height: 22px;
       }
       .dbmcp-card-title {
         margin: 0;
         font-size: 13px;
-        font-weight: 600;
+        font-weight: 650;
+        letter-spacing: -0.003em;
+        color: var(--dsw-alias-label-primary);
       }
       .dbmcp-empty {
         padding: 26px 10px;
@@ -1476,11 +1647,18 @@ window.__ModuleLoader__.load({
       .dbmcp-list {
         display: flex;
         flex-direction: column;
-        gap: 3px;
+        gap: 6px;
         margin: 0;
         padding: 0;
         list-style: none;
+        /* Rows answer their own width, not the viewport's: in a narrow panel the
+           four row buttons used to squeeze into a two-character column. The
+           query sits further down, after the rules it overrides. */
+        container-type: inline-size;
       }
+      /* Rows get a hover plane of their own so a pointer anywhere over the row
+         knows which row it is about — the row is a big click target for the
+         switch, and previously nothing moved under the cursor. */
       .dbmcp-item {
         display: flex;
         flex-direction: column;
@@ -1488,8 +1666,12 @@ window.__ModuleLoader__.load({
         border: 1px solid var(--dsw-alias-border-l1);
         border-radius: 10px;
         background: var(--dsw-alias-bg-layer-2);
-        padding: 5px 8px;
+        padding: 6px 9px;
         font-size: 13px;
+        transition: border-color 120ms ease, background 120ms ease;
+      }
+      .dbmcp-item:hover {
+        border-color: var(--dsw-alias-border-l2);
       }
       .dbmcp-item-row {
         display: flex;
@@ -1532,17 +1714,18 @@ window.__ModuleLoader__.load({
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        width: 30px;
-        height: 30px;
-        flex: 0 0 30px;
-        border-radius: 9px;
+        width: 26px;
+        height: 26px;
+        flex: 0 0 26px;
+        margin-top: 1px;
+        border-radius: 8px;
         border: 1px solid var(--dsw-alias-border-l1);
         background: var(--dsw-alias-bg-layer-2);
         color: var(--dsw-alias-label-primary);
         font-size: 10px;
-        font-weight: 700;
+        font-weight: 650;
         line-height: 1;
-        letter-spacing: 0.02em;
+        letter-spacing: 0.03em;
         text-transform: uppercase;
         overflow: hidden;
       }
@@ -1569,20 +1752,25 @@ window.__ModuleLoader__.load({
         font-size: 12px;
         overflow-wrap: anywhere;
       }
+      /* The strip that carries the MCP state, the counts and the filter chips.
+         It is the first thing under the tabs, so it gets the page's one tinted
+         surface: a bordered box the same weight as a card just read as another
+         card and pushed the list down without saying anything. It carries no
+         bottom margin of its own — the grid gap already separates it from the
+         list, and the two together left a dead band under the strip. */
       .dbmcp-status {
         display: flex;
         flex-direction: column;
-        gap: 4px;
-        margin-bottom: 6px;
-        padding: 5px 10px;
+        gap: 6px;
+        padding: 10px 12px;
         border: 1px solid var(--dsw-alias-border-l1);
         border-radius: 10px;
-        background: var(--dsw-alias-bg-layer-1);
+        background: color-mix(in srgb, var(--dsw-alias-label-primary) 3%, var(--dsw-alias-bg-layer-1));
       }
       .dbmcp-status-row {
         display: flex;
         align-items: center;
-        gap: 6px;
+        gap: 8px;
         flex-wrap: wrap;
         font-size: 12px;
         min-height: 24px;
@@ -1593,11 +1781,11 @@ window.__ModuleLoader__.load({
       .dbmcp-stats {
         display: inline-flex;
         align-items: center;
-        gap: 14px;
-        padding: 4px 14px;
-        border: 1px solid var(--dsw-alias-border-l1);
+        gap: 12px;
+        padding: 2px 10px;
         border-radius: 999px;
         color: var(--dsw-alias-label-secondary);
+        font-variant-numeric: tabular-nums;
         white-space: nowrap;
       }
       .dbmcp-stat {
@@ -1758,10 +1946,12 @@ window.__ModuleLoader__.load({
         align-items: center;
         gap: 8px;
         flex-wrap: wrap;
-        margin-bottom: 6px;
+        margin: 2px 0 8px;
       }
       .dbmcp-list-head .dbmcp-card-title {
         margin-right: 4px;
+        font-size: 13px;
+        font-weight: 650;
       }
       .dbmcp-list-spacer {
         flex: 1 1 auto;
@@ -1939,6 +2129,26 @@ window.__ModuleLoader__.load({
         gap: 6px;
         flex-wrap: wrap;
         justify-content: flex-end;
+        /* The buttons keep their size and the name gives way instead: letting
+           this box shrink broke the four of them across two lines whenever a
+           row carried a long identifier. */
+        flex: 0 0 auto;
+      }
+      /* Narrow rows wrap: the name takes the first line, the four actions drop to
+         a second one and start from the left. It has to live here, after the rules
+         it overrides — a query above them loses on source order. */
+      @container (max-width: 520px) {
+        .dbmcp-item-row {
+          flex-wrap: wrap;
+          /* space-between would strand the checkbox and the badge at the far
+             edge, a whole row away from the name they belong to. */
+          justify-content: flex-start;
+        }
+        .dbmcp-item-actions {
+          width: 100%;
+          justify-content: flex-start;
+          padding-left: 2px;
+        }
       }
       .dbmcp-probe {
         margin-top: 6px;
@@ -1951,20 +2161,26 @@ window.__ModuleLoader__.load({
       .dbmcp-probe.is-error {
         color: var(--dsw-alias-state-error-primary);
       }
+      /* A notice is the panel's voice, so it is tinted: a plain bordered box the
+         same colour as everything else was easy to read past. */
       .dbmcp-notice {
         display: flex;
         align-items: center;
         justify-content: space-between;
         gap: 12px;
         border: 1px solid var(--dsw-alias-border-l1);
+        border-left: 3px solid var(--dsw-alias-state-success-primary);
         border-radius: 10px;
         padding: 9px 12px;
         margin-bottom: 12px;
         font-size: 13px;
-        background: var(--dsw-alias-bg-layer-2);
+        line-height: 1.5;
+        background: color-mix(in srgb, var(--dsw-alias-state-success-primary) 7%, var(--dsw-alias-bg-layer-2));
       }
       .dbmcp-notice.is-error {
-        border-color: var(--dsw-alias-state-error-primary);
+        border-color: color-mix(in srgb, var(--dsw-alias-state-error-primary) 35%, var(--dsw-alias-border-l1));
+        border-left-color: var(--dsw-alias-state-error-primary);
+        background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 8%, var(--dsw-alias-bg-layer-2));
       }
       .dbmcp-form {
         display: grid;
@@ -1992,6 +2208,10 @@ window.__ModuleLoader__.load({
         max-width: none;
         box-sizing: border-box;
         font-size: 13px;
+        /* The panel is a sidebar, so its width is the form's width — not the
+           viewport's. Two- and three-column rows are declared below and folded
+           back to one column by the query at the end of this block. */
+        container-type: inline-size;
       }
       .dbmcp-form-section {
         display: flex;
@@ -2091,10 +2311,15 @@ window.__ModuleLoader__.load({
         display: flex;
         align-items: center;
         gap: 10px;
-        padding: 6px 10px;
+        padding: 8px 12px;
         border: 1px solid var(--dsw-alias-border-l1);
-        border-radius: 8px;
+        border-radius: 10px;
         font-size: 13px;
+        transition: border-color 120ms ease, background 120ms ease;
+      }
+      .dbmcp-advanced.is-page > summary:hover {
+        border-color: var(--dsw-alias-border-l2);
+        background: var(--dsw-alias-bg-layer-1);
       }
       .dbmcp-advanced.is-page[open] > summary {
         margin-bottom: 16px;
@@ -2114,9 +2339,9 @@ window.__ModuleLoader__.load({
         flex-direction: column;
         gap: 4px;
         border: 1px solid var(--dsw-alias-border-l1);
-        border-radius: 8px;
+        border-radius: 12px;
         background: var(--dsw-alias-bg-layer-2);
-        padding: 12px 14px;
+        padding: 14px 16px;
       }
       .dbmcp-readonly .dbmcp-check {
         font-size: 13px;
@@ -2132,9 +2357,9 @@ window.__ModuleLoader__.load({
         flex-direction: column;
         gap: 12px;
         border: 1px solid var(--dsw-alias-border-l1);
-        border-radius: 8px;
+        border-radius: 12px;
         background: var(--dsw-alias-bg-layer-2);
-        padding: 12px 14px;
+        padding: 14px 16px;
       }
       .dbmcp-policy-head {
         display: flex;
@@ -2164,48 +2389,50 @@ window.__ModuleLoader__.load({
       .dbmcp-unlock-card {
         display: flex;
         flex-direction: column;
-        gap: 12px;
+        gap: 14px;
         width: min(520px, 100%);
         max-height: min(80vh, 640px);
         overflow: auto;
         border: 1px solid var(--dsw-alias-border-l1);
-        border-radius: 10px;
+        border-radius: 14px;
         background: var(--dsw-alias-bg-layer-1);
         box-shadow: 0 18px 48px rgba(0, 0, 0, 0.32);
-        padding: 16px 18px;
+        padding: 18px 20px;
       }
       .dbmcp-unlock-head {
         display: flex;
         flex-direction: column;
-        gap: 4px;
+        gap: 6px;
       }
       .dbmcp-unlock-title {
-        font-size: 14px;
-        font-weight: 600;
+        font-size: 15px;
+        font-weight: 650;
+        letter-spacing: -0.005em;
         color: var(--dsw-alias-label-primary);
       }
       .dbmcp-unlock-list {
         list-style: none;
         margin: 0;
-        padding: 0;
+        padding: 6px;
         display: flex;
         flex-direction: column;
-        gap: 2px;
+        gap: 1px;
         max-height: 260px;
         overflow: auto;
         border: 1px solid var(--dsw-alias-border-l1);
-        border-radius: 8px;
-        padding: 6px;
+        border-radius: 10px;
+        background: var(--dsw-alias-bg-base);
       }
       .dbmcp-unlock-row {
         display: flex;
         align-items: center;
         gap: 8px;
-        padding: 4px 6px;
+        padding: 6px 8px;
         border-radius: 6px;
         font-size: 12px;
         color: var(--dsw-alias-label-primary);
         cursor: pointer;
+        transition: background 100ms ease;
       }
       .dbmcp-unlock-row:hover {
         background: var(--dsw-alias-bg-layer-2);
@@ -2236,9 +2463,9 @@ window.__ModuleLoader__.load({
         display: flex;
         flex-direction: column;
         gap: 4px;
-        padding: 10px 12px;
+        padding: 12px 14px;
         border: 1px solid var(--dsw-alias-border-l1);
-        border-radius: 8px;
+        border-radius: 12px;
         background: var(--dsw-alias-bg-layer-2);
       }
       .dbmcp-unlock-ddl .dbmcp-hint {
@@ -2305,15 +2532,18 @@ window.__ModuleLoader__.load({
       .dbmcp-advanced {
         grid-column: 1 / -1;
         border: 1px solid var(--dsw-alias-border-l1);
-        border-radius: 8px;
+        border-radius: 10px;
         background: var(--dsw-alias-bg-layer-2);
-        padding: 8px 12px 12px;
+        padding: 10px 14px 14px;
       }
       .dbmcp-advanced > summary {
         cursor: pointer;
         font-size: 12px;
         color: var(--dsw-alias-label-secondary);
         padding: 2px 0;
+      }
+      .dbmcp-advanced > summary:hover {
+        color: var(--dsw-alias-label-primary);
       }
       .dbmcp-advanced[open] > summary {
         margin-bottom: 10px;
@@ -2329,17 +2559,26 @@ window.__ModuleLoader__.load({
         font: inherit;
         font-size: 13px;
         padding: 6px 9px;
+        transition: border-color 120ms ease, box-shadow 120ms ease;
       }
+      .dbmcp-input:hover:not(:disabled),
+      .dbmcp-select:hover:not(:disabled) {
+        border-color: var(--dsw-alias-border-l2);
+      }
+      /* A focus ring, not just a colour change: the border alone disappeared
+         among the other borders on a form this dense. */
       .dbmcp-input:focus,
       .dbmcp-select:focus {
         outline: none;
         border-color: var(--dsw-alias-brand-primary);
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--dsw-alias-brand-primary) 18%, transparent);
       }
       .dbmcp-input.is-invalid {
         border-color: var(--dsw-alias-state-error-primary);
       }
       .dbmcp-input.is-invalid:focus {
         border-color: var(--dsw-alias-state-error-primary);
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--dsw-alias-state-error-primary) 18%, transparent);
       }
       .dbmcp-hint {
         font-size: 12px;
@@ -2357,7 +2596,7 @@ window.__ModuleLoader__.load({
         display: flex;
         align-items: center;
         gap: 10px;
-        margin-top: 8px;
+        margin-top: 12px;
       }
       .dbmcp-scan {
         display: flex;
@@ -2390,6 +2629,38 @@ window.__ModuleLoader__.load({
       .dbmcp-scan-bar .dbmcp-btn {
         margin-left: auto;
         flex: 0 0 auto;
+      }
+      /* The select-all box belongs to the bar, not to the rows: it sits first in
+         the reading order of the actions and dims out when the filter leaves
+         nothing that could be picked. */
+      .dbmcp-scan-all {
+        flex: 0 0 auto;
+        font-size: 12px;
+        color: var(--dsw-alias-label-secondary);
+        cursor: pointer;
+        user-select: none;
+      }
+      .dbmcp-scan-all.is-off,
+      .dbmcp-scan-all:has(input:disabled) {
+        cursor: default;
+        opacity: 0.55;
+      }
+      .dbmcp-scan-all .dbmcp-hint {
+        font-variant-numeric: tabular-nums;
+      }
+      /* Narrow sidebar: two- and three-column rows have no room to sit side by
+         side, and before this query they simply ran past the right edge — the
+         labels and inputs on the right were cut off with no scrollbar to say
+         so. Fold them to one column instead. */
+      @container (max-width: 560px) {
+        .dbmcp-form-section.is-two,
+        .dbmcp-form-section.is-three {
+          grid-template-columns: minmax(0, 1fr);
+        }
+        .dbmcp-form-head {
+          flex-wrap: wrap;
+          row-gap: 4px;
+        }
       }
     `
 
@@ -3745,6 +4016,24 @@ function groupTables(tables) {
       const totalConnections = (all || []).reduce((sum, source) => sum + (source.connections || []).length, 0)
       const visibleConnections = files.reduce((sum, source) => sum + source.connections.length, 0)
 
+      /* Only what the filter currently shows, and only what can actually be
+         imported: a row that is already in the registry can never be picked, so
+         it must not hold the button in a half-selected state. */
+      const pickable = files.reduce(
+        (ids, source) =>
+          ids.concat(
+            source.connections
+              .filter((item) => item.importable && item.alreadyImported !== true && !existing.includes(item.id))
+              .map((item) => item.id),
+          ),
+        [],
+      )
+      const allPicked = pickable.length > 0 && pickable.every((id) => selected.includes(id))
+      const toggleAll = () =>
+        setSelected((prev) =>
+          allPicked ? prev.filter((id) => !pickable.includes(id)) : Array.from(new Set([...prev, ...pickable])),
+        )
+
       if (state.status === 'loading') return h('div', { className: 'dbmcp-empty' }, t('loading'))
       if (state.status === 'error') {
         return h('div', { className: 'dbmcp-error' }, h('div', null, state.error))
@@ -3765,6 +4054,18 @@ function groupTables(tables) {
             onChange: setFilter,
           }),
           h('span', { className: 'dbmcp-hint' }, fmt(t('import.matches'), { n: visibleConnections, total: totalConnections })),
+          h(
+            'label',
+            { className: 'dbmcp-check dbmcp-scan-all' + (pickable.length === 0 ? ' is-off' : '') },
+            h('input', {
+              type: 'checkbox',
+              checked: allPicked,
+              disabled: pickable.length === 0,
+              onChange: toggleAll,
+            }),
+            h('span', null, t('import.selectAll')),
+            pickable.length > 0 ? h('span', { className: 'dbmcp-hint' }, `(${pickable.length})`) : null,
+          ),
           h(
             'button',
             { type: 'button', className: 'dbmcp-btn is-primary', disabled: busy || selected.length === 0, onClick: runImport },
@@ -4032,33 +4333,37 @@ function groupTables(tables) {
                           h('span', { className: 'dbmcp-hint' }, fmt(t('schema.columns'), { n: (detail.columns || []).length })),
                         ),
                         h(
-                          'table',
-                          { className: 'dbmcp-schema-tablegrid' },
+                          'div',
+                          { className: 'dbmcp-schema-tablewrap' },
                           h(
-                            'thead',
-                            null,
+                            'table',
+                            { className: 'dbmcp-schema-tablegrid' },
                             h(
-                              'tr',
+                              'thead',
                               null,
-                              h('th', null, t('schema.column')),
-                              h('th', null, t('schema.type')),
-                              h('th', null, t('schema.nullable')),
-                              h('th', null, t('schema.default')),
-                              h('th', null, t('schema.pk')),
-                            ),
-                          ),
-                          h(
-                            'tbody',
-                            null,
-                            (detail.columns || []).map((column) =>
                               h(
                                 'tr',
-                                { key: column.name },
-                                h('td', null, column.name),
-                                h('td', { className: 'dbmcp-mono' }, column.type || ''),
-                                h('td', null, column.nullable ? t('schema.yes') : t('schema.no')),
-                                h('td', { className: 'dbmcp-mono' }, column.default === null || column.default === undefined ? '' : String(column.default)),
-                                h('td', null, column.primaryKey ? '●' : ''),
+                                null,
+                                h('th', null, t('schema.column')),
+                                h('th', null, t('schema.type')),
+                                h('th', null, t('schema.nullable')),
+                                h('th', null, t('schema.default')),
+                                h('th', null, t('schema.pk')),
+                              ),
+                            ),
+                            h(
+                              'tbody',
+                              null,
+                              (detail.columns || []).map((column) =>
+                                h(
+                                  'tr',
+                                  { key: column.name },
+                                  h('td', null, column.name),
+                                  h('td', { className: 'dbmcp-mono' }, column.type || ''),
+                                  h('td', null, column.nullable ? t('schema.yes') : t('schema.no')),
+                                  h('td', { className: 'dbmcp-mono' }, column.default === null || column.default === undefined ? '' : String(column.default)),
+                                  h('td', null, column.primaryKey ? '●' : ''),
+                                ),
                               ),
                             ),
                           ),
@@ -5230,31 +5535,39 @@ function groupTables(tables) {
             { className: 'dbmcp-endpoint' },
             h('code', { className: 'dbmcp-endpoint-url' }, (http && http.url) || (clients && clients.url) || '—'),
             h(
-              'button',
-              {
-                type: 'button',
-                className: 'dbmcp-btn is-small',
-                onClick: () => copyEndpoint((http && http.url) || (clients && clients.url) || ''),
-              },
-              copiedEndpoint ? t('clients.copied') : t('clients.copy'),
-            ),
-            h('input', {
-              className: 'dbmcp-input dbmcp-port',
-              inputMode: 'numeric',
-              placeholder: String((settings && settings.httpPort) || 8765),
-              value: portDraft,
-              'aria-label': t('clients.port'),
-              onChange: (event) => setPortDraft(event.target.value),
-            }),
-            h(
-              'button',
-              {
-                type: 'button',
-                className: 'dbmcp-btn is-small',
-                disabled: busy,
-                onClick: () => controlHttp(http && http.running ? 'stop' : 'start'),
-              },
-              http && http.running ? t('clients.stop') : t('clients.start'),
+              'div',
+              { className: 'dbmcp-endpoint-actions' },
+              h(
+                'button',
+                {
+                  type: 'button',
+                  className: 'dbmcp-btn is-small',
+                  onClick: () => copyEndpoint((http && http.url) || (clients && clients.url) || ''),
+                },
+                copiedEndpoint ? t('clients.copied') : t('clients.copy'),
+              ),
+              h(
+                'label',
+                { className: 'dbmcp-port-label' },
+                h('span', null, t('clients.port')),
+                h('input', {
+                  className: 'dbmcp-input dbmcp-port',
+                  inputMode: 'numeric',
+                  placeholder: String((settings && settings.httpPort) || 8765),
+                  value: portDraft,
+                  onChange: (event) => setPortDraft(event.target.value),
+                }),
+              ),
+              h(
+                'button',
+                {
+                  type: 'button',
+                  className: 'dbmcp-btn is-small',
+                  disabled: busy,
+                  onClick: () => controlHttp(http && http.running ? 'stop' : 'start'),
+                },
+                http && http.running ? t('clients.stop') : t('clients.start'),
+              ),
             ),
           ),
           http && http.error ? h('p', { className: 'dbmcp-hint is-error' }, http.error) : null,
@@ -5498,16 +5811,19 @@ function groupTables(tables) {
               h(
                 Row,
                 { label: t('diag.write') },
-                h('input', {
-                  type: 'checkbox',
-                  className: 'dbmcp-check',
-                  checked: Boolean(settings && settings.allowWrite),
-                  onChange: (event) => toggleWrite(event.target.checked),
-                }),
                 h(
                   'span',
-                  { className: 'dbmcp-hint' },
-                  settings && settings.allowWrite ? t('diag.writeOn') : t('diag.writeOff'),
+                  { className: 'dbmcp-inline' },
+                  h(Switch, {
+                    checked: Boolean(settings && settings.allowWrite),
+                    title: t('diag.write'),
+                    onChange: (next) => toggleWrite(next),
+                  }),
+                  h(
+                    'span',
+                    { className: 'dbmcp-hint' },
+                    settings && settings.allowWrite ? t('diag.writeOn') : t('diag.writeOff'),
+                  ),
                 ),
               ),
               h(
