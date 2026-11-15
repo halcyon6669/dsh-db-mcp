@@ -9,7 +9,7 @@ import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const files = ['README.md', 'README.zh.md', ...readdirSync(join(root, 'docs')).filter((name) => name.endsWith('.md')).map((name) => `docs/${name}`)]
+const files = ['README.md', 'README.zh.md', 'CHANGELOG.md', ...readdirSync(join(root, 'docs')).filter((name) => name.endsWith('.md')).map((name) => `docs/${name}`)]
 
 const problems = []
 const checked = []

@@ -110,6 +110,7 @@ dsh plugin --profile web add dsh-db-mcp       # Web 端
 
 | 文档 | 内容 |
 | ---- | ---- |
+| [CHANGELOG.md](CHANGELOG.md) | 每个版本改了什么 —— 一版一段、带日期，外加 `main` 上还没来得及发布的部分 |
 | [docs/guide.zh.md](docs/guide.zh.md) | 面板操作：安装、连接串、导入、分组、结构浏览（中文） |
 | [docs/safety.zh.md](docs/safety.zh.md) | 四道闸门、可写模式，以及外部客户端仍受哪些约束（中文） |
 | [docs/clients.zh.md](docs/clients.zh.md) | HTTP 端点、接入其它客户端、工具清单（中文） |

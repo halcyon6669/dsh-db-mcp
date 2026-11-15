@@ -64,6 +64,17 @@ jobs:
           fi
           echo "publishing ${version}"
 
+      - name: Check the changelog has a section for this tag
+        # The release page is created from this section, so publishing a version
+        # with no entry would leave a tag nothing describes.
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./package.json').version")"
+          node dev/changelog.mjs check
+          node dev/changelog.mjs notes "$version" > /tmp/notes.md
+          test -s /tmp/notes.md
+          echo "release notes for ${version}: $(wc -l < /tmp/notes.md) line(s)"
+
       - name: Run the portable test suites
         run: npm run test:ci
 

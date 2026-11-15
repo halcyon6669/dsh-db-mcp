@@ -162,6 +162,7 @@ smaller tool list in the model's context.
 
 | Document | Contents |
 | -------- | -------- |
+| [CHANGELOG.md](CHANGELOG.md) | Every release and what it changed — one dated section per version, plus what is on `main` but not yet published |
 | [docs/guide.md](docs/guide.md) | Panel walkthrough: install, connection strings, importing, groups, structure browser |
 | [docs/safety.md](docs/safety.md) | The four gates, writable schemas, what still applies to an outside client |
 | [docs/clients.md](docs/clients.md) | The HTTP endpoint, wiring other clients, the tools list |

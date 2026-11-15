@@ -67,6 +67,7 @@ npm run test:ci       # the portable subset the publish workflow runs
 npm run test:mcp      # real Python server, real SQLite; Oracle when its container is up
 npm run test:engines  # the Python suites: engines.py, writes.py and secretbox.py
 npm run test:docs     # fenced blocks, table widths and relative links in the docs
+npm run test:changelog # the changelog's structure and its per-version sections
 ```
 
 | Suite | Covers |
@@ -83,11 +84,23 @@ npm run test:docs     # fenced blocks, table widths and relative links in the do
 | `dev/p5.test.mjs` | settings, audit rotation, Python environment discovery |
 | `dev/mcp.test.mjs` | real stdio handshake, all eight tools, read-only refusal, login failures |
 | `dev/docs.check.mjs` | balanced code fences, table column counts, relative links and headings in every Markdown file |
+| `dev/changelog.mjs` | the changelog's structure: one dated section per released version, newest first, each with a link target |
 
 Suites that need external services skip rather than fail: `mcp.test.mjs` probes the
 Oracle port and prints `skip … is not listening` when the container is down.
 
 ## Releasing
+
+Release notes live in [`CHANGELOG.md`](../CHANGELOG.md), in the
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/) shape: one `## [version]`
+section per release, newest first, with `### Added` / `### Changed` / `### Fixed` /
+`### Removed` underneath. Work that is merged but not published accumulates under
+`## [Unreleased]`; there is exactly one such heading, always at the top.
+
+Writing the change down is part of the change. A pull request that alters behaviour
+adds its line to the matching subsection of `[Unreleased]`; a pure refactor or a test
+only change earns nothing. The entry says what a user can now do or no longer hits,
+not which function moved.
 
 The package publishes from GitHub Actions with
 [npm trusted publishing](https://docs.npmjs.com/trusted-publishers):
@@ -95,42 +108,50 @@ The package publishes from GitHub Actions with
 publish credential, so no `NPM_TOKEN` secret exists.
 
 ```sh
-node dev/bump.mjs 0.8.0     # package.json + src/host.js, both
-git commit -am "chore: release 0.8.0"
+node dev/bump.mjs 0.9.8     # package.json + src/host.js + the changelog section
+git commit -am "chore: release 0.9.8"
 git push origin main
-git tag v0.8.0 && git push origin v0.8.0
+git tag v0.9.8 && git push origin v0.9.8
 ```
 
-The workflow refuses to publish when the tag and `package.json` disagree, runs
-`npm run test:ci`, publishes with `--provenance`, then polls the registry until the
-version appears. Local `npm publish` still works for the very first release, before
-a trusted publisher exists.
+`bump.mjs` is the only supported way to cut a version: it bumps both files that carry
+one and turns `## [Unreleased]` into `## [0.9.8] - <today>`, opening a fresh
+`[Unreleased]` above it and rewriting the two compare links at the bottom. It refuses
+to run when the section is empty, so a version cannot ship with nothing to say.
 
-Pushing the tag publishes to npm and nothing else: it does **not** open a page
-under *Releases*, so the repository keeps its notes in `docs/release-<version>.md`
-and the release is created from that file:
+The workflow then refuses to publish when the tag, `package.json` and the changelog
+disagree — it runs `node dev/changelog.mjs check`, extracts the section for the tag
+with `node dev/changelog.mjs notes <version>`, runs `npm run test:ci`, publishes with
+`--provenance`, and polls the registry until the version appears. Local `npm publish`
+still works for the very first release, before a trusted publisher exists.
+
+Pushing the tag publishes to npm and nothing else: it does **not** open a page under
+*Releases*, so the release page is created from the same section:
 
 ```sh
-gh release create v0.8.0 \
-  --title "v0.8.0 - <one line summary>" \
-  --notes-file docs/release-0.8.0.md \
+node dev/changelog.mjs notes 0.9.8 > /tmp/notes.md
+gh release create v0.9.8 \
+  --title "v0.9.8 - <one line summary>" \
+  --notes-file /tmp/notes.md \
   --verify-tag
 ```
 
-`--verify-tag` makes the command fail instead of creating a tag that was never
-pushed. The notes file is the single source: the GitHub release body is a copy of
-it, so correcting the file afterwards means editing the release page too. Only the
-most recent release pages have such a file — older tags carry their notes in the
-annotated tag object, which `git tag -l --format='%(contents)' v0.9.6` prints.
+`--verify-tag` makes the command fail instead of creating a tag that was never pushed.
+The changelog file is the single source: the release body is a copy of one section of
+it, so correcting that section afterwards means editing the release page too. Releases
+older than 0.6.4 predate the changelog; their notes are in the annotated tag object,
+which `git tag -l --format='%(contents)' v0.5.0` prints, and
+[design-notes.md](design-notes.md) narrates them.
 
 Keep `src/host.js`'s `PLUGIN_VERSION` in step with `package.json` — the panel and
 `/health` read it, and a mismatch ships a package that reports the previous version.
+That is what `bump.mjs` is for.
 
 Installing that release into a profile (the profile name is required, the verb is
 pnpm's):
 
 ```sh
-dsh plugin --profile desktop add dsh-db-mcp@0.8.0
+dsh plugin --profile desktop add dsh-db-mcp@0.9.8
 dsh plugin --profile desktop remove dsh-db-mcp
 ```
 
