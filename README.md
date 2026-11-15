@@ -169,7 +169,7 @@ smaller tool list in the model's context.
 | [docs/runtime.md](docs/runtime.md) | Runtime directory, Python dependencies, Docker test databases, troubleshooting |
 | [docs/reference.md](docs/reference.md) | HTTP routes, tool contracts, registry and settings files, plugin config |
 | [docs/development.md](docs/development.md) | Repository layout, hot reload, test suites, release flow |
-| [docs/design-notes.md](docs/design-notes.md) | Historical design log (P1 → P7) and the decisions behind them |
+| [docs/design-notes.md](docs/design-notes.md) | The design notes (Chinese): current-state spec for the architecture, the data model, the four gates and the plugin config — and why each decision was made |
 | [docs/architecture.drawio](docs/architecture.drawio) | Three-page map: file layout, call graph, runtime picture |
 
 ## License
