@@ -45,7 +45,9 @@ if (changelog.charCodeAt(0) === 0xfeff) {
   console.error('CHANGELOG.md starts with a BOM — remove it first')
   process.exit(1)
 }
-const unreleased = /^## \[Unreleased\]\s*$/m
+// `[ \t]*` rather than `\s*`: a newline-eating suffix would make the replacement
+// swallow the blank line that separates the heading from the first `###` section.
+const unreleased = /^## \[Unreleased\][ \t]*$/m
 if (!unreleased.test(changelog)) {
   console.error('CHANGELOG.md has no `## [Unreleased]` heading to cut the release from')
   process.exit(1)
