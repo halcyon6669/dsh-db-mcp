@@ -67,8 +67,8 @@ report of each version in more detail.
   `[Unreleased]`.
 - **The design log caught up.** `docs/design-notes.md` had stopped at 0.6.5; it now
   describes the state the code is actually in (five drivers including openGauss, the
-  four gates, the files under the runtime directory, the nine tools) and narrates every
-  release up to this one.
+  four gates, the files under the runtime directory, the nine tools). Per-version
+  history lives in this changelog and in `git log`, not in the design notes.
 
 ### Fixed
 
