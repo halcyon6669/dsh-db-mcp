@@ -371,6 +371,26 @@ check(
 )
 check('row pills: no clickable pill rule is left', !/button\.dbmcp-pill \{/.test(source))
 
+// The switch is checked for "writable" while the API takes a `readOnly` flag,
+// so the value POSTed is the opposite of the stored one. 0.9.9 shipped the
+// un-inverted value and the switch became a no-op ("可写切换不了").
+const { nextReadOnly } = mod.__test
+check(
+  'row switch: clicking a read-only source asks to unlock it',
+  nextReadOnly({ readOnly: true }) === false,
+  String(nextReadOnly({ readOnly: true })),
+)
+check(
+  'row switch: clicking a writable source asks to lock it',
+  nextReadOnly({ readOnly: false }) === true,
+  String(nextReadOnly({ readOnly: false })),
+)
+check(
+  'row switch: a source with no flag counts as read-only',
+  nextReadOnly({}) === false,
+  String(nextReadOnly({})),
+)
+
 // A 2px underline under one of eight same-coloured words was too weak a signal
 // for "this is the page you are on", so the active tab fills in as well.
 const tabRule = source.slice(source.indexOf('      .dbmcp-tab {'), source.indexOf('      .dbmcp-sub {'))

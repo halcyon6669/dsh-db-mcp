@@ -21,6 +21,16 @@ report of each version in more detail.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The writable switch on a data-source row can be flipped again.** 0.9.9
+  re-posted the state a source was already in: clicking a read-only row sent
+  `readOnly: true` and clicking a writable one sent `readOnly: false`, so the
+  switch looked dead and the banner claimed the source had just become
+  read-only. The switch is checked for "writable" while the API takes a
+  `readOnly` flag, so the value posted has to be the opposite of the stored
+  one. Both directions are now pinned by a unit test.
+
 ## [0.9.9] - 2026-11-16
 
 ### Changed

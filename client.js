@@ -2783,6 +2783,21 @@ window.__ModuleLoader__.load({
       )
     }
 
+    /**
+     * The `readOnly` value to POST when the row's writable switch is clicked.
+     *
+     * The switch is checked when the source is writable (`readOnly === false`),
+     * but the API takes a `readOnly` flag, so the two move in opposite
+     * directions: a click must send the opposite of the stored value. 0.9.9
+     * shipped the un-inverted value, which re-posted the state already stored —
+     * the banner said "is read-only now" and the switch looked dead. Kept here
+     * as a pure function so the inversion is pinned by a unit test.
+     */
+    function nextReadOnly(source) {
+      // A read-only source (true) POSTs false; a writable one (false) POSTs true.
+      return source.readOnly === false
+    }
+
     function TextInput(props) {
       return h('input', {
         className: 'dbmcp-input' + (props.invalid ? ' is-invalid' : ''),
@@ -4415,7 +4430,7 @@ function groupTables(tables) {
        * whitelist to ask about, so the switch is a pure flag flip.
        */
       const toggleReadOnly = async (source) => {
-        await setReadOnly(source, source.readOnly !== false)
+        await setReadOnly(source, nextReadOnly(source))
       }
 
       /** POST the flag; `allowDdl` rides along when a DDL switch flips. */
@@ -5710,6 +5725,7 @@ function groupTables(tables) {
         localStamp,
         TextInput,
         Switch,
+        nextReadOnly,
         Card,
         Breadcrumbs,
         MainPanel,
