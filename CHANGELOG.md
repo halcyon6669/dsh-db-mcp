@@ -21,6 +21,8 @@ report of each version in more detail.
 
 ## [Unreleased]
 
+## [0.9.9] - 2026-11-16
+
 ### Changed
 
 - **The writable-schemas allow list is gone.** A writable source may write to every
@@ -399,7 +401,8 @@ it shipped as a single unreleased tree.
 - Read-only by default; a source becomes writable only when you say so.
 - Publishing through npm trusted publishing, so no token lives in the repository.
 
-[Unreleased]: https://github.com/halcyon6669/dsh-db-mcp/compare/v0.9.8...HEAD
+[Unreleased]: https://github.com/halcyon6669/dsh-db-mcp/compare/v0.9.9...HEAD
+[0.9.9]: https://github.com/halcyon6669/dsh-db-mcp/compare/v0.9.8...v0.9.9
 [0.9.8]: https://github.com/halcyon6669/dsh-db-mcp/compare/v0.9.7...v0.9.8
 [0.9.7]: https://github.com/halcyon6669/dsh-db-mcp/compare/v0.9.6...v0.9.7
 [0.9.6]: https://github.com/halcyon6669/dsh-db-mcp/compare/v0.9.5...v0.9.6
