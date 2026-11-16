@@ -49,7 +49,7 @@
 | Claude Desktop | `claude_desktop_config.json` 里的 stdio 条目 |
 | Codex CLI | `~/.codex/config.toml` 里的 `[mcp_servers.dsh-db-mcp]` |
 
-JetBrains Air 或任何支持 MCP 的客户端，把这个地址填进去同样能用。数据源、只读标记、可写模式与 DDL 开关是共享的；审计日志、工具清单与会话级限制只存在于 DSH 内。[安全](docs/safety.zh.md#哪些规则在-dsh-之外仍然生效) 一页有逐项对照表，[接入其它客户端](docs/clients.zh.md) 讲端点怎么配。
+JetBrains Air 或任何支持 MCP 的客户端，把这个地址填进去同样能用。数据源、只读标记与 DDL 开关是共享的；审计日志、工具清单与会话级限制只存在于 DSH 内。[安全](docs/safety.zh.md#哪些规则在-dsh-之外仍然生效) 一页有逐项对照表，[接入其它客户端](docs/clients.zh.md) 讲端点怎么配。
 
 ## 运行要求
 
@@ -112,12 +112,12 @@ dsh plugin --profile web add dsh-db-mcp       # Web 端
 | ---- | ---- |
 | [CHANGELOG.md](CHANGELOG.md) | 每个版本改了什么 —— 一版一段、带日期，外加 `main` 上还没来得及发布的部分 |
 | [docs/guide.zh.md](docs/guide.zh.md) | 面板操作：安装、连接串、导入、分组、结构浏览（中文） |
-| [docs/safety.zh.md](docs/safety.zh.md) | 四道闸门、可写模式，以及外部客户端仍受哪些约束（中文） |
+| [docs/safety.zh.md](docs/safety.zh.md) | 三道闸门、DDL 开关，以及外部客户端仍受哪些约束（中文） |
 | [docs/clients.zh.md](docs/clients.zh.md) | HTTP 端点、接入其它客户端、工具清单（中文） |
 | [docs/runtime.zh.md](docs/runtime.zh.md) | 运行时目录、Python 依赖、Docker 测试库、排错（中文） |
 | [docs/reference.md](docs/reference.md) | HTTP 接口、工具契约、注册表与设置文件、插件配置（英文） |
 | [docs/development.md](docs/development.md) | 目录结构、热重载、测试套件、发布流程（英文） |
-| [docs/design-notes.md](docs/design-notes.md) | 设计说明（中文）：架构、数据模型、四道闸门与插件配置的现状规格，以及每个决定的理由 |
+| [docs/design-notes.md](docs/design-notes.md) | 设计说明（中文）：架构、数据模型、三道闸门与插件配置的现状规格，以及每个决定的理由 |
 | [docs/architecture.drawio](docs/architecture.drawio) | 三页图：文件结构、代码调用、运行时架构 |
 
 ## 许可

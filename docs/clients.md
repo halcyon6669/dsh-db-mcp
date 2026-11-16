@@ -26,7 +26,7 @@ every tool the Python server publishes, `execute_sql` included. That is the trus
 boundary this design assumes, and it is the same one that lets the panel's own requests
 through without a token. So: keep the global write switch closed while you are not
 using writes, and stop the endpoint from that tab when no outside client is connected.
-The read-only flag and the writable-schema list still apply to everything that arrives
+The read-only flag and the DDL switch still apply to everything that arrives
 this way, because both are enforced in the Python server.
 
 One click writes the entry into each client's own configuration file:

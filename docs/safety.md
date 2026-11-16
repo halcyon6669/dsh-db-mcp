@@ -2,7 +2,7 @@ English | [中文](safety.zh.md)
 
 # Safety
 
-What may write, where, and which of those rules still hold when the caller is not DSH.
+What may write, and which of those rules still hold when the caller is not DSH.
 
 The short version: every rule that decides *whether a statement may touch the
 database* is enforced in the Python server, so it covers the panel, the DSH agent and
@@ -11,29 +11,29 @@ log and the per-conversation limit — stop at DSH's edge.
 
 ## Safety switches
 
-Four independent gates decide whether a statement may write:
+Three independent gates decide whether a statement may write:
 
 1. **Global switch** — `allowWrite` in `<runtime>/settings.json`, toggled on the
    *Runtime* tab. Off by default; while off every write is refused with
    `user_error` and a hint pointing at the switch.
 2. **Per-source flag** — `readOnly` on the source, on by default. A switch on the
    row flips it in one click, and the word beside the switch says which way it is
-   set. It is the only control on a row: everything else there — the schema list,
-   the DDL state, a broken secret — is plain text, so the thing that can be
-   operated is the thing that looks operable.
-3. **Writable schemas** — a writable source also says which schemas it may write
-   to. Turning it writable asks first, and a statement aimed anywhere else is
-   refused. The row shows that list only while the source is writable: the list
-   survives a switch back to read-only, but a note on a locked row would claim a
-   permission that is not in force.
-4. **DDL** — `allowDdl` on the source, off by default. Writing rows and changing
-   the shape of the database are different decisions: a source that is happy to
-   take an `insert` may still be one whose tables belong to somebody else. While
-   it is off, `create`, `alter`, `drop`, `truncate`, `rename`, `grant` and
-   `revoke` are refused before they reach the database; `insert`, `update` and
-   `delete` are unaffected. The switch is asked for in the same unlock dialog,
-   and the row carries a *DDL allowed* or *DDL blocked* note so the answer is
-   visible without opening anything.
+   set. The row carries exactly two controls — this one and the DDL switch below —
+   and everything else on it (a broken secret, the probe result) is plain text, so
+   the things that can be operated are the things that look operable.
+3. **DDL** — `allowDdl` on the source, off by default, and its own switch right
+   beside the writable one. Writing rows and changing the shape of the database are
+   different decisions: a source that is happy to take an `insert` may still be one
+   whose tables belong to somebody else. While it is off, `create`, `alter`, `drop`,
+   `truncate`, `rename`, `grant` and `revoke` are refused before they reach the
+   database; `insert`, `update` and `delete` are unaffected. The switch only means
+   anything while the source is writable, so a read-only row greys it out rather
+   than hiding it.
+
+A writable source may write to every schema its login can see — there is no
+per-schema allow list any more. The remaining boundary is the database itself: a
+login that can write `hr.employees` can still do it over any other client. For a
+hard limit, give the source a narrower `GRANT` as well.
 
 The Python server reads the global flag at start-up and the host restarts it
 whenever the switch flips. Read-only is enforced again at the driver where the
@@ -42,7 +42,7 @@ PostgreSQL, `SET SESSION TRANSACTION READ ONLY` for MySQL).
 
 ## Which rules follow you out of DSH
 
-The four gates live in the Python server, which is the process that actually opens the
+The three gates live in the Python server, which is the process that actually opens the
 connection. DSH never sees the SQL of an outside client, so nothing that lives only in
 the host half can apply to one. That line is the whole table:
 
@@ -50,7 +50,6 @@ the host half can apply to one. That line is the whole table:
 | --- | --- | --- | --- |
 | Global write switch (`allowWrite`) | Python, read from the environment when the child starts | yes | yes — the host also replaces the HTTP child when the switch flips |
 | `readOnly` per source | Python, re-read from the registry on every call | yes | yes |
-| `writableSchemas` | Python, before the statement reaches the driver | yes | yes |
 | `allowDdl` | Python, before the target schema is even resolved | yes | yes |
 | Per-conversation limit (`mcp__db__session_scope`) | Host, keyed by the DSH conversation id | yes | no — an outside client has no conversation to key off |
 | Audit log | Host, written by the wrapper around each tool call | yes | no — outside calls leave no line in `logs/audit.jsonl` |
@@ -67,30 +66,17 @@ Two consequences worth knowing:
   Both come back on the same port, so a client already pointed at the endpoint does not
   need to be reconfigured.
 
-## Writable schemas
+## DDL
 
-Reads stay unrestricted: the agent can look at every schema the login can see. A
-write is different — a source that accepts writes has to name the schemas it may
-write to.
+Reads stay unrestricted: the agent can look at every schema the login can see, and a
+writable source can write to all of them too. The only remaining per-source choice is
+whether it may change the shape of the database.
 
-Flip a row from *read-only* to *writable* and a dialog asks where it may write. It
-lists the schemas of that source with one checkbox each — nothing to type. A schema
-the source already writes to stays on the list even when the catalog no longer
-shows it. Nothing is preselected on a source that never had a list; a source that
-had one comes back with the same boxes ticked, because switching back to read-only
-keeps the list. **Allow writes** stays disabled until at least one box is ticked.
-
-The same dialog carries one more question: **Also allow DDL**. It is off unless it
-was turned on before, and it means what it says — `create`, `alter`, `drop`,
-`truncate`, `rename`, `grant` and `revoke` are refused on a source that has not
-opted in, before the statement reaches the database. `insert`, `update` and
-`delete` keep working either way. The switch only widens *which statements* may
-run; the schemas ticked above still bound *where* they may land, so a `drop table`
-aimed outside the list is refused even with DDL on.
-
-The same names can be edited later in **Edit** → **More settings** → *Writable
-schemas*, comma separated; the DDL switch sits next to them as *Allow DDL*. Both
-are stored on the source, so the dialog and the form always agree.
+The DDL switch on a row turns it on in one click. It means what it says —
+`create`, `alter`, `drop`, `truncate`, `rename`, `grant` and `revoke` are refused on
+a source that has not opted in, before the statement reaches the database. `insert`,
+`update` and `delete` keep working either way. The same switch appears in **Edit** →
+**More settings** as *Allow DDL*, so the row and the form always agree.
 
 The guard runs in the Python server, which means it covers the agent, the HTTP
 endpoint and the panel alike:
@@ -98,23 +84,14 @@ endpoint and the panel alike:
 - Every statement in a batch is checked; a leading `--` comment or a `;` does not
   hide one.
 - Reads (`select`, `with`, `show`, `explain`, …) always pass.
-- A write is resolved to the schema it lands on — `insert into sales.orders`,
-  `update "hr".employees`, `create table audit.log`, `create index i on
-  sales.orders`, `grant … on sales.orders`, `call sales.recalc()`.
+- `insert`, `update` and `delete` pass on a writable source.
 - A statement that changes the shape of the database is refused unless the source
   allows DDL; `truncate` counts, because it empties a table just as thoroughly as
   `drop` would.
-- An unqualified target takes the source's own default: `main` for SQLite, the
-  configured database for MySQL, the configured schema (or the Oracle user) for
-  the rest, and `public` for PostgreSQL when nothing is set.
-- A statement whose target cannot be read is refused, not allowed through.
-- A source that is writable with no list at all refuses every write; the panel
-  will not put it in that state, but a hand-edited registry can.
 
-This is a guard, not a grant. It keeps the agent from writing outside the schemas
-it was given, but the real boundary stays in the database: a login that can write
-`hr.employees` can still do it over any other client. For a hard limit, give the
-source a narrower `GRANT` as well.
+This is a guard, not a grant. It keeps the agent from changing a schema it was not
+given permission to change, but the real boundary stays in the database. For a hard
+limit, give the source a narrower `GRANT` as well.
 
 Stored passwords are encrypted at rest. `secrets.json` holds an AES-256-GCM
 envelope per source and the key lives beside it in `secret.key` (mode `0600`,

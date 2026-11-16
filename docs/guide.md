@@ -285,6 +285,7 @@ full value in the tooltip; the kind pill beside it keeps its width. When the
 panel is too narrow for two columns, the tree moves above the column list instead
 of squeezing the names.
 
-Below the tree there is nothing to switch: reads are never limited by schema.
-Writes are, and they are chosen on the row itself — see
-*[Writable schemas](safety.md#writable-schemas)*.
+Below the tree there is nothing to switch: reads are never limited by schema, and
+neither are writes on a source that is not read-only. The only per-source choice is
+whether it may change the shape of the database — see
+*[DDL](safety.md#ddl)*.

@@ -72,10 +72,10 @@ you with one click:
 | Codex CLI | `[mcp_servers.dsh-db-mcp]` in `~/.codex/config.toml` |
 
 Point JetBrains AI or anything else that speaks MCP at the same URL and it works
-too. Data sources, the read-only flag, the writable schemas and the DDL switch are
-shared; the audit log, the tool list and the conversation-level limit stay inside
-DSH. [The safety page](docs/safety.md#which-rules-follow-you-out-of-dsh) has the
-line-by-line table; [clients.md](docs/clients.md) walks through the endpoint.
+too. Data sources, the read-only flag and the DDL switch are shared; the audit
+log, the tool list and the conversation-level limit stay inside DSH. [The safety
+page](docs/safety.md#which-rules-follow-you-out-of-dsh) has the line-by-line
+table; [clients.md](docs/clients.md) walks through the endpoint.
 
 ## Requirements
 
@@ -164,12 +164,12 @@ smaller tool list in the model's context.
 | -------- | -------- |
 | [CHANGELOG.md](CHANGELOG.md) | Every release and what it changed — one dated section per version, plus what is on `main` but not yet published |
 | [docs/guide.md](docs/guide.md) | Panel walkthrough: install, connection strings, importing, groups, structure browser |
-| [docs/safety.md](docs/safety.md) | The four gates, writable schemas, what still applies to an outside client |
+| [docs/safety.md](docs/safety.md) | The three gates, the DDL switch, what still applies to an outside client |
 | [docs/clients.md](docs/clients.md) | The HTTP endpoint, wiring other clients, the tools list |
 | [docs/runtime.md](docs/runtime.md) | Runtime directory, Python dependencies, Docker test databases, troubleshooting |
 | [docs/reference.md](docs/reference.md) | HTTP routes, tool contracts, registry and settings files, plugin config |
 | [docs/development.md](docs/development.md) | Repository layout, hot reload, test suites, release flow |
-| [docs/design-notes.md](docs/design-notes.md) | The design notes (Chinese): current-state spec for the architecture, the data model, the four gates and the plugin config — and why each decision was made |
+| [docs/design-notes.md](docs/design-notes.md) | The design notes (Chinese): current-state spec for the architecture, the data model, the three gates and the plugin config — and why each decision was made |
 | [docs/architecture.drawio](docs/architecture.drawio) | Three-page map: file layout, call graph, runtime picture |
 
 ## License

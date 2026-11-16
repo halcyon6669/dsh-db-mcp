@@ -30,7 +30,7 @@ are `GET`; every mutation is `POST` (the same-origin check compares `Origin` wit
 | `POST /datasources/save` | create or update a source (`id` immutable); a second row for the same host + port + database + user is refused with `409` |
 | `POST /datasources/delete` | remove a source and its stored secret |
 | `POST /datasources/test` | real login probe (accepts `id`, or an inline `kind` + `config` + `password`) |
-| `POST /datasources/bulk` | `action: test \| readOnly \| group \| delete` over `ids`; `readOnly: false` also takes `writableSchemas` and `allowDdl` |
+| `POST /datasources/bulk` | `action: test \| readOnly \| group \| delete` over `ids`; `readOnly: false` also takes `allowDdl` |
 | `POST /datasources/reorder` | rewrite the row order given `ids`; sources it does not name keep their place at the end |
 | `POST /groups/save` · `POST /groups/delete` | create, rename (`from`) or delete a group |
 | `POST /dbeaver/import` | copy selected DBeaver connections into the registry |
@@ -50,7 +50,7 @@ the port can speak JSON-RPC to it and call every tool the Python server publishe
 `execute_sql` included. Treat loopback as the boundary.
 
 What still applies is everything the Python server enforces on arrival: the read-only
-flag, `writableSchemas`, the row caps (`DB_MCP_MAX_ROWS`, `DB_MCP_MAX_ROWS_HARD`) and
+flag, `allowDdl`, the row caps (`DB_MCP_MAX_ROWS`, `DB_MCP_MAX_ROWS_HARD`) and
 `DB_MCP_ALLOW_WRITE`, which the Host passes at spawn time from the global write switch.
 What does **not** apply is the disabled-tool list: `disabledTools` is filtered in the
 Host when it registers `mcp__db__*` with DSH, so it narrows the agent's tool list only
@@ -106,7 +106,7 @@ Failures come back as `{ ok: false, error: { code, message, hint? } }` with
 
 | Code | Meaning |
 | ---- | ------- |
-| `user_error` | the request is wrong: unknown datasource, refused write, bad table name, write outside the writable schemas |
+| `user_error` | the request is wrong: unknown datasource, refused write, bad table name, a DDL statement on a source that has not opted in |
 | `db_error` | the engine refused or failed: authentication, syntax, timeout |
 | `infra_error` | the plugin could not get that far: interpreter missing, venv broken |
 
@@ -130,8 +130,8 @@ and never rewritten by the Host.
       "kind": "postgres",
       "group": "docker",
       "config": { "host": "127.0.0.1", "port": 5432, "database": "demo", "user": "demo", "schema": "public" },
-      "writableSchemas": ["public", "sales"],
       "readOnly": false,
+      "allowDdl": false,
       "isDefault": true,
       "tags": [],
       "createdAt": "…",
@@ -142,16 +142,12 @@ and never rewritten by the Host.
 }
 ```
 
-`writableSchemas` lists the schemas a non-read-only source may write to; see
-[Writable schemas](#writable-schemas). It is optional, and a registry written
-before the field existed simply has none — which makes such a source unwritable
-until the list is set.
+A writable source may write to every schema its login can see — there is no
+per-schema allow list. The remaining per-source choice is `allowDdl` (below).
 
-A registry from the earlier allow/deny build carries `schemas: { mode, names }`
-instead. The Host rewrites that once, on mount: an `allow` list becomes
-`writableSchemas` verbatim (the schemas the user trusted are the schemas a write
-should be confined to), a `deny` list becomes an empty list (inverting "everything
-except these" would grant the whole catalog), and the `schemas` key is dropped.
+A registry from the earlier builds carries `schemas: { mode, names }` or a
+`writableSchemas` list. The Host drops both keys once, on mount: neither is read
+any more, so nothing is carried over.
 
 `secrets.json` holds `{ "schemaVersion": 1, "secrets": { "<id>": { "password": "v1.…" } } }`
 and is read only by the Host and its Python child, never sent to the page.
@@ -217,32 +213,25 @@ data source.
 `id` must match `^[a-z0-9][a-z0-9-]{0,31}$` and never changes; `name` ≤ 64
 characters; `group` ≤ 48.
 
-### Writable schemas
+### The DDL switch
 
-Reads are never restricted by schema. Writes are: a source that is not read-only
-carries a `writableSchemas` list, and a statement that would write anywhere else
-is refused before it reaches the database.
+Reads are never restricted by schema, and neither are writes on a source that is
+not read-only — a writable source may write to every schema its login can see. The
+only per-source choice left is whether it may change the shape of the database.
 
 ```json
-"writableSchemas": ["public", "sales"],
+"readOnly": false,
 "allowDdl": false
 ```
 
 | Field | Meaning |
 | ----- | ------- |
-| `writableSchemas` | up to 32 schema names, each ≤ 64 characters; quotes are stripped, duplicates folded, names with spaces dropped |
 | `allowDdl` | `true` lets this source run `create`, `alter`, `drop`, `truncate`, `rename`, `grant` and `revoke`; absent or `false` refuses them |
 
-The list is stored on the source, so switching back to read-only keeps it and the
-next unlock dialog preselects it. A source may not be writable with an empty list:
-`POST /datasources/bulk` with `{ "action": "readOnly", "readOnly": false }` returns
-400 unless the source already has one, and the panel asks first.
-
-`allowDdl` is independent of the list: the list bounds *where* a statement may
-land, the switch bounds *what kind* of statement may run. `truncate` counts as DDL
-— it keeps the table but empties it. A save that omits the field keeps the stored
-value rather than revoking it, so a caller that does not know about the switch
-cannot silently turn it off.
+`allowDdl` is stored on the source and defaults to off, so a registry written before
+the field existed does not start accepting `drop table` on the next load. A save
+that omits the field keeps the stored value rather than revoking it, so a caller
+that does not know about the switch cannot silently turn it off.
 
 The guard runs in the Python child (`server/writes.py`), inside
 `ensure_readable`, so the agent, the HTTP endpoint and the panel all hit it:
@@ -250,30 +239,18 @@ The guard runs in the Python child (`server/writes.py`), inside
 - Every statement in a batch is checked; a leading `--` comment or a `;` does not
   hide one.
 - Reads (`select`, `with`, `show`, `explain`, …) always pass.
-- A write is resolved to its target schema: `insert into sales.orders`,
-  `update "hr".employees`, `create table audit.log`, `create index i on
-  sales.orders`, `grant … on sales.orders`, `call sales.recalc()`. The modifiers
-  are skipped, and `create index` lands on the table after `on`.
-- An unqualified target takes the source's default schema: `main` for SQLite, the
-  configured database for MySQL, `config.schema` (or the Oracle user, upper-cased)
-  otherwise, and `public` for PostgreSQL when nothing is set.
+- `insert`, `update` and `delete` pass on a writable source.
 - A statement that changes the shape of the database is refused unless the source
-  has `allowDdl: true`. The check runs before the target is resolved, so a DDL
-  statement is refused even when its schema would have been allowed.
-- A statement whose target cannot be read is refused rather than allowed.
-- Names compare case-insensitively.
+  has `allowDdl: true`; `truncate` counts as DDL — it keeps the table but empties
+  it.
 
-This is a guard, not a grant. It keeps the agent from writing outside the schemas
-it was given; the real boundary stays in the database. A login that can write
-`hr.employees` can still do it over any other client, so a source that needs less
-should also get a narrower `GRANT`.
+This is a guard, not a grant. It keeps the agent from changing a schema it was not
+given permission to change; the real boundary stays in the database. A login that
+can write `hr.employees` can still do it over any other client, so a source that
+needs less should also get a narrower `GRANT`.
 
-The panel enforces the same rule in its own way: turning a source writable opens a
-dialog that lists the schemas of that source (`GET /schema?datasource=` returns
-them as `schemas: string[]`) with one checkbox each. A schema the source already
-writes to stays on that list even when the catalog no longer shows it. Confirming
-with nothing ticked is disabled; a source that reports no schema at all says so
-instead of showing an empty dialog.
+The panel shows the same switch on the row, beside the writable one, and in the
+edit form's *More settings*.
 
 ## Plugin configuration
 

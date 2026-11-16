@@ -215,7 +215,6 @@ function publicProfile(profile, secrets) {
     tags: Array.isArray(profile.tags) ? profile.tags.filter((tag) => typeof tag === 'string') : [],
     group: typeof profile.group === 'string' ? profile.group : '',
     config: configToPublic(profile.kind, config),
-    writableSchemas: normalizeWritableSchemas(profile.writableSchemas),
     // DDL is its own permission: a source can be perfectly happy to take an
     // `insert` and still be one whose tables belong to somebody else.
     allowDdl: profile.allowDdl === true,
@@ -233,40 +232,6 @@ function publicProfile(profile, secrets) {
 /** Validate raw user input, returning { profile, password, error }. */
 function groupName(value) {
   return typeof value === 'string' ? value.trim().slice(0, 48) : ''
-}
-
-/**
- * The schemas a writable source may write to, as `['sales', 'billing']`.
- *
- * Reads are never restricted, so this is only consulted when the source is
- * writable: switching read-only off asks for this list first, and every
- * changing statement is checked against it in server/writes.py.
- */
-const MAX_WRITABLE_SCHEMAS = 32
-const MAX_SCHEMA_NAME_LENGTH = 64
-
-function schemaName(value) {
-  if (typeof value !== 'string') return ''
-  const text = value.trim().replace(/^["`]+|["`]+$/g, '').trim()
-  if (!text || text.length > MAX_SCHEMA_NAME_LENGTH) return ''
-  if (/\s/.test(text)) return ''
-  return text
-}
-
-function normalizeWritableSchemas(raw) {
-  const declared = Array.isArray(raw) ? raw : []
-  const seen = new Set()
-  const names = []
-  for (const item of declared) {
-    const name = schemaName(item)
-    if (!name) continue
-    const folded = name.toLowerCase()
-    if (seen.has(folded)) continue
-    seen.add(folded)
-    names.push(name)
-    if (names.length >= MAX_WRITABLE_SCHEMAS) break
-  }
-  return names
 }
 
 function normalizeInput(input, existing) {
@@ -329,10 +294,6 @@ function normalizeInput(input, existing) {
     : trimmed(raw.group)
   if (group.length > 48) return { error: 'group must be at most 48 characters' }
 
-  const writableSchemas = raw.writableSchemas === undefined || raw.writableSchemas === null
-    ? normalizeWritableSchemas(existing && existing.writableSchemas)
-    : normalizeWritableSchemas(raw.writableSchemas)
-
   // DDL is granted, never assumed: an older registry has no field, and a source
   // that has not been asked must not silently start accepting `drop table`.
   const allowDdl = raw.allowDdl === undefined || raw.allowDdl === null
@@ -348,7 +309,6 @@ function normalizeInput(input, existing) {
     isDefault: raw.isDefault === true || (existing ? existing.isDefault === true : false),
     tags,
     group,
-    writableSchemas,
     allowDdl,
     createdAt: (existing && existing.createdAt) || isoNow(),
     updatedAt: isoNow(),
@@ -1102,27 +1062,19 @@ export function createHost(options = {}) {
   }
 
   /**
-   * Move a registry written by the earlier allow/deny build onto `writableSchemas`.
-   *
-   * That build stored `schemas: { mode, names }` and gated reads as well. The
-   * allow list is the honest mapping: it named the schemas the user trusted, and
-   * that is exactly the set a write should be confined to. A deny list cannot be
-   * inverted safely — "everything except these" is not a write allow list — so
-   * those sources start with no writable schema and ask again on the next
-   * unlock. The old key is dropped either way, so nothing reads it by accident.
+   * Drop the `schemas` key a registry from the earlier allow/deny build left
+   * behind. That build gated reads as well; neither half survives now, so the
+   * key is simply removed and nothing reads it by accident.
    */
   async function migrateSchemas() {
     const registry = await readRegistry()
     if (registry.error || registry.missing) return false
     let changed = false
     const datasources = registry.datasources.map((item) => {
-      const legacy = cleanRecord(item.schemas)
-      if (!legacy || (!('mode' in legacy) && !('names' in legacy))) return item
+      if (!('schemas' in item) && !('writableSchemas' in item)) return item
       changed = true
-      const { schemas, ...rest } = item
-      const carried = legacy.mode === 'allow' ? normalizeWritableSchemas(legacy.names) : []
-      const kept = normalizeWritableSchemas(rest.writableSchemas)
-      return { ...rest, writableSchemas: kept.length > 0 ? kept : carried }
+      const { schemas, writableSchemas, ...rest } = item
+      return rest
     })
     if (!changed) return false
     await writeRegistry(datasources, registry.groups)
@@ -1728,33 +1680,14 @@ export function createHost(options = {}) {
       return { ...item, readOnly: payload.readOnly !== false, updatedAt: isoNow() }
     })
     if (action === 'readOnly') {
-      /* Turning a source writable is a decision about where it may write, so the
-         caller has to say so in the same call. Going back to read-only keeps the
-         list: it is the next unlock's starting point, not stale state. */
-      const writable = payload.readOnly === false
-      const requested = payload.writableSchemas === undefined || payload.writableSchemas === null
-        ? null
-        : normalizeWritableSchemas(payload.writableSchemas)
-      // The unlock dialog asks both questions at once, so the DDL switch rides
-      // along with the schema list. Absent means "leave it as it is".
+      // Turning a source writable is now a pure flag flip — writes go to every
+      // schema the source can see. The DDL switch rides along when the caller
+      // says so; absent means "leave it as it is".
       const ddl = payload.allowDdl === undefined || payload.allowDdl === null ? null : payload.allowDdl === true
-      if (writable && requested !== null && requested.length === 0) {
-        return { status: 400, body: { ok: false, error: 'a writable source needs at least one writable schema' } }
-      }
-      for (const item of next) {
-        if (!target.includes(item.id)) continue
-        if (requested !== null) item.writableSchemas = requested
-        else item.writableSchemas = normalizeWritableSchemas(item.writableSchemas)
-        if (ddl !== null) item.allowDdl = ddl
-        if (writable && item.writableSchemas.length === 0) {
-          return {
-            status: 400,
-            body: {
-              ok: false,
-              error: `${item.name || item.id} needs at least one writable schema before it can be writable`,
-              datasourceId: item.id,
-            },
-          }
+      if (ddl !== null) {
+        for (const item of next) {
+          if (!target.includes(item.id)) continue
+          item.allowDdl = ddl
         }
       }
     }
@@ -2307,8 +2240,9 @@ export function createHost(options = {}) {
   // secrets.json; seal them on first mount so the file stops carrying them.
   void migrateSecrets().catch(() => null)
 
-  // Same for a registry from the allow/deny build: its schema list has to become
-  // `writableSchemas` before the panel reads it, or the next unlock starts blank.
+  // A registry from the allow/deny build leaves a `schemas` key, and one from
+  // the writable-schemas build leaves `writableSchemas`. Both are dropped here
+  // so the panel never reads a field that no longer means anything.
   void migrateSchemas().catch(() => null)
 
   // Outside clients (VS Code, Cursor, Codex) need a URL rather than stdio, so the
@@ -2331,7 +2265,6 @@ export function createHost(options = {}) {
       sourceIdentity,
       hostsOf,
       endpointLabel,
-      normalizeWritableSchemas,
     },
     dispose: async () => {
       await bridge.dispose()

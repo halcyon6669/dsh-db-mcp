@@ -15,7 +15,7 @@ client.js           browser half: sidebar entry + panel (React, theme tokens onl
 locale/{en,zh}.json package metadata (title/description) shown by the plugin card
 server/main.py      FastMCP server: eight tools
 server/engines.py   per-engine connect / introspect / query / DDL
-server/writes.py    write guard: parses each statement's target schema against writableSchemas
+server/writes.py    write guard: refuses DDL unless the source's allowDdl switch is on
 server/secretbox.py opens the envelopes written by src/secretbox.js
 server/store.py     reads the registry written by the Host
 cordis.patch.yml    one Loader row with id "db-mcp"
@@ -73,7 +73,7 @@ npm run test:changelog # the changelog's structure and its per-version sections
 | Suite | Covers |
 | ----- | ------ |
 | `dev/engines.test.mjs` + `engines.test.py` | commit/rollback and `affectedRows` contract of `execute_sql`, no database needed |
-| `dev/writes.test.py` | the write guard: statement splitting, target extraction, default schema per engine, the writableSchemas check |
+| `dev/writes.test.py` | the write guard: statement splitting, the DDL opt-in switch, reads and row writes always passing |
 | `dev/secretbox.test.py` | the envelope reader: key file, round trips, aad mismatch, plaintext fallback |
 | `dev/gauss.check.py` | openGauss plumbing offline: comma host list, IRI escaping, the `ssl.wrap_socket` shim, no network |
 | `dev/selftest.mjs` | mounts `src/host.js` on a throwaway port: registry, validation, groups, bulk, schema route, DBeaver scan, probes |

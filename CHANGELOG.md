@@ -21,6 +21,21 @@ report of each version in more detail.
 
 ## [Unreleased]
 
+### Changed
+
+- **The writable-schemas allow list is gone.** A writable source may write to every
+  schema its login can see; the per-source choice is now just the DDL switch. The
+  gates drop from four to three: the global write switch, the per-source
+  `readOnly` flag, and `allowDdl`. `server/writes.py` no longer resolves a
+  statement's target schema, a save body that still sends `writableSchemas` is
+  accepted but the key is not stored, and registries carrying the legacy
+  `schemas` or `writableSchemas` keys have them dropped on mount.
+- **DDL is a switch on the row**, beside the writable one — same 36×20 track, not
+  a text note or a checkbox. It is disabled while the source is read-only, since
+  it only means anything then. The unlock dialog is gone with the list it asked
+  for: flipping a row writable is a plain toggle, and the bulk route no longer
+  needs a schema answer.
+
 ## [0.9.8] - 2026-11-15
 
 ### Added

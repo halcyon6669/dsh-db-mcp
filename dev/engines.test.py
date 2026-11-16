@@ -85,17 +85,15 @@ CONFIG = {
     "mysql": {"database": "testdb"},
     "oracle": {"user": "TEST"},
 }
-DEFAULT_SCHEMA = {"sqlite": "main", "postgres": "public", "gauss": "public", "mysql": "testdb", "oracle": "TEST"}
 
 
 def profile(kind: str, read_only: bool = False, allow_ddl: bool = False) -> dict:
-    """A source that may write, with the schema its unqualified writes land in."""
+    """A source that may write; unqualified writes land in its default schema."""
     return {
         "id": f"{kind}-test",
         "kind": kind,
         "config": dict(CONFIG[kind]),
         "readOnly": read_only,
-        "writableSchemas": [DEFAULT_SCHEMA[kind]],
         "allowDdl": allow_ddl,
     }
 

@@ -9,7 +9,7 @@
 > 状态：只描述**当前**的闸门、数据模型、配置项与工具面，随版本修订。
 > 逐版本的「改了什么、为什么改」在 [CHANGELOG.md](../CHANGELOG.md)；
 > P2 → P7 的建站过程留在 git 历史里（`git log --follow docs/design-notes.md`）。
-> 决策来源：D1=SQLite+PostgreSQL+openGauss+MySQL+Oracle；D2=默认只读 + 四道闸门；D3=插件内 venv + 官方 mcp SDK；D4=页面只做数据源管理，不做手工查询
+> 决策来源：D1=SQLite+PostgreSQL+openGauss+MySQL+Oracle；D2=默认只读 + 三道闸门（全局写开关 + 单源只读 + DDL 开关）；D3=插件内 venv + 官方 mcp SDK；D4=页面只做数据源管理，不做手工查询
 > 目标读者：需求方（你）+ 后续实现者（我）
 
 ---
@@ -24,7 +24,7 @@
 | 查询职责 | 全部交给 AI，经 MCP 工具 `mcp__db__*` 完成 |
 | 数据源 | 单一 MCP 服务进程内管理 N 个数据源，工具用 `datasource` 参数寻址 |
 | 支持类型 | SQLite / PostgreSQL / **openGauss** / MySQL / Oracle（v1 四种，0.7.5 起五种） |
-| 安全基线 | 默认只读；四道闸门：全局写开关 + 单源只读 + 可写模式白名单 + DDL 开关；行数/超时硬上限；密码加密后落盘 |
+| 安全基线 | 默认只读；三道闸门：全局写开关 + 单源只读 + DDL 开关；行数/超时硬上限；密码加密后落盘 |
 | 状态目录 | `$DSH_HOME/db-mcp/`（注册表 + 加密口令 + 设置 + 会话白名单 + 审计 + venv） |
 | 明确不做 | 页面内查询、数据编辑、ER 图、同步/备份、图表可视化（DDL 自 0.6.0 起作为工具存在，0.9.7 起单独授权） |
 
@@ -93,13 +93,13 @@
 │    · 工具：test_connection / list_datasources / list_tables /              │
 │            describe_table / sample_rows / execute_sql / explain_query /    │
 │            get_ddl                                                          │
-│    · 四道闸门、行数上限、超时、错误分级                                     │
+│    · 三道闸门、行数上限、超时、错误分级                                     │
 └────────────────────────────────────────────────────────────────────────────┘
 ```
 
 > HTTP 那半个进程回答同一套工具：外部 MCP 客户端（VS Code、Cursor、Claude Code 等）
 > 连的是 `http://127.0.0.1:8765/dsh-db-mcp`，走的是同一个 `server/main.py`，读写同一份
-> 注册表与设置，因此四道闸门对它们同样生效（见 0.9.6 与 0.9.7 两节）。
+> 注册表与设置，因此三道闸门对它们同样生效（见 0.9.6 与 0.9.7 两节）。
 
 ### 3.2 三条数据流
 
@@ -146,8 +146,7 @@
 | `kind` | `sqlite` / `postgres` / `gauss` / `mysql` / `oracle` |
 | `config` | 类型相关参数（见下表） |
 | `readOnly` | 是否只读，默认 `true` |
-| `writableSchemas` | 可写模式的模式名清单；只在 `readOnly=false` 时显示在行上 |
-| `allowDdl` | 是否允许 DDL，默认 `false`，与 `writableSchemas` 正交 |
+| `allowDdl` | 是否允许 DDL，默认 `false`，行上与可写开关并排的独立开关 |
 | `group` | 所属分组名，空串即「未分组」 |
 | `isDefault` | 保留字段：0.8.0 删掉了「设为默认」动作，省略 `datasource` 时按 `store.resolve()` 先找 `isDefault`、再退回第一项 |
 | `tags` | 自由标签（上限 8 个），导入页按此过滤 |
@@ -285,7 +284,7 @@
 - **原子写**：临时文件 + rename，禁止半截 JSON；损坏时回退 `.bak`。
 - **口令不回显**：API 只返回 `hasSecret`；日志对 `password|token|secret|dsn|wallet` 掩码。
 - **口令加密**：Host 每次写 `secrets.json` 都加密，mount 时把旧版明文就地转换；信封打不开的值被丢弃并标记「stored password unreadable」，而不是当作口令交出去。
-- **迁移**：`schemaVersion` 升级时自动迁移并留 `.bak`；`writableSchemas` 上线时把旧的 `allow` 列表搬过来、`deny` 列表转成空清单（反过来等于授权整个目录）。
+- **迁移**：`schemaVersion` 升级时自动迁移并留 `.bak`；历史上出现过的 `schemas`（allow/deny）与 `writableSchemas` 两个遗留键在 mount 时直接删除，不再迁移 —— 白名单已整体移除，写入不再按模式收窄。
 
 ---
 
@@ -319,7 +318,7 @@ Host `Config` 只剩引导阶段需要的几项：
 
 ### 7.1 安全（NFR-SEC）
 
-1. 默认只读；写要过**四道闸门**，缺一不可：全局 `allowWrite` → 单源 `readOnly=false` → 语句目标落在 `writableSchemas` 里 → 若是 DDL 则还要 `allowDdl=true`。
+1. 默认只读；写要过**三道闸门**，缺一不可：全局 `allowWrite` → 单源 `readOnly=false` → 若是 DDL 则还要 `allowDdl=true`（写入不再按模式收窄，可写即写登录可见的全部模式）。
 2. 闸门全在 **Python 侧**（`server/engines.py` 与 `server/writes.py`），所以面板、智能体、外部 MCP 客户端走的是同一套判定。
 3. 口令以 AES-256-GCM 加密落盘，密钥单独文件 0600；仅回环访问。
 4. Host API 只接受同源、已登录 Peer；写操作额外做来源校验。
@@ -444,7 +443,7 @@ Host `Config` 只剩引导阶段需要的几项：
 | # | 决策 | 结论 |
 |---|---|---|
 | D1 | v1 数据库 | **SQLite + PostgreSQL + openGauss + MySQL + Oracle**（openGauss 自 0.7.5） |
-| D2 | 写权限 | **默认只读**；四道闸门：全局写开关 + 单源只读 + 可写模式白名单 + DDL 开关，全程带审计 |
+| D2 | 写权限 | **默认只读**；三道闸门：全局写开关 + 单源只读 + DDL 开关（白名单已移除：可写=写登录可见的全部模式），全程带审计 |
 | D3 | Python 运行时 | **插件内 venv + 官方 `mcp` SDK + 五种驱动** |
 | D4 | 页面查询台 | **不做**；页面只有数据源管理，查询全部走 MCP |
 | D5 | 包名 / 侧栏 id / MCP 服务名 | **`dsh-db-mcp` / `db-mcp` / `db`**（已确认） |

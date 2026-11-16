@@ -119,10 +119,10 @@ const sqliteTree = render(
   'create form (sqlite)',
   () => SourceForm({ t, draft: emptyDraft(), editing: null, takenIds: [], onSaved: noop, onCancel: noop }),
   {
-    inputs: 11,
+    inputs: 9,
     selects: 1,
     details: true,
-    labels: ['form.paste', 'form.user', 'form.password', 'form.file', 'form.schemaAccess'],
+    labels: ['form.paste', 'form.user', 'form.password', 'form.file'],
   },
 )
 if (sqliteTree) {
@@ -130,7 +130,6 @@ if (sqliteTree) {
   check('create form: more-settings summary', summary.length === 1 && texts(summary[0]).includes('form.more'))
   check('create form: smart-parsing tag', texts(sqliteTree).includes('form.smart'))
   check('create form: footer hint', texts(sqliteTree).includes('form.autoApply'))
-  check('create form: writable schemas are asked for', texts(sqliteTree).includes('form.schemaAccessHint'))
   check('create form: DDL is its own switch', texts(sqliteTree).includes('form.allowDdl'))
 }
 
@@ -140,7 +139,7 @@ pgDraft.config = { ...pgDraft.config, host: 'localhost', port: '5432', database:
 render(
   'create form (postgres)',
   () => SourceForm({ t, draft: pgDraft, editing: null, takenIds: ['app'], onSaved: noop, onCancel: noop }),
-  { inputs: 14, selects: 2, details: true, labels: ['form.host', 'form.port', 'form.database'] },
+  { inputs: 12, selects: 2, details: true, labels: ['form.host', 'form.port', 'form.database'] },
 )
 
 const oracleDraft = emptyDraft()
@@ -283,7 +282,7 @@ check(
 
 // The table list is grouped per schema and filterable; both helpers are pure so
 // they can be checked without a live MCP server.
-const { groupTables, tableMatches, connectionMatches, writableNames, showsWritable } = mod.__test
+const { groupTables, tableMatches, connectionMatches } = mod.__test
 const grouped = groupTables([
   { name: 'orders', schema: 'sales' },
   { name: 'customers', schema: 'sales' },
@@ -299,30 +298,6 @@ check('schema grouping sorts groups', grouped.map(([schema]) => schema).join(','
 check('schema filter matches table names', tableMatches({ name: 'Orders' }, 'ord') === true)
 check('schema filter matches schema names', tableMatches({ name: 'x', schema: 'Sales' }, 'sales') === true)
 check('schema filter drops non-matches', tableMatches({ name: 'x', schema: 'y' }, 'zzz') === false)
-
-// The writable-schemas pill is a statement about a permission that is in force.
-// The list survives a switch back to read-only, so the pill must not: showing
-// "writable main" on a locked row would claim something that is not true.
-check(
-  'writable pill: shown on a writable source that names schemas',
-  showsWritable({ readOnly: false, writableSchemas: ['main'] }) === true,
-)
-check(
-  'writable pill: hidden when the source is read-only',
-  showsWritable({ readOnly: true, writableSchemas: ['main'] }) === false,
-)
-check(
-  'writable pill: hidden when the source names no schema',
-  showsWritable({ readOnly: false, writableSchemas: [] }) === false,
-)
-check(
-  'writable pill: a missing list counts as empty',
-  writableNames({}).length === 0 && showsWritable({ readOnly: false }) === false,
-)
-check(
-  'writable pill: blank names are not a list',
-  showsWritable({ readOnly: false, writableSchemas: ['', '  '] }) === false,
-)
 
 // A row carries several status words and exactly one control. The control is a
 // track switch, because a bordered pill with "read-only" on it read as one more
@@ -393,10 +368,6 @@ check(
 check(
   'row notes: state words are frameless text',
   /\.dbmcp-note \{[^}]*border: 0/.test(source) || !/\.dbmcp-note \{[^}]*border: 1px/.test(source),
-)
-check(
-  'row notes: adjacent state words are separated by a middot',
-  /\.dbmcp-item-name \.dbmcp-note \+ \.dbmcp-note::before \{[^}]*content: '·'/.test(source),
 )
 check('row pills: no clickable pill rule is left', !/button\.dbmcp-pill \{/.test(source))
 

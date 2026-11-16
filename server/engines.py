@@ -83,7 +83,7 @@ def ensure_readable(sql: str, profile: dict) -> None:
             f"datasource {profile.get('id')} is read-only; `{keyword or 'this'} ` statements are refused",
             "uncheck read-only for this source in the Data sources panel to allow writes",
         )
-    # The source is writable, so it also names the schemas it may write to.
+    # The source is writable, so only the DDL switch is left to check.
     try:
         writes.check(sql, profile)
     except writes.WriteBlocked as blocked:

@@ -306,10 +306,9 @@ try {
   const schemaUnknown = await call('GET', '/schema?datasource=ghost')
   check('schema rejects unknown sources', schemaUnknown.status === 404, schemaUnknown.body.error)
 
-  // A writable source names the schemas it may write to. The list is normalised
-  // on the way in (quotes stripped, duplicates folded, blanks dropped) and it
-  // survives a switch back to read-only, so flipping the pill twice does not
-  // make the operator retype it.
+  // Writes are no longer scoped to a schema list: a writable source may write to
+  // every schema it can see. A `writableSchemas` key in a save body is ignored
+  // (not stored), because a caller written against the older build still sends it.
   const writable = await call('POST', '/datasources/save', {
     id: 'writable-db',
     name: 'Writable db',
@@ -317,10 +316,10 @@ try {
     config: { host: '127.0.0.1', port: 5999, database: 'x', user: 'alice' },
     writableSchemas: ['"sales"', ' Sales ', '', 'billing', 'BILLING'],
   })
-  check('writable schemas are stored', writable.status === 200, writable.body.error)
+  check('a save still succeeds when it sends the old key', writable.status === 200, writable.body.error)
   check(
-    'writable schemas normalise names',
-    JSON.stringify(writable.body.datasource?.writableSchemas) === JSON.stringify(['sales', 'billing']),
+    'the writable-schemas list is not stored',
+    writable.body.datasource?.writableSchemas === undefined,
     JSON.stringify(writable.body.datasource?.writableSchemas),
   )
   const writableDefault = await call('POST', '/datasources/save', {
@@ -330,8 +329,8 @@ try {
     config: { file: 'C:/tmp/writable.db' },
   })
   check(
-    'a source without writable schemas has an empty list',
-    JSON.stringify(writableDefault.body.datasource?.writableSchemas) === JSON.stringify([]),
+    'a source saved without the key has no list',
+    writableDefault.body.datasource?.writableSchemas === undefined,
     JSON.stringify(writableDefault.body.datasource?.writableSchemas),
   )
   const writableOdd = await call('POST', '/datasources/save', {
@@ -342,8 +341,8 @@ try {
     writableSchemas: ['x'.repeat(80), 'ok'],
   })
   check(
-    'long schema names are dropped',
-    JSON.stringify(writableOdd.body.datasource?.writableSchemas) === JSON.stringify(['ok']),
+    'an odd list is dropped too',
+    writableOdd.body.datasource?.writableSchemas === undefined,
     JSON.stringify(writableOdd.body.datasource?.writableSchemas),
   )
 
@@ -359,7 +358,6 @@ try {
     name: 'Writable with DDL',
     kind: 'postgres',
     config: { host: '127.0.0.1', port: 5998, database: 'ddl', user: 'alice' },
-    writableSchemas: ['sales'],
     allowDdl: true,
   })
   check(
@@ -375,7 +373,6 @@ try {
     name: 'Writable with DDL',
     kind: 'postgres',
     config: { host: '127.0.0.1', port: 5999, database: 'x', user: 'alice' },
-    writableSchemas: ['sales'],
   })
   check(
     'a save that omits the field keeps the switch',
@@ -387,7 +384,6 @@ try {
     name: 'Writable with DDL',
     kind: 'postgres',
     config: { host: '127.0.0.1', port: 5999, database: 'x', user: 'alice' },
-    writableSchemas: ['sales'],
     allowDdl: false,
   })
   check(
@@ -396,29 +392,26 @@ try {
     JSON.stringify(ddlRevoked.body.datasource?.allowDdl),
   )
 
-  // Unlocking without an answer is refused: a source that accepts writes and
-  // names no schema would let every write through, which is the thing the
-  // guard exists to prevent.
+  // Unlocking is now a pure flag flip — no schema list is asked for, so the call
+  // succeeds with just the flag, and the DDL switch rides along when given.
   const blind = await call('POST', '/datasources/bulk', { action: 'readOnly', ids: ['writable-default'], readOnly: false })
-  check('unlocking without writable schemas is refused', blind.status === 400, blind.body.error)
+  check('unlocking needs no schema list', blind.status === 200, blind.body.error)
   const named = await call('POST', '/datasources/bulk', {
     action: 'readOnly',
     ids: ['writable-default'],
     readOnly: false,
-    writableSchemas: ['main'],
     allowDdl: true,
   })
-  check('unlocking with writable schemas succeeds', named.status === 200, named.body.error)
+  check('unlocking with the DDL switch succeeds', named.status === 200, named.body.error)
   const afterUnlock = await call('GET', '/datasources')
   const unlockedRow = (afterUnlock.body.datasources || []).find((item) => item.id === 'writable-default')
   check('the source is writable', unlockedRow && unlockedRow.readOnly === false, JSON.stringify(unlockedRow && unlockedRow.readOnly))
   check(
-    'the writable list survives the switch',
-    JSON.stringify(unlockedRow && unlockedRow.writableSchemas) === JSON.stringify(['main']),
+    'a writable source stores no schema list',
+    unlockedRow && unlockedRow.writableSchemas === undefined,
     JSON.stringify(unlockedRow && unlockedRow.writableSchemas),
   )
-  // The unlock dialog asks both questions in one call, so the bulk route carries
-  // the DDL answer too.
+  // The row's DDL switch rides along on the same bulk call as the write flag.
   check(
     'the unlock call carries the DDL switch',
     unlockedRow && unlockedRow.allowDdl === true,
@@ -429,8 +422,8 @@ try {
   const afterRelock = await call('GET', '/datasources')
   const relockedRow = (afterRelock.body.datasources || []).find((item) => item.id === 'writable-default')
   check(
-    'the writable list is kept when the source goes read-only again',
-    JSON.stringify(relockedRow && relockedRow.writableSchemas) === JSON.stringify(['main']),
+    'a read-only source stores no schema list either',
+    relockedRow && relockedRow.writableSchemas === undefined,
     JSON.stringify(relockedRow && relockedRow.writableSchemas),
   )
   check(
@@ -474,12 +467,11 @@ try {
     groupedOk,
     JSON.stringify(bulkGroup.body.datasources?.map((entry) => `${entry.id}=${entry.group}`)),
   )
-  // Becoming writable needs a schema list, so the bulk call carries one.
+  // Becoming writable is a pure flag flip — the bulk call carries no schema list.
   const bulkReadOnly = await call('POST', '/datasources/bulk', {
     action: 'readOnly',
     ids: ['team-db'],
     readOnly: false,
-    writableSchemas: ['main'],
   })
   const flipped = bulkReadOnly.body.datasources?.find((entry) => entry.id === 'team-db')
   check('bulk readOnly flips the flag', bulkReadOnly.status === 200 && flipped?.readOnly === false, String(flipped?.readOnly))
@@ -562,10 +554,10 @@ try {
   await call('POST', '/datasources/delete', { id: 'order-a' })
   await call('POST', '/datasources/delete', { id: 'order-b' })
 
-  // A registry from the allow/deny build carries `schemas: { mode, names }` and
-  // no `writableSchemas`. The allow list is carried over as the write list; a
-  // deny list is not inverted, because "everything except these" is not a list
-  // of schemas a write may touch. Either way the old key is dropped on mount.
+  // A registry from the allow/deny build carries `schemas: { mode, names }`, and
+  // one from the writable-schemas build carries `writableSchemas`. Neither key is
+  // read anymore — writes are no longer scoped to a schema list — so both are
+  // dropped on mount and nothing is carried over.
   const legacyDir = await mkdtemp(join(tmpdir(), 'dbmcp-legacy-'))
   await writeFile(
     join(legacyDir, 'datasources.json'),
@@ -590,6 +582,14 @@ try {
           readOnly: true,
           schemas: { mode: 'deny', names: ['hr'] },
         },
+        {
+          id: 'legacy-writable',
+          name: 'Legacy writable',
+          kind: 'sqlite',
+          config: { file: 'C:/tmp/legacy-writable.db' },
+          readOnly: true,
+          writableSchemas: ['main'],
+        },
       ],
     }),
     'utf8',
@@ -605,20 +605,26 @@ try {
     const listed = await fetch(`${legacyBase}/datasources`).then((response) => response.json())
     const allowRow = (listed.datasources || []).find((item) => item.id === 'legacy-allow')
     const denyRow = (listed.datasources || []).find((item) => item.id === 'legacy-deny')
+    const writableRow = (listed.datasources || []).find((item) => item.id === 'legacy-writable')
     check(
-      'an allow list becomes the writable schemas',
-      JSON.stringify(allowRow && allowRow.writableSchemas) === JSON.stringify(['main', 'sales']),
+      'an allow list is not carried over',
+      allowRow && allowRow.writableSchemas === undefined,
       JSON.stringify(allowRow && allowRow.writableSchemas),
     )
     check(
-      'a deny list does not become a writable list',
-      JSON.stringify(denyRow && denyRow.writableSchemas) === JSON.stringify([]),
+      'a deny list is not carried over either',
+      denyRow && denyRow.writableSchemas === undefined,
       JSON.stringify(denyRow && denyRow.writableSchemas),
+    )
+    check(
+      'a writable-schemas list is dropped too',
+      writableRow && writableRow.writableSchemas === undefined,
+      JSON.stringify(writableRow && writableRow.writableSchemas),
     )
     const rewritten = JSON.parse(await readFile(join(legacyDir, 'datasources.json'), 'utf8'))
     check(
       'the legacy schemas key is dropped from the file',
-      rewritten.datasources.every((item) => !('schemas' in item)),
+      rewritten.datasources.every((item) => !('schemas' in item) && !('writableSchemas' in item)),
       JSON.stringify(rewritten.datasources.map((item) => Object.keys(item).includes('schemas'))),
     )
   } finally {

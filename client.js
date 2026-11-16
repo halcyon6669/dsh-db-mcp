@@ -137,14 +137,6 @@ window.__ModuleLoader__.load({
         'sources.default': 'default',
         'sources.hasPassword': 'password saved',
         'sources.noPassword': 'no password',
-        // The switch beside this note already says "writable", so the note only
-        // has to say where. ", writable gaussdb" next to a switch labelled
-        // "writable" read as two switches arguing about the same thing; naming
-        // the note after the field it repeats ("Writable schemas") keeps it a
-        // label with values instead of a second state word. Capitalised to
-        // match `form.schemaAccess`, the field this note is a short form of.
-        'sources.writable': 'Writable schemas: {names}',
-        'sources.writableHint': 'May only write to: {names}',
         'sources.secretBroken': 'stored password unreadable',
         'sources.neverProbed': 'never tested',
         'sources.idChip': 'ID',
@@ -192,12 +184,8 @@ window.__ModuleLoader__.load({
         'form.passwordEmpty': 'no password stored yet',
         'form.readOnly': 'Read-only (recommended)',
         'form.readOnlyHint': 'blocks writes for this source unless the global write switch is on',
-        'form.schemaAccess': 'Writable schemas',
-        'form.schemaAccessHint': 'chosen when you allow writes; reads stay unrestricted',
         'form.allowDdl': 'Allow DDL',
-        'form.allowDdlHint': 'lets this source run create, alter, drop and truncate inside the writable schemas',
-        'form.schemaNames': 'Schemas',
-        'form.schemaNamesHint': 'comma separated, for example sales, billing',
+        'form.allowDdlHint': 'lets this source run create, alter, drop and truncate',
         'form.schemaBroken': 'The stored password cannot be decrypted any more. Type it again to save it with the current key.',
         'form.invalid': 'Fill the required fields first.',
         'form.requiredHint': 'The connection string, user and password are required: fill them, then save.',
@@ -255,22 +243,8 @@ window.__ModuleLoader__.load({
         'notice.nowReadOnly': '{name} is read-only now.',
         'notice.nowWritable': '{name} accepts writes now.',
         'notice.nowWritableLocked': '{name} accepts writes now, but the global write switch is still off — turn it on under Runtime.',
-        'notice.bulkNeedsSchemas': 'Those sources name no writable schema yet. Switch them on one at a time to pick the schemas.',
-        'unlock.title': 'Where may {name} write?',
-        'unlock.hint': 'Reads stay unrestricted. A write that names any other schema is refused before it reaches the database.',
-        'unlock.loading': 'Reading the schema list…',
-        'unlock.error': 'Could not read the schema list.',
-        'unlock.retry': 'Try again',
-        'unlock.none': 'Tick at least one schema.',
-        'unlock.empty': 'This source reported no schema. Test the connection first, then try again.',
-        'unlock.selected': '{n} selected',
-        'unlock.confirm': 'Allow writes',
-        'unlock.cancel': 'Cancel',
-        'unlock.ddl': 'Also allow DDL (create / alter / drop)',
-        'unlock.ddlHint': 'Off means the tables keep their shape: only insert, update and delete go through. Either way the target schema must be one of the schemas ticked above.',
-        'sources.ddl': 'DDL allowed',
-        'sources.ddlHint': 'This source accepts create, alter and drop inside the schemas it may write to.',
-        'sources.ddlBlocked': 'DDL blocked',
+        'sources.ddl': 'DDL',
+        'sources.ddlHint': 'This source may run create, alter, drop and truncate.',
         'sources.ddlBlockedHint': 'This source accepts insert, update and delete, but refuses create, alter and drop.',
         'action.schema': 'Structure',
         'action.backToSources': 'Data sources',
@@ -418,8 +392,6 @@ window.__ModuleLoader__.load({
         'sources.default': '默认',
         'sources.hasPassword': '已存密码',
         'sources.noPassword': '无密码',
-        'sources.writable': '写入模式：{names}',
-        'sources.writableHint': '仅可写：{names}',
         'sources.secretBroken': '已存口令无法解密',
         'sources.neverProbed': '尚未测试',
         'sources.idChip': '标识符',
@@ -466,12 +438,8 @@ window.__ModuleLoader__.load({
         'form.passwordEmpty': '尚未保存口令',
         'form.readOnly': '只读（推荐）',
         'form.readOnlyHint': '未打开全局写开关时，此数据源拒绝写操作',
-        'form.schemaAccess': '可写模式',
-        'form.schemaAccessHint': '允许写入时才需要选择；读取不受限制',
         'form.allowDdl': '允许 DDL',
-        'form.allowDdlHint': '允许此数据源在可写模式内执行 create、alter、drop、truncate',
-        'form.schemaNames': '模式名',
-        'form.schemaNamesHint': '用逗号分隔，例如 sales, billing',
+        'form.allowDdlHint': '允许此数据源执行 create、alter、drop、truncate',
         'form.schemaBroken': '已存口令无法再用当前密钥解密，请重新输入一次口令以按新密钥保存。',
         'form.invalid': '请先填写必填字段。',
         'form.requiredHint': '连接串、用户与口令都是必填项：填好之后再保存。',
@@ -529,22 +497,8 @@ window.__ModuleLoader__.load({
         'notice.nowReadOnly': '{name} 已改为只读。',
         'notice.nowWritable': '{name} 现在允许写。',
         'notice.nowWritableLocked': '{name} 现在允许写，但全局写开关还关着——到「运行时诊断」里打开它。',
-        'notice.bulkNeedsSchemas': '这些数据源还没有指定可写模式。请逐个打开开关，选择允许写的模式。',
-        'unlock.title': '{name} 可以写哪些模式？',
-        'unlock.hint': '读取不受限制。点名其它模式的写语句会在到达数据库之前被拒绝。',
-        'unlock.loading': '正在读取模式列表…',
-        'unlock.error': '无法读取模式列表。',
-        'unlock.retry': '重试',
-        'unlock.none': '至少勾选一个模式。',
-        'unlock.empty': '这个数据源没有报出任何模式。先测试一下连接，再回来试。',
-        'unlock.selected': '已选 {n} 个',
-        'unlock.confirm': '允许写',
-        'unlock.cancel': '取消',
-        'unlock.ddl': '同时允许 DDL（create / alter / drop）',
-        'unlock.ddlHint': '关闭时表结构保持不变，只放行 insert、update、delete。无论开关如何，目标模式都必须在上方勾选的模式里。',
-        'sources.ddl': '允许 DDL',
-        'sources.ddlHint': '此数据源在其可写模式内接受 create、alter、drop。',
-        'sources.ddlBlocked': '禁止 DDL',
+        'sources.ddl': 'DDL',
+        'sources.ddlHint': '此数据源可执行 create、alter、drop、truncate。',
         'sources.ddlBlockedHint': '此数据源接受 insert、update、delete，但拒绝 create、alter、drop。',
         'action.schema': '结构',
         'action.backToSources': '数据源',
@@ -915,46 +869,8 @@ window.__ModuleLoader__.load({
         font-weight: 400;
         color: var(--dsw-alias-label-secondary);
       }
-      /* Where a writable source may write is a detail of the state the switch
-         already states, so it stays quiet: secondary colour, tabular names. It
-         was brand-coloured before, which put it on the same footing as the
-         switch and made the row read as two contradictory controls. */
-      .dbmcp-note.is-writable {
-        color: var(--dsw-alias-label-secondary);
-        font-variant-numeric: tabular-nums;
-      }
       .dbmcp-note.is-broken {
         color: var(--dsw-alias-state-warn-primary);
-      }
-      /* DDL on a writable source is the widest permission the panel hands out,
-         so it is the one thing on the row that gets a box — the opposite state
-         is spelled out too, so the row never leaves the question unanswered. */
-      .dbmcp-note.is-ddl,
-      .dbmcp-note.is-ddl-off {
-        padding: 1px 7px;
-        border-radius: 999px;
-        font-size: 11px;
-        letter-spacing: 0.02em;
-      }
-      .dbmcp-note.is-ddl {
-        border: 1px solid color-mix(in srgb, var(--dsw-alias-brand-primary) 32%, transparent);
-        color: var(--dsw-alias-brand-primary);
-        font-weight: 600;
-      }
-      .dbmcp-note.is-ddl-off {
-        border: 1px dashed var(--dsw-alias-border-l2);
-        color: var(--dsw-alias-label-secondary);
-      }
-      .dbmcp-item-name .dbmcp-note + .dbmcp-note::before {
-        content: '·';
-        margin-right: 2px;
-        color: var(--dsw-alias-border-l1);
-      }
-      /* A boxed note carries its own edge, so the middle dot before it would
-         sit on top of that edge. */
-      .dbmcp-item-name .dbmcp-note.is-ddl::before,
-      .dbmcp-item-name .dbmcp-note.is-ddl-off::before {
-        content: none;
       }
       /* The read-only / writable flip. A 36x20 track reads as a control at a
          glance, which is the one thing a pill with a status word on it never
@@ -2362,128 +2278,17 @@ window.__ModuleLoader__.load({
       .dbmcp-readonly .dbmcp-hint {
         padding-left: 24px;
       }
-      /* Schema policy sits next to the read-only switch: both narrow what the
-         agent may do, so they share one bordered block instead of looking like
-         two unrelated fields. */
+      /* The DDL switch in the source form. It used to live inside a bordered
+         policy block with the writable-schemas field; that field is gone, so the
+         switch keeps the same box as the read-only block for visual weight. */
       .dbmcp-policy {
         display: flex;
-        flex-direction: column;
-        gap: 12px;
+        align-items: center;
+        gap: 8px;
         border: 1px solid var(--dsw-alias-border-l1);
         border-radius: 12px;
         background: var(--dsw-alias-bg-layer-2);
         padding: 14px 16px;
-      }
-      .dbmcp-policy-head {
-        display: flex;
-        align-items: baseline;
-        gap: 10px;
-        flex-wrap: wrap;
-      }
-      .dbmcp-policy .dbmcp-form-section {
-        gap: 12px;
-      }
-      .dbmcp-policy .dbmcp-hint {
-        font-size: 12px;
-      }
-      /* Unlock dialog: the one question asked before a source may accept
-         writes. It sits over the panel rather than in a tab, because the
-         answer decides what the write guard will let through afterwards. */
-      .dbmcp-unlock {
-        position: fixed;
-        inset: 0;
-        z-index: 40;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        padding: 24px;
-        background: rgba(8, 10, 14, 0.45);
-      }
-      .dbmcp-unlock-card {
-        display: flex;
-        flex-direction: column;
-        gap: 14px;
-        width: min(520px, 100%);
-        max-height: min(80vh, 640px);
-        overflow: auto;
-        border: 1px solid var(--dsw-alias-border-l1);
-        border-radius: 14px;
-        background: var(--dsw-alias-bg-layer-1);
-        box-shadow: 0 18px 48px rgba(0, 0, 0, 0.32);
-        padding: 18px 20px;
-      }
-      .dbmcp-unlock-head {
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
-      }
-      .dbmcp-unlock-title {
-        font-size: 15px;
-        font-weight: 650;
-        letter-spacing: -0.005em;
-        color: var(--dsw-alias-label-primary);
-      }
-      .dbmcp-unlock-list {
-        list-style: none;
-        margin: 0;
-        padding: 6px;
-        display: flex;
-        flex-direction: column;
-        gap: 1px;
-        max-height: 260px;
-        overflow: auto;
-        border: 1px solid var(--dsw-alias-border-l1);
-        border-radius: 10px;
-        background: var(--dsw-alias-bg-base);
-      }
-      .dbmcp-unlock-row {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        padding: 6px 8px;
-        border-radius: 6px;
-        font-size: 12px;
-        color: var(--dsw-alias-label-primary);
-        cursor: pointer;
-        transition: background 100ms ease;
-      }
-      .dbmcp-unlock-row:hover {
-        background: var(--dsw-alias-bg-layer-2);
-      }
-      .dbmcp-unlock-row:disabled {
-        cursor: default;
-        opacity: 0.7;
-      }
-      .dbmcp-unlock-name {
-        min-width: 0;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-      .dbmcp-unlock-foot {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        justify-content: flex-end;
-        flex-wrap: wrap;
-      }
-      .dbmcp-unlock-foot .dbmcp-hint {
-        margin-right: auto;
-      }
-      /* The DDL switch sits between the schema list and the footer: it is the
-         second half of the same answer, so it reads as one block with the list. */
-      .dbmcp-unlock-ddl {
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-        padding: 12px 14px;
-        border: 1px solid var(--dsw-alias-border-l1);
-        border-radius: 12px;
-        background: var(--dsw-alias-bg-layer-2);
-      }
-      .dbmcp-unlock-ddl .dbmcp-hint {
-        font-size: 12px;
-        padding-left: 22px;
       }
       .dbmcp-help {
         display: inline-flex;
@@ -3287,9 +3092,6 @@ window.__ModuleLoader__.load({
         kind: 'sqlite',
         readOnly: true,
         config: baseConfig('sqlite'),
-        // Only consulted once writes are allowed: a writable source may write to
-        // these schemas and no others. Reads are never restricted.
-        writableSchemas: '',
         // DDL is a separate permission from writing rows: `create table` and
         // `drop table` change what everybody else reads, so they are opted into.
         allowDdl: false,
@@ -3312,8 +3114,6 @@ window.__ModuleLoader__.load({
       draft.readOnly = source.readOnly !== false
       draft.hasSecret = source.hasSecret === true
       draft.secretBroken = source.secretBroken === true
-      const declared = Array.isArray(source && source.writableSchemas) ? source.writableSchemas : []
-      draft.writableSchemas = declared.join(', ')
       draft.allowDdl = source.allowDdl === true
       draft.config = {
         ...fallback,
@@ -3452,10 +3252,6 @@ window.__ModuleLoader__.load({
             kind: draft.kind,
             readOnly: draft.readOnly,
             config: { ...draft.config, port: draft.config.port ? Number(draft.config.port) : undefined },
-            writableSchemas: String(draft.writableSchemas || '')
-              .split(',')
-              .map((name) => name.trim())
-              .filter(Boolean),
             allowDdl: draft.allowDdl === true,
             password: saveSecret && draft.password !== '' ? draft.password : undefined,
           }
@@ -3756,38 +3552,15 @@ window.__ModuleLoader__.load({
             h(
               'div',
               { className: 'dbmcp-policy' },
-              h(
-                'div',
-                { className: 'dbmcp-policy-head' },
-                h('span', { className: 'dbmcp-form-label' }, t('form.schemaAccess')),
-                h('span', { className: 'dbmcp-hint' }, t('form.schemaAccessHint')),
-              ),
-              h(
-                'div',
-                { className: 'dbmcp-form-section' },
-                h(
-                  Field,
-                  { key: 'writableSchemas', label: t('form.schemaNames'), hint: t('form.schemaNamesHint') },
-                  h(TextInput, {
-                    value: draft.writableSchemas,
-                    placeholder: 'sales, billing',
-                    onChange: (value) => patch({ writableSchemas: value }),
-                  }),
-                ),
-              ),
-              // The unlock dialog asks the same question; both write `allowDdl`,
-              // so a source created as writable can still be given DDL later.
-              h(
-                'label',
-                { className: 'dbmcp-check' },
-                h('input', {
-                  type: 'checkbox',
-                  checked: draft.allowDdl === true,
-                  onChange: (event) => patch({ allowDdl: event.target.checked }),
-                }),
-                h('span', null, t('form.allowDdl')),
-                h('span', { className: 'dbmcp-help', title: t('form.allowDdlHint'), 'aria-hidden': 'true' }, '?'),
-              ),
+              // DDL is its own switch, the same shape as the writable switch on
+              // a row: a source can take `insert` and still be one whose tables
+              // belong to somebody else, so shape-changing statements opt in.
+              h(Switch, {
+                checked: draft.allowDdl === true,
+                label: t('form.allowDdl'),
+                title: t('form.allowDdlHint'),
+                onChange: (next) => patch({ allowDdl: next }),
+              }),
             ),
             h(
               'div',
@@ -3940,21 +3713,6 @@ const sourceMatches = (source, needle) => {
     .toLowerCase()
   return hay.includes(text)
 }
-
-/** Schemas a writable source may write to; empty means it is not writable yet. */
-const writableNames = (source) => {
-  const names = source && Array.isArray(source.writableSchemas) ? source.writableSchemas : []
-  return names.filter((name) => typeof name === 'string' && name.trim() !== '')
-}
-
-/**
- * Whether a row shows its writable-schemas pill.
- *
- * The list outlives a switch back to read-only, because it is the next unlock's
- * starting point. Showing it on a locked row would read as a permission that is
- * not in force, so the pill only appears once the source is actually writable.
- */
-const showsWritable = (source) => Boolean(source) && source.readOnly === false && writableNames(source).length > 0
 
 /**
  * Section order for the list. "Ungrouped" is a bucket like any other, but it is
@@ -4516,10 +4274,6 @@ function groupTables(tables) {
       const [notice, setNotice] = React.useState(null)
       const [probing, setProbing] = React.useState(null)
       const [pendingDelete, setPendingDelete] = React.useState(null)
-      // The unlock dialog: { source, picked, manual, catalog, busy, error }.
-      // Switching a source to writable goes through here, because a source
-      // that accepts writes must first say which schemas it may write to.
-      const [unlock, setUnlock] = React.useState(null)
       const [selected, setSelected] = React.useState([])
       const [bulkGroup, setBulkGroup] = React.useState('')
       const [pendingBulkDelete, setPendingBulkDelete] = React.useState(false)
@@ -4657,25 +4411,19 @@ function groupTables(tables) {
       /**
        * Flip one source between read-only and writable from its row switch.
        *
-       * Going read-only is immediate. Going writable first asks which schemas
-       * may be written to: a source that accepts writes without saying where is
-       * exactly the thing this guard exists to prevent.
+       * Writable now means "may write to every schema it can see": there is no
+       * whitelist to ask about, so the switch is a pure flag flip.
        */
       const toggleReadOnly = async (source) => {
-        if (source.readOnly === false) {
-          await setReadOnly(source, true)
-          return
-        }
-        openUnlock(source)
+        await setReadOnly(source, source.readOnly !== false)
       }
 
-      /** POST the flag; `writableSchemas` rides along when unlocking. */
-      const setReadOnly = async (source, readOnly, writableSchemas, allowDdl) => {
+      /** POST the flag; `allowDdl` rides along when a DDL switch flips. */
+      const setReadOnly = async (source, readOnly, allowDdl) => {
         const name = source.name || source.id
         setBusy(true)
         try {
           const body = { action: 'readOnly', ids: [source.id], readOnly }
-          if (writableSchemas !== undefined) body.writableSchemas = writableSchemas
           if (allowDdl !== undefined) body.allowDdl = allowDdl === true
           await apiPost('/datasources/bulk', body)
           const globalOpen = Boolean(settings && settings.allowWrite)
@@ -4694,6 +4442,11 @@ function groupTables(tables) {
         }
       }
 
+      /** Flip the DDL switch, which rides alongside the writable flag. */
+      const toggleDdl = async (source) => {
+        await setReadOnly(source, false, source.allowDdl !== true)
+      }
+
       const bulkDelete = async () => {
         if (selected.length === 0) return
         if (!pendingBulkDelete) {
@@ -4701,49 +4454,6 @@ function groupTables(tables) {
           return
         }
         await runBulk('delete')
-      }
-
-      /** Read the schema list once, when the dialog opens. */
-      const openUnlock = (source) => {
-        // The DDL switch is preselected from what the source already allows, so
-        // reopening the dialog shows the choice that is in force, not a default.
-        setUnlock({ source, picked: {}, catalog: null, busy: true, error: null, ddl: source.allowDdl === true })
-        ;(async () => {
-          try {
-            const data = await apiGet(`/schema?datasource=${encodeURIComponent(source.id)}`)
-            if (!data.ok) {
-              const failure = data.error || {}
-              throw new Error(failure.message || t('unlock.error'))
-            }
-            // `schemas` is the catalog's own list. A Host from before the field
-            // existed only sends the tables, so derive the list from their
-            // schema names rather than showing an empty dialog with no way out.
-            const listed = Array.isArray(data.schemas) && data.schemas.length > 0
-              ? data.schemas
-              : (Array.isArray(data.tables) ? data.tables : []).map((table) => table && table.schema)
-            const declared = Array.isArray(source.writableSchemas) ? source.writableSchemas : []
-            // Names the source already writes to stay on the list even when the
-            // catalog no longer shows them, so the choice can always be kept.
-            const names = Array.from(new Set(listed.concat(declared).filter((name) => typeof name === 'string' && name.trim() !== '')))
-            const picked = {}
-            for (const name of declared) {
-              if (names.includes(name)) picked[name] = true
-            }
-            setUnlock((prev) => (prev && prev.source.id === source.id ? { ...prev, picked, catalog: names, busy: false } : prev))
-          } catch (failure) {
-            setUnlock((prev) =>
-              prev && prev.source.id === source.id
-                ? { ...prev, busy: false, error: String((failure && failure.message) || failure) }
-                : prev,
-            )
-          }
-        })()
-      }
-
-      /** The names the dialog would submit: the ticked boxes. */
-      const unlockNames = (state) => {
-        if (!state) return []
-        return Object.keys(state.picked || {}).filter((name) => state.picked[name])
       }
 
       const probe = async (source) => {        setProbing(source.id)
@@ -5191,30 +4901,20 @@ function groupTables(tables) {
                         void toggleReadOnly(source)
                       },
                     }),
-                    // The list is kept on a read-only source (it is the next
-                    // unlock's starting point), but showing it there reads as a
-                    // permission that is not in force: it only earns a note once
-                    // the source is actually writable.
-                    showsWritable(source)
-                      ? h(
-                          'span',
-                          {
-                            className: 'dbmcp-note is-writable',
-                            title: fmt(t('sources.writableHint'), { names: writableNames(source).join(', ') }),
-                          },
-                          fmt(t('sources.writable'), { names: writableNames(source).join(', ') }),
-                        )
-                      : null,
+                    // DDL is its own switch, right beside the writable one. It
+                    // only means anything while the source is writable, so a
+                    // read-only row disables it rather than hiding it.
+                    h(Switch, {
+                      checked: source.allowDdl === true,
+                      label: t('sources.ddl'),
+                      title: source.allowDdl === true ? t('sources.ddlHint') : t('sources.ddlBlockedHint'),
+                      disabled: busy || source.readOnly === true,
+                      onChange: () => {
+                        void toggleDdl(source)
+                      },
+                    }),
                     source.secretBroken === true
                       ? h('span', { className: 'dbmcp-note is-broken' }, t('sources.secretBroken'))
-                      : null,
-                    // The DDL switch only means something while the source is
-                    // writable; on a locked row it would read as a permission
-                    // that is not in force, exactly like the schema list.
-                    showsWritable(source)
-                      ? source.allowDdl === true
-                        ? h('span', { className: 'dbmcp-note is-ddl', title: t('sources.ddlHint') }, t('sources.ddl'))
-                        : h('span', { className: 'dbmcp-note is-ddl-off', title: t('sources.ddlBlockedHint') }, t('sources.ddlBlocked'))
                       : null,
                   ),
               h(
@@ -5459,22 +5159,7 @@ function groupTables(tables) {
               type: 'button',
               className: 'dbmcp-btn is-small',
               disabled: busy,
-              onClick: () => {
-                /* A source may only become writable once it names the schemas it
-                   may write to, and that answer is per source — so a selection
-                   without one is asked about instead of being rejected blind. */
-                const chosen = selected.map((id) => sources.find((item) => item.id === id)).filter(Boolean)
-                const pending = chosen.filter((item) => writableNames(item).length === 0)
-                if (pending.length === 0) {
-                  void runBulk('readOnly', { readOnly: false })
-                  return
-                }
-                if (chosen.length === 1) {
-                  openUnlock(chosen[0])
-                  return
-                }
-                setNotice({ message: t('notice.bulkNeedsSchemas'), isError: true })
-              },
+              onClick: () => void runBulk('readOnly', { readOnly: false }),
             },
             t('bulk.readwrite'),
           ),
@@ -5937,117 +5622,6 @@ function groupTables(tables) {
         body = h('div', { className: 'dbmcp-grid is-single' }, body)
       }
 
-      /* The unlock dialog. It asks the one question the write guard needs an
-         answer to, and it refuses to close with an empty answer. */
-      const unlockDialog = !unlock
-        ? null
-        : (() => {
-            const names = unlockNames(unlock)
-            const toggle = (name) =>
-              setUnlock((prev) =>
-                prev ? { ...prev, picked: { ...prev.picked, [name]: !prev.picked[name] } } : prev,
-              )
-            const confirm = async () => {
-              if (names.length === 0) return
-              const source = unlock.source
-              const ddl = unlock.ddl === true
-              setUnlock(null)
-              try {
-                await setReadOnly(source, false, names, ddl)
-              } catch (error) {
-                /* setReadOnly already raised the banner */
-              }
-            }
-            return h(
-              'div',
-              { className: 'dbmcp-unlock', role: 'dialog', 'aria-modal': 'true' },
-              h(
-                'div',
-                { className: 'dbmcp-unlock-card' },
-                h(
-                  'div',
-                  { className: 'dbmcp-unlock-head' },
-                  h('span', { className: 'dbmcp-unlock-title' }, fmt(t('unlock.title'), { name: unlock.source.name || unlock.source.id })),
-                  h('span', { className: 'dbmcp-hint' }, t('unlock.hint')),
-                ),
-                unlock.busy
-                  ? h('div', { className: 'dbmcp-empty' }, t('unlock.loading'))
-                  : unlock.error
-                    ? h(
-                        'div',
-                        { className: 'dbmcp-error' },
-                        h('div', null, t('unlock.error')),
-                        h('code', null, unlock.error),
-                        h(
-                          'button',
-                          { type: 'button', className: 'dbmcp-btn is-small', onClick: () => openUnlock(unlock.source) },
-                          t('unlock.retry'),
-                        ),
-                      )
-                    : (unlock.catalog || []).length === 0
-                      ? h('div', { className: 'dbmcp-empty' }, t('unlock.empty'))
-                      : h(
-                          'ul',
-                          { className: 'dbmcp-unlock-list' },
-                          (unlock.catalog || []).map((name) =>
-                            h(
-                              'li',
-                              { key: `unlock-${name}` },
-                              h(
-                                'label',
-                                { className: 'dbmcp-unlock-row' },
-                                h('input', {
-                                  type: 'checkbox',
-                                  checked: unlock.picked[name] === true,
-                                  onChange: () => toggle(name),
-                                }),
-                                h('span', { className: 'dbmcp-unlock-name' }, name),
-                              ),
-                            ),
-                          ),
-                        ),
-                !unlock.busy && !unlock.error && (unlock.catalog || []).length > 0
-                  ? h(
-                      'div',
-                      { className: 'dbmcp-unlock-ddl' },
-                      h(
-                        'label',
-                        { className: 'dbmcp-check' },
-                        h('input', {
-                          type: 'checkbox',
-                          checked: unlock.ddl === true,
-                          onChange: (event) =>
-                            setUnlock((prev) => (prev ? { ...prev, ddl: event.target.checked } : prev)),
-                        }),
-                        h('span', null, t('unlock.ddl')),
-                      ),
-                      h('span', { className: 'dbmcp-hint' }, t('unlock.ddlHint')),
-                    )
-                  : null,
-                h(
-                  'div',
-                  { className: 'dbmcp-unlock-foot' },
-                  h(
-                    'span',
-                    { className: 'dbmcp-hint' + (names.length === 0 ? ' is-warn' : '') },
-                    names.length === 0 ? t('unlock.none') : fmt(t('unlock.selected'), { n: names.length }),
-                  ),
-                  h('button', { type: 'button', className: 'dbmcp-btn', onClick: () => setUnlock(null) }, t('unlock.cancel')),
-                  h(
-                    'button',
-                    {
-                      type: 'button',
-                      className: 'dbmcp-btn is-primary',
-                      disabled: names.length === 0 || unlock.busy,
-                      onClick: () => void confirm(),
-                    },
-                    t('unlock.confirm'),
-                  ),
-                ),
-              ),
-            )
-          })()
-
       return h(
         'div',
         { className: 'dbmcp-page', style: palette },
@@ -6111,7 +5685,6 @@ function groupTables(tables) {
             )
           : null,
         body,
-        unlockDialog,
       )
     }
 
@@ -6147,8 +5720,6 @@ function groupTables(tables) {
         reportTarget,
         StatusStrip,
         sourceMatches,
-        writableNames,
-        showsWritable,
         sectionOrder,
         paletteOf,
         parseColor,
