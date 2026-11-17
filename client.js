@@ -4980,17 +4980,19 @@ function groupTables(tables) {
                       },
                     }),
                     // DDL is its own switch, right beside the writable one. It
-                    // only means anything while the source is writable, so a
-                    // read-only row disables it rather than hiding it.
-                    h(Switch, {
-                      checked: source.allowDdl === true,
-                      label: t('sources.ddl'),
-                      title: source.allowDdl === true ? t('sources.ddlHint') : t('sources.ddlBlockedHint'),
-                      disabled: busy || source.readOnly === true,
-                      onChange: () => {
-                        void toggleDdl(source)
-                      },
-                    }),
+                    // only means anything while the source is writable, so hide
+                    // it entirely until the writable switch is turned on.
+                    source.readOnly === false
+                      ? h(Switch, {
+                          checked: source.allowDdl === true,
+                          label: t('sources.ddl'),
+                          title: source.allowDdl === true ? t('sources.ddlHint') : t('sources.ddlBlockedHint'),
+                          disabled: busy,
+                          onChange: () => {
+                            void toggleDdl(source)
+                          },
+                        })
+                      : null,
                     source.secretBroken === true
                       ? h('span', { className: 'dbmcp-note is-broken' }, t('sources.secretBroken'))
                       : null,
