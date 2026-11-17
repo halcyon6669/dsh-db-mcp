@@ -488,13 +488,27 @@ try {
     JSON.stringify(bulkDelete.body.datasources?.map((entry) => entry.id)),
   )
 
-  // Groups are user-created, renameable and deletable, and survive as empty ones.
+  // Emptying a group deletes it; a group the user made and never filled stays,
+  // because that one is a drop target rather than a leftover.
   const groupsAfterBulk = await call('GET', '/groups')
-  check('groups list keeps the created group', groupsAfterBulk.body.groups?.includes('ops'), JSON.stringify(groupsAfterBulk.body.groups))
+  check(
+    'emptying a group through a bulk delete removes it',
+    !groupsAfterBulk.body.groups?.includes('ops'),
+    JSON.stringify(groupsAfterBulk.body.groups),
+  )
   const emptyGroup = await call('POST', '/groups/save', { name: 'staging' })
   check('an empty group can be created', emptyGroup.status === 200 && emptyGroup.body.groups.includes('staging'), emptyGroup.body.error)
   const duplicateGroup = await call('POST', '/groups/save', { name: 'staging' })
   check('duplicate group names are rejected', duplicateGroup.status === 400, duplicateGroup.body.error)
+  await new Promise((resolve) => setTimeout(resolve, 5))
+  const groupSource = await call('POST', '/datasources/save', {
+    id: 'grp-a',
+    name: 'Group A',
+    group: 'ops',
+    kind: 'sqlite',
+    config: { file: 'C:/tmp/grp-a.db' },
+  })
+  check('a source can join a group', groupSource.status === 200 && groupSource.body.datasource?.group === 'ops', groupSource.body.error)
   const renameGroup = await call('POST', '/groups/save', { name: 'operations', from: 'ops' })
   check(
     'renaming a group rewrites its members',
@@ -514,6 +528,31 @@ try {
   )
   const unknownGroup = await call('POST', '/groups/delete', { name: 'nope' })
   check('deleting an unknown group is a 404', unknownGroup.status === 404, unknownGroup.body.error)
+
+  // The same rule on the single-source path: the group a source was the last
+  // member of goes away, while a group that was empty before the delete is a
+  // drop target the user made and has to stay.
+  await call('POST', '/datasources/save', {
+    id: 'solo-a',
+    name: 'Solo A',
+    group: 'solo',
+    kind: 'sqlite',
+    config: { file: 'C:/tmp/solo-a.db' },
+  })
+  const groupsWithSolo = await call('GET', '/groups')
+  check('a group appears with its first source', groupsWithSolo.body.groups?.includes('solo'), JSON.stringify(groupsWithSolo.body.groups))
+  await call('POST', '/datasources/delete', { id: 'solo-a' })
+  const groupsAfterSolo = await call('GET', '/groups')
+  check(
+    'deleting the last source in a group removes it',
+    !groupsAfterSolo.body.groups?.includes('solo'),
+    JSON.stringify(groupsAfterSolo.body.groups),
+  )
+  check(
+    'a group that was already empty survives a delete',
+    groupsAfterSolo.body.groups?.includes('staging'),
+    JSON.stringify(groupsAfterSolo.body.groups),
+  )
 
   const first = await call('POST', '/datasources/save', {
     id: 'order-a',

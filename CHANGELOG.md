@@ -21,6 +21,20 @@ report of each version in more detail.
 
 ## [Unreleased]
 
+### Added
+
+- **A ticked block of sources drags as one.** Grab the handle of any checked row
+  and the whole selection travels together, keeping its own order, and lands above
+  or below the row it was dropped on. Dropping on a group moves all of them.
+
+### Changed
+
+- **Emptying a group deletes it.** Deleting the last source in a group removes the
+  group too, instead of leaving behind an empty section nobody created. A group that
+  was already empty before the delete survives — that one is a drop target the user
+  made on purpose, and the two cases are told apart by whether the group held a
+  source at the time of the delete.
+
 ## [0.9.10] - 2026-11-16
 
 ### Fixed

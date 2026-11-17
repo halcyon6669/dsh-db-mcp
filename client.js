@@ -269,7 +269,7 @@ window.__ModuleLoader__.load({
         'group.delete': 'Delete',
         'group.deleteConfirm': 'Delete group?',
         'group.selectAll': 'Select every source in this group',
-        'group.dragHint': 'Drag onto a group to move it',
+        'group.dragHint': 'Drag onto a group to move it; checking rows drags them together',
         'group.empty': 'Drop a source here',
         'bulk.selected': '{n} selected',
         'bulk.test': 'Test selected',
@@ -286,6 +286,7 @@ window.__ModuleLoader__.load({
         'notice.groupSaved': 'Group “{name}” saved.',
         'notice.groupDeleted': 'Group “{name}” deleted.',
         'notice.moved': 'Moved into “{group}”.',
+        'notice.movedMany': 'Moved {n} sources into “{group}”.',
         'schema.title': 'Structure of {name}',
         'schema.tables': 'Tables ({n})',
         'schema.pick': 'Pick a table on the left to see its columns.',
@@ -523,7 +524,7 @@ window.__ModuleLoader__.load({
         'group.delete': '删除',
         'group.deleteConfirm': '确认删除分组？',
         'group.selectAll': '全选该分组的数据源',
-        'group.dragHint': '拖到分组上即可移动',
+        'group.dragHint': '拖到分组上即可移动；勾选多行后拖动会整批移动',
         'group.empty': '把数据源拖到这里',
         'bulk.selected': '已选 {n} 个',
         'bulk.test': '批量测试',
@@ -540,6 +541,7 @@ window.__ModuleLoader__.load({
         'notice.groupSaved': '已保存分组「{name}」。',
         'notice.groupDeleted': '已删除分组「{name}」。',
         'notice.moved': '已移动到「{group}」。',
+        'notice.movedMany': '已将 {n} 个数据源移动到「{group}」。',
         'schema.title': '{name} 的结构',
         'schema.tables': '表（{n}）',
         'schema.pick': '在左侧选一张表查看它的列。',
@@ -1949,6 +1951,12 @@ window.__ModuleLoader__.load({
       }
       .dbmcp-item.is-dragging {
         opacity: 0.55;
+      }
+      /* A checked block drags as one; the tint tells the user the whole block
+         is in hand, not just the row under the cursor. */
+      .dbmcp-list.is-dragging-block .dbmcp-item.is-dragging {
+        opacity: 0.7;
+        border-color: color-mix(in srgb, var(--dsw-alias-brand-primary) 45%, transparent);
       }
       .dbmcp-item.is-drop-before {
         box-shadow: 0 -2px 0 0 var(--dsw-alias-brand-primary);
@@ -3742,15 +3750,32 @@ function sectionOrder(groupNames, sources, narrowing) {
   return names.filter((name) => sources.some((source) => String(source.group || '').trim() === name))
 }
 
+/**
+ * The order a drop should produce.
+ *
+ * A group of checked rows drags as one block: the block keeps its own relative
+ * order and lands whole — above `target`, or below it when `after`. No row in
+ * the block is left behind at the old position.
+ */
+function reorderForDrop(order, moving, target, after) {
+  const block = order.filter((id) => moving.includes(id) && id !== target)
+  if (block.length === 0) return order.slice()
+  const rest = order.filter((id) => !block.includes(id))
+  const at = rest.indexOf(target)
+  if (at < 0) return rest.concat(block)
+  const cut = at + (after ? 1 : 0)
+  return rest.slice(0, cut).concat(block, rest.slice(cut))
+}
+
 function groupTables(tables) {
-      const buckets = new Map()
-      for (const table of tables || []) {
-        const key = table.schema || ''
-        if (!buckets.has(key)) buckets.set(key, [])
-        buckets.get(key).push(table)
-      }
-      return Array.from(buckets.entries()).sort((left, right) => (left[0] || '').localeCompare(right[0] || ''))
-    }
+  const buckets = new Map()
+  for (const table of tables || []) {
+    const key = table.schema || ''
+    if (!buckets.has(key)) buckets.set(key, [])
+    buckets.get(key).push(table)
+  }
+  return Array.from(buckets.entries()).sort((left, right) => (left[0] || '').localeCompare(right[0] || ''))
+}
 
     function tableMatches(table, needle) {
       if (!needle) return true
@@ -4295,7 +4320,7 @@ function groupTables(tables) {
       const [groupDraft, setGroupDraft] = React.useState('')
       const [editingGroup, setEditingGroup] = React.useState(null)
       const [pendingGroupDelete, setPendingGroupDelete] = React.useState(null)
-      const [draggingId, setDraggingId] = React.useState(null)
+      const [dragIds, setDragIds] = React.useState([])
       const [dragOverGroup, setDragOverGroup] = React.useState(null)
       const [dropMark, setDropMark] = React.useState(null)
       const [renamingSource, setRenamingSource] = React.useState(null)
@@ -4732,30 +4757,63 @@ function groupTables(tables) {
         }
       }
 
-      const moveToGroup = async (id, name) => {
+      /**
+       * Drop the tick from rows that were just moved as a block. Dragging a row
+       * that was not checked leaves the existing selection alone — the user did
+       * not ask to move those.
+       */
+      const clearMovedSelection = (moved) => {
+        const allMoved = moved.length > 0 && moved.every((id) => selected.includes(id))
+        if (allMoved) setSelected([])
+      }
+
+      /**
+       * Move a dragged block into a group.
+       *
+       * `ids` is usually one row, but grabbing a checked row drags every checked
+       * row, so the call takes the whole block and the backend moves them in one
+       * write.
+       */
+      const moveToGroup = async (ids, name) => {
+        const list = Array.isArray(ids) ? ids : [ids]
+        if (list.length === 0) return
         try {
-          await apiPost('/datasources/bulk', { action: 'group', ids: [id], group: name })
+          await apiPost('/datasources/bulk', { action: 'group', ids: list, group: name })
           const label = name || t('group.unassigned')
-          setNotice({ message: t('notice.moved').replace('{group}', label), isError: false })
+          setNotice({
+            message:
+              list.length > 1
+                ? t('notice.movedMany').replace('{n}', String(list.length)).replace('{group}', label)
+                : t('notice.moved').replace('{group}', label),
+            isError: false,
+          })
+          clearMovedSelection(list)
           load()
         } catch (error) {
           reportError(error)
         }
       }
 
-      /** Dropping a row onto another row: adopt its group, then sit above or below it. */
-      const dropOnRow = async (draggedId, target, after = false) => {
-        const dragged = sources.find((item) => item.id === draggedId)
-        if (!dragged || dragged.id === target.id) return
+      /**
+       * Dropping a block onto a row: adopt that row's group, then sit above or
+       * below it. A multi-row drag stays in one piece and keeps its own order.
+       */
+      const dropOnRow = async (movedIds, target, after = false) => {
+        const moving = (Array.isArray(movedIds) ? movedIds : [movedIds]).filter((id) => id && id !== target.id)
+        if (moving.length === 0) return
         try {
-          if (String(dragged.group || '').trim() !== String(target.group || '').trim()) {
-            await apiPost('/datasources/bulk', { action: 'group', ids: [draggedId], group: String(target.group || '').trim() })
+          const group = String(target.group || '').trim()
+          const leaving = moving.some((id) => {
+            const row = sources.find((item) => item.id === id)
+            return row && String(row.group || '').trim() !== group
+          })
+          if (leaving) {
+            await apiPost('/datasources/bulk', { action: 'group', ids: moving, group })
           }
-          const ids = sources.map((item) => item.id).filter((id) => id !== draggedId)
-          const at = ids.indexOf(target.id)
-          ids.splice(at < 0 ? ids.length : at + (after ? 1 : 0), 0, draggedId)
+          const ids = reorderForDrop(sources.map((item) => item.id), moving, target.id, after)
           await apiPost('/datasources/reorder', { ids })
-          setDraggingId(null)
+          setDragIds([])
+          clearMovedSelection(moving)
           load()
         } catch (error) {
           reportError(error)
@@ -4782,6 +4840,7 @@ function groupTables(tables) {
         const probeInfo = source.lastProbe
         const failed = probeFailed(source)
         const checked = selected.includes(source.id)
+        const dragging = dragIds.includes(source.id)
         const badge = kindBadge(source.kind)
         return h(
           'li',
@@ -4789,12 +4848,12 @@ function groupTables(tables) {
             className:
               'dbmcp-item' +
               (checked ? ' is-selected' : '') +
-              (draggingId === source.id ? ' is-dragging' : '') +
+              (dragging ? ' is-dragging' : '') +
               (dropMark && dropMark.id === source.id ? (dropMark.after ? ' is-drop-after' : ' is-drop-before') : '') +
               (failed ? ' is-failed' : ''),
             key: source.id,
             onDragOver: (event) => {
-              if (!draggingId || draggingId === source.id) return
+              if (dragIds.length === 0 || dragging) return
               event.preventDefault()
               event.stopPropagation()
               /* Landing below the middle of a row means "after this one". */
@@ -4810,8 +4869,8 @@ function groupTables(tables) {
               event.stopPropagation()
               const after = Boolean(dropMark && dropMark.id === source.id && dropMark.after)
               setDropMark(null)
-              if (!draggingId || draggingId === source.id) return
-              void dropOnRow(draggingId, source, after)
+              if (dragIds.length === 0 || dragging) return
+              void dropOnRow(dragIds, source, after)
             },
           },
           h(
@@ -4824,17 +4883,21 @@ function groupTables(tables) {
                 title: t('group.dragHint'),
                 draggable: true,
                 onDragStart: (event) => {
-                  setDraggingId(source.id)
+                  /* Grabbing a checked row drags the whole checked block, so the
+                     selection is the drag: one row, or all of them. */
+                  const batch = checked ? selected.slice() : [source.id]
+                  setDragIds(batch)
                   try {
                     event.dataTransfer.setData('text/plain', source.id)
+                    event.dataTransfer.setData('application/x-dbmcp-rows', JSON.stringify(batch))
                     event.dataTransfer.effectAllowed = 'move'
                     const row = event.currentTarget.closest('.dbmcp-item')
                     if (row) event.dataTransfer.setDragImage(row, 16, 16)
                   } catch (error) {
-                    /* some shells hand out a read-only dataTransfer; draggingId still carries the id */
+                    /* some shells hand out a read-only dataTransfer; dragIds still carries the block */
                   }
                 },
-                onDragEnd: () => setDraggingId(null),
+                onDragEnd: () => setDragIds([]),
               },
               h('span', { className: 'dbmcp-grip-dots', 'aria-hidden': 'true' }),
             ),
@@ -5015,14 +5078,15 @@ function groupTables(tables) {
             onDrop: (event) => {
               event.preventDefault()
               setDragOverGroup(null)
-              let id = draggingId
+              let ids = dragIds
               try {
-                id = event.dataTransfer.getData('text/plain') || id
+                const packed = event.dataTransfer.getData('application/x-dbmcp-rows')
+                if (packed) ids = JSON.parse(packed)
               } catch (error) {
-                /* fall back to the id remembered on dragstart */
+                /* fall back to the block remembered on dragstart */
               }
-              setDraggingId(null)
-              if (id) void moveToGroup(id, name)
+              setDragIds([])
+              if (Array.isArray(ids) && ids.length > 0) void moveToGroup(ids, name)
             },
           },
           h(
@@ -5098,7 +5162,7 @@ function groupTables(tables) {
             ? folded
               ? null
               : h('div', { className: 'dbmcp-hint dbmcp-group-empty' }, t('group.empty'))
-            : h('ul', { className: 'dbmcp-list' }, items.map(renderItem)),
+            : h('ul', { className: 'dbmcp-list' + (dragIds.length > 1 ? ' is-dragging-block' : '') }, items.map(renderItem)),
         )
       }
 
@@ -5146,7 +5210,7 @@ function groupTables(tables) {
         const loose = buckets.get('') || []
         /* A single unnamed bucket with rows in it needs no heading. */
         if (order.length === 1 && !order[0] && loose.length > 0) {
-          return h('ul', { className: 'dbmcp-list' }, loose.map(renderItem))
+          return h('ul', { className: 'dbmcp-list' + (dragIds.length > 1 ? ' is-dragging-block' : '') }, loose.map(renderItem))
         }
         return h(
           'div',
@@ -5737,6 +5801,7 @@ function groupTables(tables) {
         StatusStrip,
         sourceMatches,
         sectionOrder,
+        reorderForDrop,
         paletteOf,
         parseColor,
       },

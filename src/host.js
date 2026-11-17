@@ -966,6 +966,22 @@ export function createHost(options = {}) {
     )
   }
 
+  /**
+   * The group list that survives a delete.
+   *
+   * A group whose last source is deleted goes with it — keeping an empty
+   * section there would leave the user with a row they never made. A group that
+   * was *already* empty is different: it is a drop target the user created on
+   * purpose, so it stays. `before` is the datasource list from before the
+   * delete, which is what tells the two apart.
+   */
+  function groupsAfterDelete(before, after, groups) {
+    const occupied = (list) => new Set(list.map((item) => groupName(item && item.group)).filter(Boolean))
+    const wasUsed = occupied(before)
+    const stillUsed = occupied(after)
+    return groups.filter((name) => !wasUsed.has(name) || stillUsed.has(name))
+  }
+
   async function readSecrets() {
     const read = await readJson(secretsFile)
     const secrets = read.value && cleanRecord(read.value.secrets) ? read.value.secrets : {}
@@ -1623,7 +1639,7 @@ export function createHost(options = {}) {
     if (action === 'delete') {
       const list = registry.datasources.filter((item) => !target.includes(item.id))
       if (list.length > 0 && !list.some((item) => item.isDefault)) list[0].isDefault = true
-      await writeRegistry(list)
+      await writeRegistry(list, groupsAfterDelete(registry.datasources, list, registry.groups))
       const { secrets } = await readSecrets()
       let changed = false
       for (const id of target) {
@@ -1791,7 +1807,7 @@ export function createHost(options = {}) {
       return { status: 404, body: { ok: false, error: `unknown datasource: ${id}` } }
     }
     if (list.length > 0 && !list.some((item) => item.isDefault)) list[0].isDefault = true
-    await writeRegistry(list)
+    await writeRegistry(list, groupsAfterDelete(registry.datasources, list, registry.groups))
     const { secrets } = await readSecrets()
     if (secrets[id]) {
       delete secrets[id]
@@ -2265,6 +2281,7 @@ export function createHost(options = {}) {
       sourceIdentity,
       hostsOf,
       endpointLabel,
+      groupsAfterDelete,
     },
     dispose: async () => {
       await bridge.dispose()

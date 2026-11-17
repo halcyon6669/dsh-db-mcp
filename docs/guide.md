@@ -255,7 +255,12 @@ Every source carries an optional **group** label, editable under *More settings*
   members.
 - **Collapse** — the triangle next to the group name folds the section; an empty group
   stays visible as a drop target.
+- **Disappearing groups** — delete the last source in a group and the group goes with
+  it, rather than leaving an empty section you never created. A group that was already
+  empty before the delete is different: you made it as a drop target, so it stays.
 - **Move** — drag a source row onto a group, or onto **Ungrouped** to clear it.
+- **Move several** — tick the rows first, then drag any one of them: the whole ticked
+  block travels together and lands in one piece.
 - **Reorder** — drag a row onto another row: the top half of the target puts it before,
   the bottom half after. Dropping across groups re-groups and repositions in one go.
 - **Rename a source** — double-click its name; the id never changes.

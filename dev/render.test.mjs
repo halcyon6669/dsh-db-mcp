@@ -521,6 +521,34 @@ check(
   'sections: the whole list keeps every group plus ungrouped',
   sectionOrder(['docker'], groupedRow, false).join('|') === 'docker|',
 )
+// Dropping a block of checked rows: the block lands whole, in its own order.
+const { reorderForDrop } = mod.__test
+check(
+  'drag: a single row lands above its target',
+  reorderForDrop(['a', 'b', 'c', 'd'], ['d'], 'b', false).join('|') === 'a|d|b|c',
+  reorderForDrop(['a', 'b', 'c', 'd'], ['d'], 'b', false).join('|'),
+)
+check(
+  'drag: landing after a row puts it below',
+  reorderForDrop(['a', 'b', 'c', 'd'], ['a'], 'c', true).join('|') === 'b|c|a|d',
+  reorderForDrop(['a', 'b', 'c', 'd'], ['a'], 'c', true).join('|'),
+)
+check(
+  'drag: a checked block moves together and keeps its order',
+  reorderForDrop(['a', 'b', 'c', 'd', 'e'], ['b', 'd'], 'a', true).join('|') === 'a|b|d|c|e',
+  reorderForDrop(['a', 'b', 'c', 'd', 'e'], ['b', 'd'], 'a', true).join('|'),
+)
+check(
+  'drag: the row under the cursor is not moved twice',
+  reorderForDrop(['a', 'b', 'c'], ['a', 'b'], 'b', false).join('|') === 'a|b|c',
+  reorderForDrop(['a', 'b', 'c'], ['a', 'b'], 'b', false).join('|'),
+)
+check(
+  'drag: dragging the only checked row is a plain reorder',
+  reorderForDrop(['a', 'b'], ['a'], 'b', true).join('|') === 'b|a',
+  reorderForDrop(['a', 'b'], ['a'], 'b', true).join('|'),
+)
+
 check('status: a failed probe is a failure', probeFailed({ lastProbe: { ok: false } }) === true)
 check('status: a healthy probe is not a failure', probeFailed({ lastProbe: { ok: true } }) === false)
 check('status: an untested source is not a failure', probeFailed({}) === false)
