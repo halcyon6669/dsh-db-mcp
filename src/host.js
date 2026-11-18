@@ -673,6 +673,35 @@ function parseJdbcUrl(url) {
   }
 }
 
+/**
+ * Network handlers that change *where* the connection goes.
+ *
+ * DBeaver keeps an SSH tunnel out of the connection fields: the target host is
+ * `localhost` and the real endpoint lives in `configuration.handlers.ssh_tunnel`.
+ * Importing such a connection as-is produces a source pointing at `localhost`,
+ * which either fails or — worse — reaches an unrelated local server. The plugin
+ * does not open tunnels, so these entries are reported instead of imported.
+ */
+function blockingHandlers(configuration) {
+  const handlers = cleanRecord(configuration && configuration.handlers)
+  const found = []
+  for (const [id, handler] of Object.entries(handlers)) {
+    if (!handler || typeof handler !== 'object') continue
+    if (handler.enabled === false) continue
+    const type = trimmed(handler.type).toUpperCase()
+    const tunnel = /ssh|tunnel/i.test(id) || type === 'TUNNEL'
+    const proxy = /proxy/i.test(id) || type.includes('PROXY')
+    if (tunnel || proxy) found.push({ id, kind: tunnel ? 'ssh' : 'proxy' })
+  }
+  return found
+}
+
+function handlerReason(found) {
+  const names = found.map((entry) => `handlers.${entry.id}`).join(', ')
+  const what = found.some((entry) => entry.kind === 'ssh') ? 'an SSH tunnel' : 'a proxy'
+  return `needs ${what} (${names}); this plugin opens neither, so the connection would point at the wrong host`
+}
+
 function mapDBeaverConnection(connection) {
   const cfg = cleanRecord(connection && connection.configuration)
   const fromUrl = parseJdbcUrl(cfg.url)
@@ -683,6 +712,10 @@ function mapDBeaverConnection(connection) {
     mapDBeaverProvider('', fromUrl && fromUrl.scheme) ||
     null
   if (!kind) return { ok: false, reason: `unsupported provider: ${(connection && connection.provider) || 'unknown'}` }
+  // Checked before the fields are read: with a tunnel the fields describe the
+  // tunnel's local end, so every value below would be wrong.
+  const blocked = blockingHandlers(cfg)
+  if (blocked.length > 0) return { ok: false, reason: handlerReason(blocked) }
   // With configurationType=URL the URL is what DBeaver actually connects with,
   // so its values win over the (possibly stale) form fields.
   const preferUrl = /^url$/i.test(trimmed(cfg.configurationType))

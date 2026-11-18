@@ -448,6 +448,54 @@ class GuardChain(unittest.TestCase):
         self.assertEqual(full["rows"][0][0], long)
 
 
+class SslMapping(unittest.TestCase):
+    """`sslMode` reaches the driver instead of sitting unused in the config.
+
+    The field was stored by the importer and never read, so a source that said
+    `require` still connected in plaintext — the exact failure a user cannot see.
+    """
+
+    def test_unset_stays_unset(self):
+        # psycopg already defaults to `prefer`; writing the value out would
+        # change the behaviour of a source saved before the field existed.
+        self.assertIsNone(engines._pg_sslmode({}))
+        self.assertIsNone(engines._pg_sslmode({"sslMode": "  "}))
+
+    def test_postgres_modes_pass_through(self):
+        for mode in ("disable", "allow", "prefer", "require", "verify-ca", "verify-full"):
+            self.assertEqual(engines._pg_sslmode({"sslMode": mode}), mode)
+
+    def test_postgres_accepts_the_mysql_spelling(self):
+        # A PostgreSQL source copied from a MySQL connection carries
+        # `verify_ca`; refusing it would silently drop back to plaintext.
+        self.assertEqual(engines._pg_sslmode({"sslMode": "verify_ca"}), "verify-ca")
+        self.assertEqual(engines._pg_sslmode({"sslMode": "verify_identity"}), "verify-full")
+        self.assertEqual(engines._pg_sslmode({"sslMode": "required"}), "require")
+
+    def test_an_unknown_mode_does_not_crash_the_connection(self):
+        self.assertIsNone(engines._pg_sslmode({"sslMode": "on"}))
+
+    def test_mysql_required_skips_verification(self):
+        context = engines._mysql_ssl({"sslMode": "required"})
+        self.assertIsNotNone(context)
+        self.assertFalse(context.check_hostname)
+        self.assertEqual(context.verify_mode, engines.ssl.CERT_NONE)
+
+    def test_mysql_verify_identity_checks_the_hostname(self):
+        context = engines._mysql_ssl({"sslMode": "verify_identity"})
+        self.assertTrue(context.check_hostname)
+        self.assertEqual(context.verify_mode, engines.ssl.CERT_REQUIRED)
+
+    def test_mysql_verify_ca_checks_the_chain_only(self):
+        context = engines._mysql_ssl({"sslMode": "verify_ca"})
+        self.assertFalse(context.check_hostname)
+        self.assertEqual(context.verify_mode, engines.ssl.CERT_REQUIRED)
+
+    def test_mysql_unset_and_disabled_leave_tls_off(self):
+        for mode in (None, "", "disable", "disabled", "preferred", "prefer"):
+            self.assertIsNone(engines._mysql_ssl({"sslMode": mode} if mode is not None else {}))
+
+
 class RenderContract(unittest.TestCase):
     """`affectedRows` is surfaced for writes and absent for reads: keys only."""
 

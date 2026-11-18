@@ -91,6 +91,24 @@ report of each version in more detail.
 
 ### Fixed
 
+- **`sslMode` was stored and never used.** The DBeaver importer copied the field
+  into the source config, and both connection paths ignored it: a source that said
+  `require` still connected in plaintext, which is the kind of failure nobody sees.
+  PostgreSQL now gets `sslmode` and MySQL gets an `ssl` context; the two engines
+  spell the levels differently and either spelling is accepted on either engine.
+  Unset keeps the driver's own default, so nothing changes for an existing source.
+  openGauss still skips certificate verification — that limitation is now written
+  down in [docs/safety.md](docs/safety.md#tls) instead of being implicit.
+
+- **A DBeaver connection behind an SSH tunnel was imported as if it were local.**
+  DBeaver keeps the tunnel in `configuration.handlers` and writes the tunnel's
+  *local* end into the connection fields, so the import produced a source pointing
+  at `localhost` — it failed, or worse, reached an unrelated local server while the
+  panel said the import succeeded. The importer now reads `handlers` first and
+  reports the entry as not importable, naming the handler it found. Proxy handlers
+  are treated the same way; a handler with `enabled: false` routes nothing and does
+  not block.
+
 - **A batch starting with `SELECT` could carry a `DROP TABLE` past the write guard.**
   `ensure_readable` looked only at the first keyword, so `select 1; drop table t` was
   classified as a read, the DDL switch was never consulted, and every statement in

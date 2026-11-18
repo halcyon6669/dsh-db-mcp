@@ -402,12 +402,75 @@ def _connect_sqlite(profile: dict, config: dict):
     return connection, connection.close
 
 
+PG_SSL_MODES = ("disable", "allow", "prefer", "require", "verify-ca", "verify-full")
+MYSQL_SSL_MODES = (
+    "disable",
+    "preferred",
+    "required",
+    "verify_ca",
+    "verify_identity",
+)
+
+
+def _pg_sslmode(config: dict) -> str | None:
+    """The `sslmode` to hand psycopg, or None to let it keep its default.
+
+    psycopg already defaults to `prefer`, so an unset field stays unset rather
+    than being written out — that keeps the behaviour of a source saved before
+    the field existed.
+    """
+    value = str(config.get("sslMode") or "").strip().lower()
+    if not value:
+        return None
+    if value in PG_SSL_MODES:
+        return value
+    # DBeaver also writes the MySQL spelling into PostgreSQL sources that were
+    # copied from a MySQL connection; map the two that have a clear equivalent.
+    if value in ("required",):
+        return "require"
+    if value in ("verify_ca",):
+        return "verify-ca"
+    if value in ("verify_identity", "verify_identity_full"):
+        return "verify-full"
+    return None
+
+
+def _mysql_ssl(config: dict):
+    """An `ssl.SSLContext` for PyMySQL, or None to leave TLS off.
+
+    PyMySQL takes either a dict or a context; a context is used here so the
+    three DBeaver levels map to something exact. `preferred` cannot be honoured
+    — PyMySQL has no opportunistic TLS — so it falls back to the previous
+    behaviour (plaintext) and the docs say so.
+    """
+    value = str(config.get("sslMode") or "").strip().lower()
+    if not value or value in ("disable", "disabled", "preferred", "prefer"):
+        return None
+    if value in ("required", "require"):
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+        return context
+    if value in ("verify_ca", "verify-ca"):
+        context = ssl.create_default_context()
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_REQUIRED
+        return context
+    if value in ("verify_identity", "verify-identity", "verify-full", "verify_full"):
+        context = ssl.create_default_context()
+        context.check_hostname = True
+        context.verify_mode = ssl.CERT_REQUIRED
+        return context
+    return None
+
+
 def _connect_postgres(profile: dict, config: dict, password: str | None):
     try:
         import psycopg
     except ImportError as error:  # pragma: no cover - environment problem
         raise DbError("infra_error", f"psycopg is not installed: {error}", "run the plugin's Python setup again")
     options = "-c default_transaction_read_only=on" if profile.get("readOnly") else None
+    sslmode = _pg_sslmode(config)
     try:
         connection = psycopg.connect(
             host=config.get("host") or "localhost",
@@ -418,6 +481,7 @@ def _connect_postgres(profile: dict, config: dict, password: str | None):
             connect_timeout=10,
             options=options,
             application_name=config.get("applicationName") or "dsh-db-mcp",
+            **({"sslmode": sslmode} if sslmode else {}),
         )
     except Exception as error:  # noqa: BLE001 - driver specific exception types
         raise DbError("db_error", f"PostgreSQL connection failed: {error}")
@@ -641,6 +705,7 @@ def _connect_mysql(profile: dict, config: dict, password: str | None):
         import pymysql
     except ImportError as error:  # pragma: no cover - environment problem
         raise DbError("infra_error", f"PyMySQL is not installed: {error}", "run the plugin's Python setup again")
+    ssl_context = _mysql_ssl(config)
     try:
         connection = pymysql.connect(
             host=config.get("host") or "localhost",
@@ -651,6 +716,7 @@ def _connect_mysql(profile: dict, config: dict, password: str | None):
             connect_timeout=10,
             charset=config.get("charset") or "utf8mb4",
             autocommit=False,
+            **({"ssl": ssl_context} if ssl_context is not None else {}),
         )
     except Exception as error:  # noqa: BLE001 - driver specific exception types
         raise DbError("db_error", f"MySQL connection failed: {error}")

@@ -139,6 +139,24 @@ it — the id is what the file keys on, so it is never abbreviated. The limit is
 per-conversation convenience, not a security boundary: the files under the runtime
 directory stay readable by your account.
 
+## TLS
+
+`sslMode` on a source decides what the driver negotiates; the mapping is in
+[reference.md](reference.md#sslmode). Two things are worth knowing before relying on
+it:
+
+- **openGauss does not verify certificates.** The driver's TLS entry point is
+  shimmed (Python 3.12 removed `ssl.wrap_socket`), and the shim runs with
+  `CERT_NONE`, so a connection to an openGauss server is encrypted but not
+  authenticated: a machine in the middle can present any certificate. Keep those
+  servers on a network you control, or put TLS termination in front of them.
+- **A DBeaver connection that needs an SSH tunnel is not imported.** DBeaver keeps
+  the tunnel in `configuration.handlers` and writes the tunnel's local end into the
+  connection fields, so importing one would create a source pointing at `localhost`.
+  The import list shows such entries with the reason and no checkbox. The same goes
+  for proxy handlers. If you need those connections, publish the database endpoint
+  another way and add it by hand.
+
 ## Audit log
 
 Every MCP tool call appends one JSON line to `<runtime>/logs/audit.jsonl` (0600):

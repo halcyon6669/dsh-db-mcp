@@ -214,11 +214,36 @@ data source.
 | `sqlite` | `file` (absolute path), `readOnlyOpen?`, `busyTimeoutMs?` |
 | `postgres` | `host`, `port` (5432), `database`, `user`, `schema?`, `sslMode?` |
 | `gauss` | same as `postgres`, plus `hosts: [{ host, port }]` for an openGauss cluster; `host` may also be `h1:1,h2:2` |
-| `mysql` | `host`, `port` (3306), `database`, `user`, `charset?` |
+| `mysql` | `host`, `port` (3306), `database`, `user`, `charset?`, `sslMode?` |
 | `oracle` | `host`, `port` (1521), `serviceName` **or** `sid`, `user`, `schema?` |
 
 `id` must match `^[a-z0-9][a-z0-9-]{0,31}$` and never changes; `name` ≤ 64
 characters; `group` ≤ 48.
+
+### `sslMode`
+
+Unset keeps the driver's own default (psycopg `prefer`, PyMySQL plaintext), so a
+source saved before the field existed behaves as it did. The two engines spell the
+levels differently; the plugin accepts either spelling on either engine and maps it:
+
+| Value | PostgreSQL (`psycopg`) | MySQL (`PyMySQL`) |
+| ----- | ---------------------- | ----------------- |
+| `disable` | no TLS | no TLS |
+| `allow` / `preferred` | try plaintext first | no TLS — PyMySQL has no opportunistic mode |
+| `prefer` | try TLS first (default) | no TLS |
+| `require` / `required` | TLS, no certificate check | TLS, no certificate check |
+| `verify-ca` / `verify_ca` | TLS, chain checked | TLS, chain checked |
+| `verify-full` / `verify_identity` | TLS, chain and hostname checked | TLS, chain and hostname checked |
+
+An unrecognised value is ignored rather than failing the connection, so a typo
+cannot turn a working source into a broken one — it just leaves the default in
+place. openGauss always skips certificate verification (see
+[safety.md](safety.md#tls)), because the driver's TLS hook is shimmed.
+
+The DBeaver importer carries `sslMode` across, and refuses a connection that needs
+an SSH tunnel or a proxy: DBeaver stores the *tunnel's* local end in the connection
+fields, so importing one would produce a source pointing at `localhost`. Those
+entries show up in the import list with the reason instead of a checkbox.
 
 ### The DDL switch
 

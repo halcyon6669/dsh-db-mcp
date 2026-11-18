@@ -219,6 +219,78 @@ try {
     JSON.stringify(nested),
   )
 
+  // DBeaver hides an SSH tunnel behind `configuration.handlers`: the connection
+  // fields describe the tunnel's local end (localhost), and the real endpoint
+  // never appears in them. Importing that as-is creates a source pointing at the
+  // wrong host, so the entry has to be reported instead.
+  const tunneled = host.__test.mapDBeaverConnection({
+    name: 'behind-a-jump-host',
+    provider: 'postgresql',
+    driver: 'postgres-jdbc',
+    configuration: {
+      host: 'localhost',
+      port: '5432',
+      database: 'app',
+      user: 'demo',
+      configurationType: 'MANUAL',
+      handlers: {
+        ssh_tunnel: {
+          type: 'TUNNEL',
+          enabled: true,
+          host: 'jump.example.com',
+          port: '22',
+          authType: 'PASSWORD',
+          user: 'deploy',
+        },
+      },
+    },
+  })
+  check(
+    'dbeaver entry behind an ssh tunnel is not importable',
+    tunneled.ok === false && /SSH tunnel/.test(String(tunneled.reason)),
+    JSON.stringify(tunneled),
+  )
+  check(
+    'the tunnel reason names the handler it found',
+    /handlers\.ssh_tunnel/.test(String(tunneled.reason)),
+    String(tunneled.reason),
+  )
+
+  const proxied = host.__test.mapDBeaverConnection({
+    name: 'behind-a-proxy',
+    provider: 'postgresql',
+    driver: 'postgres-jdbc',
+    configuration: {
+      host: 'db.internal',
+      port: '5432',
+      database: 'app',
+      handlers: { socks_proxy: { type: 'SOCKS_PROXY', enabled: true, host: 'proxy', port: '1080' } },
+    },
+  })
+  check(
+    'dbeaver entry behind a proxy is not importable',
+    proxied.ok === false && /proxy/.test(String(proxied.reason)),
+    JSON.stringify(proxied),
+  )
+
+  // A handler that is switched off routes nothing, so the plain fields are right.
+  const disabledTunnel = host.__test.mapDBeaverConnection({
+    name: 'tunnel-off',
+    provider: 'postgresql',
+    driver: 'postgres-jdbc',
+    configuration: {
+      host: 'db.internal',
+      port: '5432',
+      database: 'app',
+      handlers: { ssh_tunnel: { type: 'TUNNEL', enabled: false, host: 'jump.example.com' } },
+    },
+  })
+  check(
+    'a disabled tunnel handler does not block the import',
+    disabledTunnel.ok === true && disabledTunnel.config.host === 'db.internal',
+    JSON.stringify(disabledTunnel),
+  )
+
   const importable = all.find((entry) => entry.importable && entry.kind === 'sqlite')
   if (importable) {
     // `chinook` already points at the same file and account, so the scan must
