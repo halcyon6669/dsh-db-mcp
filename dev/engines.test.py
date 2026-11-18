@@ -11,12 +11,19 @@ from __future__ import annotations
 import importlib.util
 import os
 import shutil
+import socket
 import sqlite3
+import ssl
 import sys
 import tempfile
 import time
 import unittest
 from pathlib import Path
+
+# Recorded before any test can install the shim: the shim only exists to replace
+# a `ssl.wrap_socket` that Python 3.12 removed, so on an older interpreter the
+# two cases below have nothing to prove.
+HAS_NATIVE_WRAP_SOCKET = hasattr(ssl, "wrap_socket")
 
 PACKAGE = Path(__file__).resolve().parent.parent
 # `server/main.py` runs with its own directory first on sys.path, which is how
@@ -1037,6 +1044,199 @@ class CellPolicy(unittest.TestCase):
         self._set_policy("auto")
         self.assertEqual(engines._cell(None), None)
         self.assertEqual(engines._cell(42), 42)
+
+
+class GaussPlumbing(unittest.TestCase):
+    """The openGauss path without a server: host list, IRI, TLS shim, placeholders.
+
+    These started as a hand-run script, which meant the one engine that cannot be
+    reached from a container had no automatic coverage at all.
+    """
+
+    def test_a_comma_host_list_keeps_per_host_ports(self):
+        hosts = engines._host_list({"host": "10.0.0.1,10.0.0.2:30101", "port": 30100})
+        self.assertEqual(hosts, [("10.0.0.1", 30100), ("10.0.0.2", 30101)])
+
+    def test_a_declared_hosts_array_wins_over_host(self):
+        hosts = engines._host_list({"hosts": [{"host": "h1", "port": 1}, "h2"], "port": 5432})
+        self.assertEqual(hosts, [("h1", 1), ("h2", 5432)])
+
+    def test_an_empty_config_still_names_one_host(self):
+        self.assertEqual(engines._host_list({}), [("localhost", 5432)])
+
+    def test_the_iri_carries_every_host(self):
+        iri = engines._gauss_iri({"host": "a,b:2", "port": 1, "database": "demo", "user": "u"}, "p@ss")
+        self.assertEqual(iri, "opengauss://u:p%40ss@a:1,b:2/demo")
+
+    def test_the_iri_escapes_the_password(self):
+        iri = engines._gauss_iri({"host": "h", "user": "u"}, "p@ss/word")
+        self.assertNotIn("p@ss", iri)
+        self.assertIn("p%40ss%2Fword", iri)
+
+    def test_a_password_only_source_has_no_credentials_prefix(self):
+        self.assertEqual(engines._gauss_iri({"host": "h", "database": "d"}, None), "opengauss://h:5432/d")
+
+    def test_one_placeholder_becomes_a_dollar_bind(self):
+        rewrite = engines._GaussCursor._rewrite
+        self.assertEqual(rewrite("where a = %s", 1), "where a = $1")
+        self.assertEqual(rewrite("where a = %s and b = %s", 2), "where a = $1 and b = $2")
+
+    def test_a_statement_the_rewriter_cannot_match_is_left_alone(self):
+        rewrite = engines._GaussCursor._rewrite
+        self.assertEqual(rewrite("select 1", 0), "select 1")
+        # A count that does not match is not ours to guess at: the server reports it.
+        self.assertEqual(rewrite("where a = %s and b = %s", 1), "where a = %s and b = %s")
+
+
+@unittest.skipIf(HAS_NATIVE_WRAP_SOCKET, "this interpreter still ships ssl.wrap_socket")
+class SslShim(unittest.TestCase):
+    """The replacement for `ssl.wrap_socket`, which Python 3.12 removed.
+
+    py_opengauss calls it, so without the shim the driver raises AttributeError
+    before the handshake. The subtlety is the default: `wrap_socket` never
+    verified, while `PROTOCOL_TLS_CLIENT` does — a naive replacement would fail
+    every connection to a server with a self-signed certificate.
+    """
+
+    def tearDown(self):
+        # Leave the module as it was found; the shim is installed on the `ssl`
+        # module itself, so leaking it would change every later test.
+        if not HAS_NATIVE_WRAP_SOCKET and hasattr(ssl, "wrap_socket"):
+            del ssl.wrap_socket
+
+    def _wrapped(self, **kwargs):
+        engines._ssl_shim()
+        self.assertTrue(hasattr(ssl, "wrap_socket"), "the shim did not install")
+        client, server = socket.socketpair()
+        self.addCleanup(server.close)
+        wrapped = ssl.wrap_socket(client, do_handshake_on_connect=False, **kwargs)
+        self.addCleanup(wrapped.close)
+        return wrapped
+
+    def test_the_shim_does_not_verify_by_default(self):
+        wrapped = self._wrapped()
+        self.assertEqual(wrapped.context.verify_mode, ssl.CERT_NONE)
+        self.assertFalse(wrapped.context.check_hostname)
+
+    def test_a_caller_that_asks_for_verification_gets_it(self):
+        wrapped = self._wrapped(cert_reqs=ssl.CERT_REQUIRED)
+        self.assertEqual(wrapped.context.verify_mode, ssl.CERT_REQUIRED)
+        # Hostname checking has to stay off even then: the shim has no host to
+        # check against, and turning it on makes `wrap_socket` raise.
+        self.assertFalse(wrapped.context.check_hostname)
+
+    def test_a_server_side_socket_uses_the_server_protocol(self):
+        client, server = socket.socketpair()
+        self.addCleanup(client.close)
+        engines._ssl_shim()
+        wrapped = ssl.wrap_socket(server, server_side=True, do_handshake_on_connect=False)
+        self.addCleanup(wrapped.close)
+        self.assertEqual(wrapped.context.protocol, ssl.PROTOCOL_TLS_SERVER)
+
+
+class OracleCatalogueFallback(unittest.TestCase):
+    """A catalogue older than 12c has no `ORACLE_MAINTAINED`, and must still list.
+
+    The first query filters Oracle's own bookkeeping out of `all_tables`; the
+    fallback drops that filter rather than failing the call. Only a server that
+    rejects the column can show which one ran, so the cursor is told to fail on
+    the fragment that names it.
+    """
+
+    def test_a_catalogue_without_the_flag_falls_back_to_the_plain_listing(self):
+        cursor = RoutingCursor(
+            {"all_tables": [("TEST", "ORDERS", "TABLE")]},
+            fail=("oracle_maintained",),
+        )
+        result = engines.list_tables(profile("oracle"), FakeConnection(cursor), "TEST")
+        self.assertEqual([table["name"] for table in result["tables"]], ["ORDERS"])
+        self.assertEqual(len(cursor.executed), 2, "the fallback query never ran")
+        self.assertIn("oracle_maintained", cursor.executed[0])
+        self.assertNotIn("oracle_maintained", cursor.executed[1])
+        self.assertIn("all_objects", cursor.executed[0])
+        self.assertNotIn("all_objects", cursor.executed[1])
+
+    def test_the_fallback_still_binds_the_owner_twice(self):
+        # Two `:1`/`:2` placeholders over a `union all`: oracledb counts the
+        # occurrences, not the distinct names.
+        cursor = RecordingCursor({"all_tables": []}, fail=("oracle_maintained",))
+        engines.list_tables(profile("oracle"), FakeConnection(cursor), "TEST")
+        self.assertEqual([len(binds) for binds in cursor.binds], [2, 2])
+
+
+class RelationTruncation(unittest.TestCase):
+    """`limit` trims the reply, and `truncated` says it did.
+
+    Verified against a live PostgreSQL first; this keeps it from regressing now
+    that the row count is the only signal a caller gets.
+    """
+
+    def _rows(self, count: int):
+        return [(f"t{index}", "fk", "parent", "id", f"fk_{index}") for index in range(count)]
+
+    def test_a_schema_under_the_limit_is_not_truncated(self):
+        cursor = RoutingCursor({"FOREIGN KEY": self._rows(2)})
+        result = engines.list_relations(profile("postgres"), FakeConnection(cursor), None)
+        self.assertEqual(result["total"], 2)
+        self.assertEqual(len(result["relations"]), 2)
+        self.assertFalse(result["truncated"])
+
+    def test_a_schema_over_the_limit_reports_how_many_it_held(self):
+        cursor = RoutingCursor({"FOREIGN KEY": self._rows(5)})
+        result = engines.list_relations(profile("postgres"), FakeConnection(cursor), None, limit=2)
+        self.assertEqual(len(result["relations"]), 2)
+        self.assertEqual(result["total"], 5, "the caller needs the real size, not the trimmed one")
+        self.assertTrue(result["truncated"])
+
+    def test_sqlite_truncates_the_same_way(self):
+        cursor = RoutingCursor(
+            {
+                "sqlite_master": [("a",), ("b",), ("c",)],
+                'PRAGMA foreign_key_list("a")': [(0, 0, "parent", "pid", "id", "NO ACTION", "NO ACTION", "NONE")],
+                'PRAGMA foreign_key_list("b")': [(0, 0, "parent", "pid", "id", "NO ACTION", "NO ACTION", "NONE")],
+                'PRAGMA foreign_key_list("c")': [(0, 0, "parent", "pid", "id", "NO ACTION", "NO ACTION", "NONE")],
+            }
+        )
+        result = engines.list_relations(profile("sqlite"), FakeConnection(cursor), None, limit=1)
+        self.assertEqual(len(result["relations"]), 1)
+        self.assertEqual(result["total"], 3)
+        self.assertTrue(result["truncated"])
+
+
+class MissingDriverIsInfraError(unittest.TestCase):
+    """`infra_error` means "the installation is broken", and only that.
+
+    It survives in exactly three places — the driver imports. Everything else,
+    including a driver that rejects the statement, is a `db_error`. A `None` in
+    `sys.modules` makes the import raise the same ImportError a broken venv does.
+    """
+
+    def _blocked(self, name: str):
+        previous = sys.modules.get(name)
+        sys.modules[name] = None
+        self.addCleanup(lambda: sys.modules.pop(name, None) if previous is None else sys.modules.__setitem__(name, previous))
+
+    def test_a_missing_postgres_driver_is_an_infra_error(self):
+        self._blocked("psycopg")
+        with self.assertRaises(engines.DbError) as caught:
+            engines._connect_postgres(profile("postgres"), {"host": "localhost"}, None)
+        self.assertEqual(caught.exception.code, "infra_error")
+        self.assertIn("psycopg", caught.exception.message)
+        self.assertIn("setup again", caught.exception.hint)
+
+    def test_a_missing_mysql_driver_is_an_infra_error(self):
+        self._blocked("pymysql")
+        with self.assertRaises(engines.DbError) as caught:
+            engines._connect_mysql(profile("mysql"), {"host": "localhost"}, None)
+        self.assertEqual(caught.exception.code, "infra_error")
+        self.assertIn("PyMySQL", caught.exception.message)
+
+    def test_a_missing_oracle_driver_is_an_infra_error(self):
+        self._blocked("oracledb")
+        with self.assertRaises(engines.DbError) as caught:
+            engines._connect_oracle(profile("oracle"), {"host": "localhost", "serviceName": "FREE"}, None)
+        self.assertEqual(caught.exception.code, "infra_error")
+        self.assertIn("oracledb", caught.exception.message)
 
 
 if __name__ == "__main__":

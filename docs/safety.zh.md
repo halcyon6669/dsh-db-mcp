@@ -69,9 +69,10 @@ Python 服务在启动时读取全局开关，开关一动 Host 就重启它。�
 
 ## TLS
 
-数据源上的 `sslMode` 决定驱动实际协商什么，取值映射见 [reference.md](reference.md#sslmode)。有两点需要先知道：
+数据源上的 `sslMode` 决定驱动实际协商什么，取值映射见 [reference.md](reference.md#sslmode)。有三点需要先知道：
 
 - **openGauss 不校验证书。** 驱动的 TLS 入口被 shim 接管（Python 3.12 移除了 `ssl.wrap_socket`），shim 以 `CERT_NONE` 运行，所以连到 openGauss 的链路是加密的，但没有认证：中间人可以出示任意证书。这类服务器请放在你能控制的网络里，或者在前面做 TLS 终止。
+- **要校验证书的那两档，信任根不在插件手里。** 没有 `sslCa` 这样的配置项，所以 `verify-ca` 和 `verify-full` 用的是驱动自己的查找路径：libpq 找 `%APPDATA%\postgresql`（Windows）或 `~/.postgresql`（其它平台）里的 `root.crt`，PyMySQL 用系统信任库。文件不存在时连接会直接失败并报 *root certificate file … does not exist or is not readable*，**不会**退化成不校验的连接。`verify-full` 还会拿证书里的名字和你配置的 `host` 比对，所以容器请按名字访问而不是 `127.0.0.1`，否则就用 `verify-ca`。
 - **需要 SSH 隧道的 DBeaver 连接不会被导入。** DBeaver 把隧道放在 `configuration.handlers` 里，而连接字段里写的是隧道的本地端，直接导入会得到一个指向 `localhost` 的数据源。导入列表会把这类连接连同原因一起显示出来，且没有勾选框；走代理的 handler 同样处理。确实需要的话，请换一种方式把数据库端点暴露出来再手动添加。
 
 ## 资源上限

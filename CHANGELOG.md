@@ -105,6 +105,17 @@ report of each version in more detail.
 
 ### Changed
 
+- **The TLS section says where a trust root has to come from.** `verify-ca` and
+  `verify-full` were documented as "chain checked", which reads as if the plugin does
+  the checking with something it holds. It does not: there is no `sslCa` key, so libpq
+  looks for `root.crt` in `%APPDATA%\postgresql` (Windows) or `~/.postgresql`, and
+  PyMySQL uses the system trust store. With no such file the connection is refused
+  rather than downgraded, and `verify-full` compares the certificate name against the
+  configured `host` — so a container reached as `127.0.0.1` fails a certificate issued
+  for its name. Both facts are now in `docs/reference.md#sslmode` and
+  `docs/safety.md#tls`, and the MySQL deadline note says outright that
+  `max_execution_time` does not interrupt a statement that is merely waiting.
+
 - **The conversation-limit card left the Tools tab.** It had been folded in under the
   tool list, where a setting that only the agent writes is the last thing anyone looks
   for. It now lives on the *Data source list* tab with the global write switch, since

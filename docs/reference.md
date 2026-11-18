@@ -84,7 +84,9 @@ Row limits come from the server: `DB_MCP_MAX_ROWS` (default 200) per call, cappe
 
 Every statement also has a deadline: `DB_MCP_STATEMENT_TIMEOUT_MS` (default 30000,
 `0` disables it). It is set per engine — `statement_timeout` on PostgreSQL and
-openGauss, `max_execution_time` on MySQL (which the server applies to `SELECT` only),
+openGauss, `max_execution_time` on MySQL (which the server applies to `SELECT` only,
+and which does not interrupt a statement that is merely waiting — `select sleep(60)`
+runs to completion and returns a row; the same query against a real table is stopped),
 `call_timeout` on Oracle, and a SQLite progress handler. A statement that hits it
 comes back as `{ ok: false, error: { code: "timeout", … } }`, and the hint says how
 to raise or disable the limit. Reads additionally run on a server-side cursor
@@ -273,6 +275,16 @@ An unrecognised value is ignored rather than failing the connection, so a typo
 cannot turn a working source into a broken one — it just leaves the default in
 place. openGauss always skips certificate verification (see
 [safety.md](safety.md#tls)), because the driver's TLS hook is shimmed.
+
+The verifying levels need a certificate the client trusts, and there is no config
+key for one: libpq looks for `root.crt` in `%APPDATA%\postgresql` (Windows) or
+`~/.postgresql` (elsewhere), and PyMySQL uses the system trust store. Without that
+file `verify-ca` and `verify-full` fail with *root certificate file … does not
+exist or is not readable* rather than quietly connecting unverified — which is the
+right failure, but it means a self-signed server cannot be verified through this
+plugin yet. `verify-full` additionally compares the certificate's name against the
+`host` you configured, so `127.0.0.1` fails against a certificate issued for the
+container name; `verify-ca` is the level to use when the address is an IP.
 
 The DBeaver importer carries `sslMode` across, and refuses a connection that needs
 an SSH tunnel or a proxy: DBeaver stores the *tunnel's* local end in the connection

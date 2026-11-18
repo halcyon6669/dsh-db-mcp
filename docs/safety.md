@@ -143,7 +143,7 @@ directory stay readable by your account.
 ## TLS
 
 `sslMode` on a source decides what the driver negotiates; the mapping is in
-[reference.md](reference.md#sslmode). Two things are worth knowing before relying on
+[reference.md](reference.md#sslmode). Three things are worth knowing before relying on
 it:
 
 - **openGauss does not verify certificates.** The driver's TLS entry point is
@@ -151,6 +151,14 @@ it:
   `CERT_NONE`, so a connection to an openGauss server is encrypted but not
   authenticated: a machine in the middle can present any certificate. Keep those
   servers on a network you control, or put TLS termination in front of them.
+- **The verifying levels need a trust root the plugin cannot configure.** There is no
+  `sslCa` key, so `verify-ca` and `verify-full` fall back to the driver's own lookup:
+  `root.crt` in `%APPDATA%\postgresql` (Windows) or `~/.postgresql` (elsewhere) for
+  libpq, the system trust store for PyMySQL. With no such file the connection is
+  refused with *root certificate file … does not exist or is not readable* — it does
+  not fall back to an unverified connection. `verify-full` also compares the
+  certificate name with the configured `host`, so reach a container by name rather
+  than by `127.0.0.1`, or stay at `verify-ca`.
 - **A DBeaver connection that needs an SSH tunnel is not imported.** DBeaver keeps
   the tunnel in `configuration.handlers` and writes the tunnel's local end into the
   connection fields, so importing one would create a source pointing at `localhost`.
