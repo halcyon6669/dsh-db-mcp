@@ -238,6 +238,10 @@ window.__ModuleLoader__.load({
         'scopes.removed': 'Conversation limit removed.',
         'scopes.cleared': 'Every conversation limit is cleared.',
         'scopes.allSources': 'all data sources',
+        'scopes.columnId': 'Conversation id',
+        'scopes.columnTitle': 'Name',
+        'scopes.columnSources': 'Data sources',
+        'scopes.noTitle': 'untitled',
         'scopes.parked': 'archived',
         'scopes.parkedHint': '{n} archived conversation(s) keep their limit and get it back when unarchived.',
         'diag.venv': 'Python venv',
@@ -513,6 +517,10 @@ window.__ModuleLoader__.load({
         'scopes.removed': '已移除该会话的限制。',
         'scopes.cleared': '已清除全部会话限制。',
         'scopes.allSources': '全部数据源',
+        'scopes.columnId': '会话 id',
+        'scopes.columnTitle': '会话名',
+        'scopes.columnSources': '访问的数据库',
+        'scopes.noTitle': '未命名',
         'scopes.parked': '已归档',
         'scopes.parkedHint': '{n} 个已归档会话保留着限制，取消归档后会恢复。',
         'diag.venv': 'Python 虚拟环境',
@@ -1570,84 +1578,130 @@ window.__ModuleLoader__.load({
         font-size: 13px;
         line-height: 1.5;
       }
-      /* One chip per conversation does not scale past a handful, so the list is
-         folded by default and scrolls inside a fixed height once opened. */
+      /* The list is a table: an id, a name and the data sources are three
+         different kinds of thing, and three columns read across far better than
+         a line of run-on text. It opens expanded, because a limit is set by the
+         agent and the panel is the only place it can be read — hiding it behind
+         a click made it invisible to the person who has to check it. The box
+         scrolls and the header sticks, so a long list never pushes the page
+         around. */
       .dbmcp-scope-box {
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
         margin-top: 10px;
-        max-height: 240px;
-        overflow-y: auto;
-      }
-      .dbmcp-scope {
-        display: flex;
-        align-items: flex-start;
-        gap: 8px;
-        padding: 5px 8px;
+        max-height: 280px;
+        overflow: auto;
         border: 1px solid var(--dsw-alias-border-l1);
         border-radius: 8px;
         background: var(--dsw-alias-bg-base);
-        min-width: 0;
       }
-      /* A parked row is informational: it cannot be removed from here because
-         the limit belongs to a conversation that is out of the list. */
-      .dbmcp-scope.is-parked {
-        border-style: dashed;
-        background: var(--dsw-alias-bg-layer-1);
+      .dbmcp-scope-table {
+        width: 100%;
+        border-collapse: collapse;
+        table-layout: fixed;
       }
-      .dbmcp-scope-main {
-        flex: 1 1 auto;
-        min-width: 0;
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
-      }
-      .dbmcp-scope-line {
-        display: flex;
-        align-items: baseline;
-        gap: 8px;
-        min-width: 0;
-        flex-wrap: wrap;
-      }
-      .dbmcp-scope-title {
-        font-size: 12px;
+      .dbmcp-scope-th {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+        padding: 6px 10px;
+        text-align: left;
+        font-size: 11px;
         font-weight: 500;
+        letter-spacing: 0.02em;
+        color: var(--dsw-alias-label-secondary);
+        background: var(--dsw-alias-bg-layer-1);
+        border-bottom: 1px solid var(--dsw-alias-border-l1);
+        white-space: nowrap;
+      }
+      .dbmcp-scope-th.is-id {
+        width: 40%;
+      }
+      .dbmcp-scope-th.is-title {
+        width: 28%;
+      }
+      .dbmcp-scope-th.is-sources {
+        width: 26%;
+      }
+      .dbmcp-scope-th.is-action {
+        width: 48px;
+      }
+      .dbmcp-scope-cell {
+        padding: 7px 10px;
+        vertical-align: top;
+        min-width: 0;
+        font-size: 12px;
         color: var(--dsw-alias-label-primary);
-        max-width: 100%;
-        overflow: hidden;
-        text-overflow: ellipsis;
+      }
+      .dbmcp-scope-row + .dbmcp-scope-row .dbmcp-scope-cell {
+        border-top: 1px solid var(--dsw-alias-border-l1);
+      }
+      /* A parked row is informational: the limit belongs to a conversation that
+         is no longer in the list, so it is dimmed rather than given a remove
+         button the user cannot act on here. */
+      .dbmcp-scope-row.is-parked .dbmcp-scope-cell {
+        background: var(--dsw-alias-bg-layer-1);
+        color: var(--dsw-alias-label-secondary);
+      }
+      .dbmcp-scope-cell.is-action {
+        text-align: right;
         white-space: nowrap;
       }
       /* The id is shown in full: it is the only thing the user can match against
          their own logs, so it wraps instead of being shortened. */
       .dbmcp-scope-id {
+        display: block;
         font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
         font-size: 11px;
+        line-height: 1.45;
         color: var(--dsw-alias-label-secondary);
         word-break: break-all;
       }
-      .dbmcp-scope-ids {
-        min-width: 0;
+      .dbmcp-scope-title {
+        display: block;
+        font-weight: 500;
+        color: var(--dsw-alias-label-primary);
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
-        margin: 0;
+      }
+      .dbmcp-scope-none {
+        color: var(--dsw-alias-label-secondary);
+        font-style: italic;
+      }
+      .dbmcp-scope-sources {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+      }
+      .dbmcp-scope-chip {
+        max-width: 100%;
+        padding: 0 6px;
+        border: 1px solid var(--dsw-alias-border-l1);
+        border-radius: 999px;
+        background: var(--dsw-alias-bg-layer-1);
+        font-size: 11px;
+        line-height: 1.6;
+        color: var(--dsw-alias-label-secondary);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
       .dbmcp-scope-tag {
-        flex: 0 0 auto;
         font-size: 11px;
         color: var(--dsw-alias-label-secondary);
         border: 1px solid var(--dsw-alias-border-l1);
         border-radius: 999px;
         padding: 0 6px;
+        white-space: nowrap;
       }
-      .dbmcp-scope-parked-note {
-        margin: 4px 0 0;
+      .dbmcp-scope-note .dbmcp-scope-cell {
+        padding: 8px 10px 4px;
+        font-size: 11px;
+        color: var(--dsw-alias-label-secondary);
+        background: var(--dsw-alias-bg-layer-1);
+        border-top: 1px solid var(--dsw-alias-border-l1);
       }
       .dbmcp-scope-remove {
-        flex: 0 0 auto;
-        padding: 0 4px;
+        padding: 0 5px;
         border: 0;
         background: transparent;
         color: var(--dsw-alias-label-secondary);
@@ -4533,7 +4587,7 @@ function groupTables(tables) {
       const [env, setEnv] = React.useState(null)
       const [installing, setInstalling] = React.useState(false)
       const [scopes, setScopes] = React.useState(null)
-      const [scopesOpen, setScopesOpen] = React.useState(false)
+      const [scopesOpen, setScopesOpen] = React.useState(true)
       const [http, setHttp] = React.useState(null)
       const [clients, setClients] = React.useState(null)
       const [tools, setTools] = React.useState(null)
@@ -5750,59 +5804,74 @@ function groupTables(tables) {
       /* A conversation limit has no other screen: it is set by the agent through
          MCP, so the panel is the only place it can be read or removed. It lives
          on the Sources page next to the global write switch — both answer "who
-         may touch which data" — and is folded by default because one chip per
-         conversation grows without bound. An empty list still shows the card,
-         with one line saying nothing is limited, so the feature is findable. */
+         may touch which data". The table starts expanded rather than behind a
+         click: whoever opens this page is here to check or lift a limit, and a
+         collapsed card just makes them hunt for it. An empty list still shows
+         the card, with one line saying nothing is limited. */
       const renderScopes = () => {
         const list = (scopes && scopes.sessions) || []
         const parked = (scopes && scopes.archived) || []
         const rules = list.reduce((sum, entry) => sum + ((entry.ids || []).length), 0)
         const empty = list.length === 0 && parked.length === 0
+        const sources = (entry) =>
+          (entry.ids || []).length === 0
+            ? h('span', { className: 'dbmcp-scope-none' }, t('scopes.allSources'))
+            : h(
+                'div',
+                { className: 'dbmcp-scope-sources' },
+                (entry.ids || []).map((id) =>
+                  h('span', { className: 'dbmcp-scope-chip', key: id, title: id }, id),
+                ),
+              )
         const row = (entry, isParked) =>
           h(
-            'div',
+            'tr',
             {
-              className: isParked ? 'dbmcp-scope is-parked' : 'dbmcp-scope',
+              className: isParked ? 'dbmcp-scope-row is-parked' : 'dbmcp-scope-row',
               key: `${isParked ? 'a' : 'l'}:${entry.session}`,
             },
+            /* The full id is what the user can match against their own records,
+               so it wraps in its own column rather than being shortened. */
             h(
-              'div',
-              { className: 'dbmcp-scope-main' },
-              h(
-                'div',
-                { className: 'dbmcp-scope-line' },
-                entry.title
-                  ? h('span', { className: 'dbmcp-scope-title', title: entry.title }, entry.title)
-                  : null,
-                /* The full id is what the user can match against their own
-                   records, so it is shown in full rather than shortened. */
-                h(
-                  'code',
-                  { className: 'dbmcp-scope-id', title: entry.session },
-                  entry.session || '—',
-                ),
-              ),
-              h(
-                'div',
-                { className: 'dbmcp-hint dbmcp-scope-ids' },
-                (entry.ids || []).join(', ') || t('scopes.allSources'),
-              ),
+              'td',
+              { className: 'dbmcp-scope-cell' },
+              h('code', { className: 'dbmcp-scope-id', title: entry.session }, entry.session || '—'),
             ),
-            isParked
-              ? h('span', { className: 'dbmcp-scope-tag' }, t('scopes.parked'))
-              : h(
-                  'button',
-                  {
-                    type: 'button',
-                    className: 'dbmcp-scope-remove',
-                    title: t('scopes.remove'),
-                    'aria-label': t('scopes.remove'),
-                    disabled: busy,
-                    onClick: () => void removeScope(entry.session),
-                  },
-                  '×',
-                ),
+            h(
+              'td',
+              { className: 'dbmcp-scope-cell' },
+              entry.title
+                ? h('span', { className: 'dbmcp-scope-title', title: entry.title }, entry.title)
+                : h('span', { className: 'dbmcp-scope-none' }, t('scopes.noTitle')),
+            ),
+            h('td', { className: 'dbmcp-scope-cell' }, sources(entry)),
+            h(
+              'td',
+              { className: 'dbmcp-scope-cell is-action' },
+              isParked
+                ? h('span', { className: 'dbmcp-scope-tag' }, t('scopes.parked'))
+                : h(
+                    'button',
+                    {
+                      type: 'button',
+                      className: 'dbmcp-scope-remove',
+                      title: t('scopes.remove'),
+                      'aria-label': t('scopes.remove'),
+                      disabled: busy,
+                      onClick: () => void removeScope(entry.session),
+                    },
+                    '×',
+                  ),
+            ),
           )
+        const header = h(
+          'tr',
+          null,
+          h('th', { className: 'dbmcp-scope-th is-id', scope: 'col' }, t('scopes.columnId')),
+          h('th', { className: 'dbmcp-scope-th is-title', scope: 'col' }, t('scopes.columnTitle')),
+          h('th', { className: 'dbmcp-scope-th is-sources', scope: 'col' }, t('scopes.columnSources')),
+          h('th', { className: 'dbmcp-scope-th is-action', scope: 'col' }, ''),
+        )
         return h(
           Card,
           {
@@ -5840,15 +5909,34 @@ function groupTables(tables) {
             : h(
                 'div',
                 { className: 'dbmcp-scope-box' },
-                list.map((entry) => row(entry, false)),
-                parked.length === 0
-                  ? null
-                  : h(
-                      'p',
-                      { className: 'dbmcp-hint dbmcp-scope-parked-note' },
-                      fmt(t('scopes.parkedHint'), { n: parked.length }),
-                    ),
-                parked.map((entry) => row(entry, true)),
+                h(
+                  'table',
+                  { className: 'dbmcp-scope-table' },
+                  h('colgroup', null,
+                    h('col', { style: { width: '40%' } }),
+                    h('col', { style: { width: '28%' } }),
+                    h('col', { style: { width: '26%' } }),
+                    h('col', { style: { width: '48px' } }),
+                  ),
+                  h('thead', null, header),
+                  h(
+                    'tbody',
+                    null,
+                    list.map((entry) => row(entry, false)),
+                    parked.length === 0
+                      ? null
+                      : h(
+                          'tr',
+                          { className: 'dbmcp-scope-note' },
+                          h(
+                            'td',
+                            { className: 'dbmcp-scope-cell', colSpan: 4 },
+                            fmt(t('scopes.parkedHint'), { n: parked.length }),
+                          ),
+                        ),
+                    parked.map((entry) => row(entry, true)),
+                  ),
+                ),
               ),
         )
       }

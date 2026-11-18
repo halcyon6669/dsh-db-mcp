@@ -686,6 +686,11 @@ check('scopes card: the tools tab no longer carries it', !/tab !== 'tools' \? nu
 check('scopes card: an empty list still renders the card', !/if \(list\.length === 0\) return null/.test(scopesCard), scopesCard.slice(0, 80))
 check('scopes card: the empty state has a line of its own', /empty \? t\('scopes\.empty'\)/.test(scopesCard))
 check('scopes card: the folded line counts conversations and rules', /fmt\(t\('scopes\.summary'\), \{ n: list\.length, rules \}\)/.test(scopesCard))
+/* A limit is set by the agent, so the panel is the only place it can be read;
+   hiding the table behind a click made the person who has to check it hunt for
+   it. It therefore starts open. */
+check('scopes card: the table starts expanded', /const \[scopesOpen, setScopesOpen\] = React\.useState\(true\)/.test(source))
+check('scopes card: collapsing is still possible', /onClick: \(\) => setScopesOpen\(!scopesOpen\)/.test(scopesCard) && /t\('scopes\.hide'\)/.test(scopesCard))
 check('scopes card: every row can be removed', /onClick: \(\) => void removeScope\(entry\.session\)/.test(scopesCard))
 check('scopes card: the whole set can be cleared', /onClick: clearScopes/.test(scopesCard))
 check(
@@ -696,6 +701,18 @@ check(
 check('scopes card: a known title is shown above the id', /entry\.title\s*\n?\s*\? h\('span', \{ className: 'dbmcp-scope-title'/.test(scopesCard))
 check('scopes card: archived conversations keep a parked section', /parked\.map\(\(entry\) => row\(entry, true\)\)/.test(scopesCard))
 check('scopes card: parked rows explain why they are still listed', /t\('scopes\.parkedHint'\)/.test(scopesCard))
+
+/* The list is a table, not a stack of chips: an id, a name and a set of data
+   sources are three different kinds of thing, and columns read across far
+   better than a run-on line. The header sticks so a long list cannot scroll it
+   away, and each column declares its own width so a long id cannot squeeze the
+   name out of view. */
+check('scopes card: the rows are table rows', /h\(\s*'tr'/.test(scopesCard) && /h\(\s*'tbody'/.test(scopesCard))
+check('scopes card: every column has a heading', /t\('scopes\.columnId'\)/.test(scopesCard) && /t\('scopes\.columnTitle'\)/.test(scopesCard) && /t\('scopes\.columnSources'\)/.test(scopesCard))
+check('scopes card: a missing name still has a cell', /t\('scopes\.noTitle'\)/.test(scopesCard))
+check('scopes card: the header sticks while the body scrolls', /\.dbmcp-scope-th \{[^}]*position: sticky/.test(source))
+check('scopes card: the id column wraps instead of truncating', /\.dbmcp-scope-id \{[^}]*word-break: break-all/.test(source))
+check('scopes card: the box scrolls on its own', /\.dbmcp-scope-box \{[^}]*overflow: auto/.test(source))
 
 // the component's own header still took a min-height plus a bottom margin when
 // it rendered empty — about thirty pixels of nothing above the list.

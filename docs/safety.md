@@ -123,14 +123,18 @@ While a limit is saved for that conversation:
 Say *"stop limiting this conversation"* (or call the tool with `all: true`) and the
 limit is removed. Conversations with no saved limit keep access to every source, and
 the *Conversation limits* card on the *Data source list* tab lists the conversations
-that are limited — folded into one summary line, with a remove button per conversation,
-a "Clear all", and an automatic removal when a conversation is disposed or archived, so
-the list cannot grow without bound. Archiving is not deletion: the limit is parked in
+that are limited, with a remove button per conversation, a "Clear all", and an automatic
+removal when a conversation is disposed or archived, so the list cannot grow without
+bound. Archiving is not deletion: the limit is parked in
 the same file and handed back when the conversation is unarchived, because a limit you
 set on purpose should survive a trip through the archive. Removing a limit by hand
 forgets the parked copy too, so an unarchive cannot bring back something you deleted.
 The card is always there, saying "no conversation is limited" when the list is empty.
-Each row shows the conversation's title when the host knows it, and the full id beneath
+It is a three-column table — conversation id, name, data sources — open by default,
+because an id, a title and a set of sources are three different kinds of thing, and
+columns read across far better than a line of run-on text. The header sticks while the
+box scrolls, so a long list never pushes the page around.
+Each row shows the conversation's title when the host knows it, and the full id beside
 it — the id is what the file keys on, so it is never abbreviated. The limit is a
 per-conversation convenience, not a security boundary: the files under the runtime
 directory stay readable by your account.
