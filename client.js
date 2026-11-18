@@ -229,6 +229,7 @@ window.__ModuleLoader__.load({
         'render.textFull': 'Full value',
         'render.textSaved': 'Long-text setting saved.',
         'scopes.title': 'Conversation limits',
+        'scopes.empty': 'No conversation is limited — every session can reach every data source.',
         'scopes.summary': '{n} conversation(s) limited · {rules} rule(s)',
         'scopes.show': 'Show',
         'scopes.hide': 'Hide',
@@ -500,6 +501,7 @@ window.__ModuleLoader__.load({
         'render.textFull': '完整值',
         'render.textSaved': '长文本设置已保存。',
         'scopes.title': '会话访问范围',
+        'scopes.empty': '没有会话被限制——每个会话都能访问所有数据源。',
         'scopes.summary': '{n} 个会话受限 · 共 {rules} 条规则',
         'scopes.show': '展开',
         'scopes.hide': '收起',
@@ -5705,40 +5707,50 @@ function groupTables(tables) {
         )
 
       /* A conversation limit has no other screen: it is set by the agent through
-         MCP, so the panel is the only place it can be read or removed. Folded by
-         default because one chip per conversation grows without bound. */
+         MCP, so the panel is the only place it can be read or removed. It lives
+         on the Sources page next to the global write switch — both answer "who
+         may touch which data" — and is folded by default because one chip per
+         conversation grows without bound. An empty list still shows the card,
+         with one line saying nothing is limited, so the feature is findable. */
       const renderScopes = () => {
         const list = scopes || []
-        if (list.length === 0) return null
         const rules = list.reduce((sum, entry) => sum + ((entry.ids || []).length), 0)
+        const empty = list.length === 0
         return h(
           Card,
           {
             title: t('scopes.title'),
-            aside: String(list.length),
-            actions: h(
-              'div',
-              { className: 'dbmcp-inline' },
-              h(
-                'button',
-                {
-                  type: 'button',
-                  className: 'dbmcp-btn is-small',
-                  disabled: busy,
-                  onClick: () => setScopesOpen(!scopesOpen),
-                },
-                scopesOpen ? t('scopes.hide') : t('scopes.show'),
-              ),
-              h(
-                'button',
-                { type: 'button', className: 'dbmcp-btn is-small', disabled: busy, onClick: clearScopes },
-                t('scopes.clear'),
-              ),
-            ),
+            aside: empty ? null : String(list.length),
+            actions: empty
+              ? null
+              : h(
+                  'div',
+                  { className: 'dbmcp-inline' },
+                  h(
+                    'button',
+                    {
+                      type: 'button',
+                      className: 'dbmcp-btn is-small',
+                      disabled: busy,
+                      onClick: () => setScopesOpen(!scopesOpen),
+                    },
+                    scopesOpen ? t('scopes.hide') : t('scopes.show'),
+                  ),
+                  h(
+                    'button',
+                    { type: 'button', className: 'dbmcp-btn is-small', disabled: busy, onClick: clearScopes },
+                    t('scopes.clear'),
+                  ),
+                ),
           },
-          h('p', { className: 'dbmcp-hint' }, fmt(t('scopes.summary'), { n: list.length, rules })),
-          scopesOpen
-            ? h(
+          h(
+            'p',
+            { className: 'dbmcp-hint' },
+            empty ? t('scopes.empty') : fmt(t('scopes.summary'), { n: list.length, rules }),
+          ),
+          empty || !scopesOpen
+            ? null
+            : h(
                 'div',
                 { className: 'dbmcp-scope-box' },
                 list.map((entry) =>
@@ -5761,8 +5773,7 @@ function groupTables(tables) {
                     ),
                   ),
                 ),
-              )
-            : null,
+              ),
         )
       }
 
@@ -5865,6 +5876,7 @@ function groupTables(tables) {
                 renderList(),
               )
             : null,
+          tab !== 'list' ? null : renderScopes(),
           tab !== 'runtime'
             ? null
             : h(
@@ -5944,7 +5956,6 @@ function groupTables(tables) {
           tab !== 'clients' ? null : renderClients(),
           tab !== 'tools' ? null : renderTools(),
           tab !== 'tools' ? null : renderResults(),
-          tab !== 'tools' ? null : renderScopes(),
           tab !== 'audit'
             ? null
             : h(            Card,

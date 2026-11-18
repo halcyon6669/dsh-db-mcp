@@ -103,12 +103,12 @@ the source all live there. Below the masthead, seven tabs:
 
 | Tab | What it does |
 | ---- | ------------ |
-| Data source list | the registry: health strip, search, group chips, rows grouped by label, bulk actions, refresh |
+| Data source list | the registry: health strip, search, group chips, rows grouped by label, bulk actions, refresh, the global write switch and the conversation-limits card |
 | New data source | one connection string, user, password; also used for editing |
 | Import from DBeaver | scan, tick, import |
 | Connect | the HTTP endpoint and the outside agents it can be written into |
 | Runtime | Host facts, tool count, venv and driver versions |
-| Tools | every tool the Python server publishes, with its on/off switch, plus a Context optimisation card (row defaults, long-text setting) and any conversation limits |
+| Tools | every tool the Python server publishes, with its on/off switch, plus a Context optimisation card (row defaults, long-text setting) |
 | Audit log | the last dozen tool calls, converted to your time zone |
 
 **New data source** and **Import from DBeaver** swap only the card under the tabs —

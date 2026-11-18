@@ -147,6 +147,51 @@ try {
   const afterClear = await get('/scopes')
   check('clearing leaves nothing behind', afterClear.body.sessions.length === 0)
 
+  /* A disposed or archived conversation must not keep a limit that the panel can
+     no longer show. Those listeners only exist when a live plugin passes ctx, so
+     this needs its own host with a stub ctx; the HTTP half is switched off first
+     so no Python child is spawned. */
+  const listeners = {}
+  const stubCtx = {
+    on: (event, handler) => {
+      listeners[event] = handler
+      return () => {
+        delete listeners[event]
+      }
+    },
+  }
+  await post('/settings', { httpEnabled: false })
+  const watched = await createHost({ dir, config: {}, log: () => {}, ctx: stubCtx })
+  try {
+    check(
+      'both lifecycle events are listened for',
+      typeof listeners['session/disposed'] === 'function' &&
+        typeof listeners['workspace/session-archived'] === 'function',
+      Object.keys(listeners).join(','),
+    )
+    await post('/scopes', { session: 'gone-1', datasources: ['alpha'] })
+    await post('/scopes', { session: 'gone-2', datasources: ['beta'] })
+    const both = await get('/scopes')
+    check('two conversations are limited before either goes away', both.body.sessions.length === 2)
+
+    listeners['session/disposed']({ id: 'gone-1' })
+    await new Promise((resolve) => setTimeout(resolve, 150))
+    const afterDispose = await get('/scopes')
+    check(
+      'a disposed conversation loses its limit',
+      afterDispose.body.sessions.length === 1 && afterDispose.body.sessions[0].session === 'gone-2',
+      JSON.stringify(afterDispose.body.sessions),
+    )
+
+    listeners['workspace/session-archived']({ sessionId: 'gone-2' })
+    await new Promise((resolve) => setTimeout(resolve, 150))
+    const afterArchive = await get('/scopes')
+    check('an archived conversation loses its limit', afterArchive.body.sessions.length === 0, JSON.stringify(afterArchive.body.sessions))
+  } finally {
+    await watched.dispose?.().catch(() => {})
+    await post('/settings', { httpEnabled: true })
+  }
+
   /* ---- HTTP endpoint and outside clients ---- */
   // The endpoint only auto-starts inside a live plugin, so a bare host reports
   // its configured port and a null URL until something starts it.

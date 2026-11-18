@@ -36,14 +36,23 @@ report of each version in more detail.
   and the whole selection travels together, keeping its own order, and lands above
   or below the row it was dropped on. Dropping on a group moves all of them.
 
-- **Conversation limits can be removed from the panel.** The limits an agent sets
-  through `session_scope` used to be permanent: the only thing that could clear one
-  was the agent itself, and the panel merely listed them. Every limit now has a
-  remove button, the whole set has a "Clear all", and a conversation that is
-  disposed or archived loses its limit automatically, so the list no longer grows
-  forever.
+- **Conversation limits are visible and removable on the data source list.** The
+  limits an agent sets through `session_scope` are written by the agent and were
+  otherwise permanent — the panel had no way to show or lift one. A *Conversation
+  limits* card now sits under the source list, next to the global write switch: both
+  answer who may touch which data. It folds to one summary line, gives every
+  conversation a remove button and the whole set a "Clear all", and a conversation
+  that is disposed or archived loses its limit automatically, so the list cannot grow
+  forever. With no limit in place the card stays and says so, rather than hiding a
+  feature that only appears once the agent has already used it.
 
 ### Changed
+
+- **The conversation-limit card left the Tools tab.** It had been folded in under the
+  tool list, where a setting that only the agent writes is the last thing anyone looks
+  for. It now lives on the *Data source list* tab with the global write switch, since
+  both answer the same question — who may touch which data — and the Tools tab is back
+  to being about tools.
 
 - **The Context optimisation card collects the three output settings.** The row
   counts and the long-text setting are not per-tool decisions, so they no longer hang

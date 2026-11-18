@@ -122,11 +122,12 @@ While a limit is saved for that conversation:
 
 Say *"stop limiting this conversation"* (or call the tool with `all: true`) and the
 limit is removed. Conversations with no saved limit keep access to every source, and
-the *Tools* tab lists the conversations that are limited — folded into one summary
-line, with a remove button per conversation, a "Clear all", and an automatic
-removal when a conversation is disposed or archived, so the list cannot grow
-without bound. The limit is a per-conversation convenience, not a security boundary:
-the files under the runtime directory stay readable by your account.
+the *Conversation limits* card on the *Data source list* tab lists the conversations
+that are limited — folded into one summary line, with a remove button per conversation,
+a "Clear all", and an automatic removal when a conversation is disposed or archived, so
+the list cannot grow without bound. The card is always there, saying "no conversation is
+limited" when the list is empty. The limit is a per-conversation convenience, not a
+security boundary: the files under the runtime directory stay readable by your account.
 
 ## Audit log
 

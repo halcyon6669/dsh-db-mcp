@@ -675,7 +675,20 @@ if (writeTree) {
   check('write switch: a busy panel disables it', Boolean(busyNode) && busyNode.props.disabled === true)
 }
 
-// A card that carries no title draws its own header (the list card does), and
+/* The conversation-limit card answers the same question as the write switch —
+   who may touch which data — so it sits on the same page, not on the Tools tab
+   where nobody would look for it. It used to vanish when no limit existed, which
+   made a feature that only the agent writes invisible until it was already in
+   use; the card now always renders and says so in one line. */
+const scopesCard = source.slice(source.indexOf('const renderScopes = ()'), source.indexOf('let body'))
+check('scopes card: it lives on the data source list', /tab !== 'list' \? null : renderScopes\(\)/.test(source))
+check('scopes card: the tools tab no longer carries it', !/tab !== 'tools' \? null : renderScopes\(\)/.test(source))
+check('scopes card: an empty list still renders the card', !/if \(list\.length === 0\) return null/.test(scopesCard), scopesCard.slice(0, 80))
+check('scopes card: the empty state has a line of its own', /empty \? t\('scopes\.empty'\)/.test(scopesCard))
+check('scopes card: the folded line counts conversations and rules', /fmt\(t\('scopes\.summary'\), \{ n: list\.length, rules \}\)/.test(scopesCard))
+check('scopes card: every row can be removed', /onClick: \(\) => void removeScope\(entry\.session\)/.test(scopesCard))
+check('scopes card: the whole set can be cleared', /onClick: clearScopes/.test(scopesCard))
+
 // the component's own header still took a min-height plus a bottom margin when
 // it rendered empty — about thirty pixels of nothing above the list.
 const { Card } = mod.__test
