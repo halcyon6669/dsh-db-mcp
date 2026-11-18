@@ -13,7 +13,7 @@ src/secretbox.js    AES-256-GCM envelopes for secrets.json, plus the secret.key 
 src/tools.js        spawns the Python server, publishes its tools on the host tools service
 client.js           browser half: sidebar entry + panel (React, theme tokens only)
 locale/{en,zh}.json package metadata (title/description) shown by the plugin card
-server/main.py      FastMCP server: eight tools
+server/main.py      FastMCP server: nine tools
 server/engines.py   per-engine connect / introspect / query / DDL
 server/writes.py    write guard: refuses DDL unless the source's allowDdl switch is on
 server/secretbox.py opens the envelopes written by src/secretbox.js
@@ -31,7 +31,7 @@ purpose: they are read from the repository (the READMEs link them over `raw.gith
 
 ## Architecture diagrams
 
-`docs/architecture.drawio` holds three pages — the file layout, the call graph and the
+`docs/architecture.drawio` holds three pages 鈥?the file layout, the call graph and the
 runtime picture. The call graph and the runtime page are also exported to
 `asset/architecture-calls.png` and `asset/architecture-runtime.png` for places that
 cannot render draw.io. Line numbers inside the diagrams are the ones measured in this
@@ -53,7 +53,7 @@ The Cordis Loader imports a plugin entry **once per process**, so editing
   imports (`new URL(import.meta.url).searchParams.get('v')`), otherwise Node's module
   cache would keep returning the old copies of the inner files.
 - The Python server is a child process: `POST /mcp/restart` (or the **Restart MCP**
-  button) replaces it. Tool registrations stay in place — disposing and re-registering
+  button) replaces it. Tool registrations stay in place 鈥?disposing and re-registering
   them makes the agent's tool catalog go stale and report `unknown tool`.
 
 A profile that links this directory (`dsh plugin --profile desktop add <path>`)
@@ -82,12 +82,12 @@ npm run test:changelog # the changelog's structure and its per-version sections
 | `dev/render.test.mjs` | components rendered with a stub React: tab bar, form fields, list, bulk bar, breadcrumbs |
 | `dev/i18n.test.mjs` | en/zh key parity, no dead keys, no stray copy outside the dictionaries |
 | `dev/p5.test.mjs` | settings, audit rotation, Python environment discovery |
-| `dev/mcp.test.mjs` | real stdio handshake, all eight tools, read-only refusal, login failures |
+| `dev/mcp.test.mjs` | real stdio handshake, all nine tools, read-only refusal, login failures |
 | `dev/docs.check.mjs` | balanced code fences, table column counts, relative links and headings in every Markdown file |
 | `dev/changelog.mjs` | the changelog's structure: one dated section per released version, newest first, each with a link target |
 
 Suites that need external services skip rather than fail: `mcp.test.mjs` probes the
-Oracle port and prints `skip … is not listening` when the container is down.
+Oracle port and prints `skip 鈥?is not listening` when the container is down.
 
 ## Releasing
 
@@ -120,7 +120,7 @@ one and turns `## [Unreleased]` into `## [0.9.8] - <today>`, opening a fresh
 to run when the section is empty, so a version cannot ship with nothing to say.
 
 The workflow then refuses to publish when the tag, `package.json` and the changelog
-disagree — it runs `node dev/changelog.mjs check`, extracts the section for the tag
+disagree 鈥?it runs `node dev/changelog.mjs check`, extracts the section for the tag
 with `node dev/changelog.mjs notes <version>`, runs `npm run test:ci`, publishes with
 `--provenance`, and polls the registry until the version appears. Local `npm publish`
 still works for the very first release, before a trusted publisher exists.
@@ -143,7 +143,7 @@ older than 0.6.4 predate the changelog; their notes are in the annotated tag obj
 which `git tag -l --format='%(contents)' v0.5.0` prints, and
 [design-notes.md](design-notes.md) narrates them.
 
-Keep `src/host.js`'s `PLUGIN_VERSION` in step with `package.json` — the panel and
+Keep `src/host.js`'s `PLUGIN_VERSION` in step with `package.json` 鈥?the panel and
 `/health` read it, and a mismatch ships a package that reports the previous version.
 That is what `bump.mjs` is for.
 
@@ -155,7 +155,7 @@ dsh plugin --profile desktop add dsh-db-mcp@0.9.8
 dsh plugin --profile desktop remove dsh-db-mcp
 ```
 
-Expect pnpm to print `Added 1 entry to minimumReleaseAgeExclude …` when the version
+Expect pnpm to print `Added 1 entry to minimumReleaseAgeExclude 鈥 when the version
 is younger than its 1440-minute cooldown: that line is pnpm recording a per-version
 exception so the explicit pin may install. See
 [guide.md](guide.md#install-and-upgrade) for the policy knobs.

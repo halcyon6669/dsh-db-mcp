@@ -483,7 +483,7 @@ class GuardChain(unittest.TestCase):
             full = engines.execute_sql(profile("sqlite"), connection, "select body from t", 200, True)
         finally:
             engines.TEXT_POLICY = "auto"
-        self.assertIn("(共300字)", plain["rows"][0][0])
+        self.assertIn("(300 chars)", plain["rows"][0][0])
         self.assertEqual(full["rows"][0][0], long)
 
 
@@ -745,6 +745,172 @@ class SqliteTimeoutOnARealDatabase(unittest.TestCase):
         self.assertEqual(result["rows"], [[0]])
 
 
+class RoutingCursor:
+    """A cursor that answers by statement, so a multi-query call can be tested.
+
+    `describe_table` asks four or five questions, each with its own result. A
+    single canned row list cannot tell them apart; matching on a fragment of the
+    statement can. The longest matching needle wins, so a call that names one
+    table by name beats the generic PRAGMA it is shaped like.
+    """
+
+    def __init__(self, answers: dict, fail: tuple = ()):
+        self.answers = dict(answers)
+        self.fail = tuple(fail)
+        self.executed: list[str] = []
+        self.closed = False
+        self.description = None
+        self.rowcount = -1
+        self._rows: list = []
+
+    def execute(self, sql, params=None) -> None:
+        text = str(sql)
+        self.executed.append(text)
+        for needle in self.fail:
+            if needle in text:
+                raise RuntimeError(f"{needle} is not available")
+        for needle in sorted(self.answers, key=len, reverse=True):
+            if needle in text:
+                self._rows = list(self.answers[needle])
+                return
+        self._rows = []
+
+    def fetchall(self):
+        return list(self._rows)
+
+    def fetchone(self):
+        return self._rows[0] if self._rows else None
+
+    def __iter__(self):
+        return iter(self._rows)
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class DescribeExtras(unittest.TestCase):
+    """`describe_table` answers the join questions too, and never fails over them.
+
+    A model that has to guess whether a foreign key exists writes the join wrong;
+    a missing column comment, on the other hand, is not worth a failed call.
+    """
+
+    def test_sqlite_reports_keys_indexes_and_size(self):
+        cursor = RoutingCursor(
+            {
+                'PRAGMA table_info("t")': [
+                    (0, "id", "INTEGER", 0, None, 1),
+                    (1, "pid", "INTEGER", 1, None, 0),
+                ],
+                'PRAGMA foreign_key_list("t")': [(0, 0, "parent", "pid", "id", "NO ACTION", "NO ACTION", "NONE")],
+                'PRAGMA index_list("t")': [(0, "idx_pid", 0, "c", 0)],
+                'PRAGMA index_info("idx_pid")': [(0, 1, "pid")],
+            }
+        )
+        result = engines.describe_table(profile("sqlite"), FakeConnection(cursor), "t", None)
+        self.assertEqual(
+            sorted(result),
+            ["columns", "comment", "foreignKeys", "indexes", "primaryKey", "rowEstimate", "schema", "table"],
+        )
+        self.assertEqual(result["primaryKey"], ["id"])
+        self.assertEqual(result["foreignKeys"], [{"column": "pid", "refTable": "parent", "refColumn": "id", "name": None}])
+        self.assertEqual(result["indexes"], [{"name": "idx_pid", "columns": ["pid"], "unique": False}])
+        self.assertIsNone(result["comment"])
+        self.assertIsNone(result["rowEstimate"])
+
+    def test_a_refused_extra_leaves_the_rest_intact(self):
+        # A driver or a grant that will not answer the index PRAGMA must not turn
+        # a describe call into an error: the columns are the part that matters.
+        cursor = RoutingCursor(
+            {
+                'PRAGMA table_info("t")': [(0, "id", "INTEGER", 0, None, 1)],
+                'PRAGMA foreign_key_list("t")': [(0, 0, "parent", "id", "id", "NO ACTION", "NO ACTION", "NONE")],
+            },
+            fail=("index_list",),
+        )
+        result = engines.describe_table(profile("sqlite"), FakeConnection(cursor), "t", None)
+        self.assertEqual([column["name"] for column in result["columns"]], ["id"])
+        self.assertEqual(len(result["foreignKeys"]), 1)
+        self.assertEqual(result["indexes"], [])
+
+    def test_postgres_gets_keys_indexes_and_a_row_estimate(self):
+        cursor = RoutingCursor(
+            {
+                "FOREIGN KEY": [("pid", "parent", "id", "t_pid_fkey")],
+                "from pg_indexes": [("t_pkey", "CREATE UNIQUE INDEX t_pkey ON public.t USING btree (id)")],
+                "reltuples": [(1234,)],
+            }
+        )
+        extras = engines._describe_extras("postgres", cursor, "t", "public")
+        self.assertEqual(extras["foreignKeys"], [{"column": "pid", "refTable": "parent", "refColumn": "id", "name": "t_pid_fkey"}])
+        self.assertEqual(extras["indexes"], [{"name": "t_pkey", "columns": ["id"], "unique": True}])
+        self.assertEqual(extras["rowEstimate"], 1234)
+
+    def test_a_never_analysed_table_has_no_estimate(self):
+        # `reltuples` is -1 before the first ANALYZE; reporting that as a row
+        # count would be a lie the model would act on.
+        cursor = RoutingCursor({"reltuples": [(-1,)]})
+        self.assertIsNone(engines._pg_row_estimate(cursor, "t", "public"))
+
+    def test_index_columns_survive_an_expression(self):
+        self.assertEqual(engines._index_columns("CREATE INDEX i ON t USING btree (a, b)"), ["a", "b"])
+        self.assertEqual(engines._index_columns("CREATE INDEX i ON t USING btree (lower(x), y)"), ["lower(x)", "y"])
+        self.assertEqual(engines._index_columns("CREATE INDEX i ON t"), [])
+
+    def test_oracle_resolves_the_spelling_the_catalog_stores(self):
+        exact = "select table_name from all_tables where owner = :1 and table_name = :2"
+        fuzzy = "upper(table_name) = upper(:2)"
+        stored = RoutingCursor({exact: [("lower_t",)]})
+        self.assertEqual(engines._oracle_catalog_name(stored, "TEST", "LOWER_T"), "lower_t")
+        # Nothing matched the two exact spellings; the case-insensitive pass does.
+        loose = RoutingCursor({exact: [], fuzzy: [("MixedCase",)]})
+        self.assertEqual(engines._oracle_catalog_name(loose, "TEST", "mixedcase"), "MixedCase")
+
+
+class Relations(unittest.TestCase):
+    """`list_relations` answers every join path for a schema in one call."""
+
+    def test_sqlite_walks_the_tables_it_has(self):
+        cursor = RoutingCursor(
+            {
+                "sqlite_master": [("a",), ("b",)],
+                'PRAGMA foreign_key_list("a")': [(0, 0, "parent", "pid", "id", "NO ACTION", "NO ACTION", "NONE")],
+                'PRAGMA foreign_key_list("b")': [],
+            }
+        )
+        result = engines.list_relations(profile("sqlite"), FakeConnection(cursor), None)
+        self.assertEqual(sorted(result), ["relations", "schema", "total", "truncated"])
+        self.assertEqual(
+            result["relations"],
+            [{"table": "a", "column": "pid", "refTable": "parent", "refColumn": "id", "name": None}],
+        )
+        self.assertEqual(result["total"], 1)
+        self.assertFalse(result["truncated"])
+
+    def test_postgres_asks_once_for_the_whole_schema(self):
+        cursor = RoutingCursor({"FOREIGN KEY": [("orders", "customer_id", "customers", "id", "orders_customer_fkey")]})
+        result = engines.list_relations(profile("postgres"), FakeConnection(cursor), None)
+        self.assertEqual(
+            result["relations"],
+            [
+                {
+                    "table": "orders",
+                    "column": "customer_id",
+                    "refTable": "customers",
+                    "refColumn": "id",
+                    "name": "orders_customer_fkey",
+                }
+            ],
+        )
+        self.assertEqual(len(cursor.executed), 1, "one round trip, not one per table")
+
+    def test_a_schema_without_keys_says_so(self):
+        cursor = RoutingCursor({"FOREIGN KEY": []})
+        result = engines.list_relations(profile("postgres"), FakeConnection(cursor), None)
+        self.assertEqual(result["relations"], [])
+        self.assertEqual(result["total"], 0)
+
+
 class CellPolicy(unittest.TestCase):
     """`_cell` summarises long text under `auto`, keeps it under `full`."""
 
@@ -761,7 +927,7 @@ class CellPolicy(unittest.TestCase):
         rendered = engines._cell(long)
         self.assertTrue(rendered.startswith("x" * 50))
         self.assertTrue(rendered.endswith("x" * 50))
-        self.assertIn("…(共300字)…", rendered)
+        self.assertIn("…(300 chars)…", rendered)
         self.assertLess(len(rendered), 200)
 
     def test_unknown_policy_falls_back_to_auto(self):

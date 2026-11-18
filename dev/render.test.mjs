@@ -499,6 +499,42 @@ check('renderer: select keeps the table shape', readText.startsWith('n\n') && re
 const ddlText = renderResult({ ok: true, sql: 'insert into t values (1)', columns: [], rows: [], rowCount: 0, elapsedMs: 2 })
 check('renderer: a write without a rowcount still renders as a result set', ddlText.includes('(0 row(s), 2ms)'), ddlText)
 
+// describe_table also reports the join facts. They belong under the column list,
+// not in a JSON blob the model has to parse.
+const described = renderResult({
+  ok: true,
+  datasource: { id: 'chinook', kind: 'sqlite' },
+  table: 'InvoiceLine',
+  schema: 'main',
+  comment: 'one row per sold item',
+  rowEstimate: 2240,
+  primaryKey: ['InvoiceLineId'],
+  columns: [
+    { name: 'InvoiceLineId', type: 'INTEGER', nullable: false, default: null, primaryKey: true },
+    { name: 'TrackId', type: 'INTEGER', nullable: false, default: null, primaryKey: false, comment: 'which track' },
+  ],
+  foreignKeys: [{ column: 'TrackId', refTable: 'Track', refColumn: 'TrackId', name: null }],
+  indexes: [{ name: 'IFK_InvoiceLineTrackId', columns: ['TrackId'], unique: false }],
+})
+check('renderer: describe names the table and its comment', described.includes('main.InvoiceLine') && described.includes('-- one row per sold item'), described)
+check('renderer: describe shows the row estimate', described.includes('~2240 row(s) (estimate)'), described)
+check('renderer: describe lists the foreign key as a path', described.includes('TrackId -> Track.TrackId'), described)
+check('renderer: describe lists indexes with their columns', described.includes('IFK_InvoiceLineTrackId (TrackId)'), described)
+check('renderer: describe keeps the column comments', described.includes('-- which track'), described)
+check('renderer: a describe with no keys does not print empty sections', !renderResult({ ok: true, table: 't', columns: [{ name: 'a', type: 'TEXT', nullable: true, primaryKey: false }], primaryKey: [], foreignKeys: [], indexes: [], comment: null, rowEstimate: null }).includes('foreign keys:'))
+
+const related = renderResult({
+  ok: true,
+  schema: 'public',
+  relations: [
+    { table: 'orders', column: 'customer_id', refTable: 'customers', refColumn: 'id', name: 'orders_customer_fkey' },
+  ],
+  truncated: false,
+  total: 1,
+})
+check('renderer: relations reads as join paths', related === 'orders.customer_id -> customers.id  (orders_customer_fkey)', related)
+check('renderer: an empty schema says so', renderResult({ ok: true, schema: 'public', relations: [], total: 0, truncated: false }) === 'no foreign keys in public')
+
 // The audit card may hold entries from earlier days, so a bare clock is not enough.
 const clock = localClock('2026-11-09T11:29:38.782Z')
 check('audit clock carries the date', /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(clock), clock)

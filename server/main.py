@@ -251,14 +251,38 @@ def list_tables(datasource: Optional[str] = None, schema: Optional[str] = None) 
 
 @mcp.tool()
 def describe_table(table: str, datasource: Optional[str] = None, schema: Optional[str] = None) -> dict:
-    """Describe one table: column names, types, nullability, defaults and primary key.
+    """Describe one table: columns, types, nullability, defaults and primary key.
 
-    Call this before writing SQL so the column names are exact.
+    Also reports `foreignKeys` (what this table points at), `indexes` (name,
+    columns, whether unique), `comment` and the per-column `comment`, and
+    `rowEstimate` — the planner's row count, not a `count(*)`. Any of those the
+    engine or the permissions cannot answer comes back as `[]` or `null`; the
+    describe call still succeeds. Call this before writing SQL so the column
+    names are exact and the joins use the right columns.
     """
     try:
         profile, (connection, close) = _open(datasource)
         try:
             result = engines.describe_table(profile, connection, table, schema)
+        finally:
+            close()
+        return {"ok": True, "datasource": _source(profile), **result}
+    except Exception as error:  # noqa: BLE001
+        return _error(error)
+
+
+@mcp.tool()
+def list_relations(datasource: Optional[str] = None, schema: Optional[str] = None) -> dict:
+    """List every foreign key in one schema, so a join path is one call away.
+
+    Returns `relations` as flat rows: `{table, column, refTable, refColumn,
+    name}`. Use it when a query needs to join tables you have not described
+    yet — describe_table gives the same edges for a single table.
+    """
+    try:
+        profile, (connection, close) = _open(datasource)
+        try:
+            result = engines.list_relations(profile, connection, schema)
         finally:
             close()
         return {"ok": True, "datasource": _source(profile), **result}

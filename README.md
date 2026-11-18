@@ -123,7 +123,8 @@ for real before you commit the source.
 | ---- | ------- |
 | `mcp__db__list_datasources` | registered sources: id, kind, target, read-only |
 | `mcp__db__list_tables` | tables and views of a source |
-| `mcp__db__describe_table` | columns, types, nullability, primary key |
+| `mcp__db__describe_table` | columns, types, nullability, primary key, plus keys, indexes, comments and a size estimate |
+| `mcp__db__list_relations` | every foreign key in a schema — the join paths, in one call |
 | `mcp__db__sample_rows` | a few rows of a table |
 | `mcp__db__execute_sql` | execute one statement — a query, or a write when that is allowed |
 | `mcp__db__explain_query` | query plan |

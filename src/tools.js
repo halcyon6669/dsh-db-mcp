@@ -83,7 +83,35 @@ export function renderResult(value) {
     return value.ddl.trim();
   }
   if (Array.isArray(value.columns) && value.table) {
-    return value.columns.map((column) => `${column.name}  ${column.type}${column.primaryKey ? '  PK' : ''}${column.nullable ? '' : '  NOT NULL'}`).join('\n');
+    const lines = value.columns.map((column) => {
+      const notes = [
+        column.primaryKey ? 'PK' : '',
+        column.nullable ? '' : 'NOT NULL',
+        column.comment ? `-- ${column.comment}` : '',
+      ].filter(Boolean);
+      return `${column.name}  ${column.type}${notes.length ? `  ${notes.join('  ')}` : ''}`;
+    });
+    const head = [`${value.schema ? `${value.schema}.` : ''}${value.table}`];
+    if (value.comment) head.push(`-- ${value.comment}`);
+    if (typeof value.rowEstimate === 'number') head.push(`~${value.rowEstimate} row(s) (estimate)`);
+    if (Array.isArray(value.primaryKey) && value.primaryKey.length) {
+      head.push(`primary key (${value.primaryKey.join(', ')})`);
+    }
+    const keys = (value.foreignKeys || [])
+      .filter((key) => key && key.column)
+      .map((key) => `  ${key.column} -> ${key.refTable}.${key.refColumn}`);
+    if (keys.length) head.push('foreign keys:', ...keys);
+    const indexes = (value.indexes || [])
+      .filter((index) => index && index.name)
+      .map((index) => `  ${index.name}${index.unique ? ' unique' : ''} (${(index.columns || []).join(', ')})`);
+    if (indexes.length) head.push('indexes:', ...indexes);
+    return `${head.join('\n')}\n${lines.join('\n')}`;
+  }
+  if (Array.isArray(value.relations)) {
+    if (value.relations.length === 0) return value.schema ? `no foreign keys in ${value.schema}` : 'no foreign keys';
+    const lines = value.relations.map((entry) => `${entry.table}.${entry.column} -> ${entry.refTable}.${entry.refColumn}${entry.name ? `  (${entry.name})` : ''}`);
+    const more = value.truncated ? `\n… truncated (${value.total} total)` : '';
+    return lines.join('\n') + more;
   }
   return JSON.stringify(value, null, 2);
 }

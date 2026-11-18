@@ -87,7 +87,8 @@ dsh plugin --profile web add dsh-db-mcp       # Web 端
 | ---- | ---- |
 | `mcp__db__list_datasources` | 已登记的数据源：id、类型、目标、是否只读 |
 | `mcp__db__list_tables` | 某个源里的表与视图 |
-| `mcp__db__describe_table` | 列、类型、可空、主键 |
+| `mcp__db__describe_table` | 列、类型、可空、主键，外加外键、索引、注释与行数估计 |
+| `mcp__db__list_relations` | 一个 schema 里的全部外键——join 路径一次拿全 |
 | `mcp__db__sample_rows` | 取几行样本 |
 | `mcp__db__execute_sql` | 执行一条语句——查询，或在允许写入时执行写入 |
 | `mcp__db__explain_query` | 执行计划 |

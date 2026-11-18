@@ -91,8 +91,8 @@
 │  Python MCP 服务（server/，官方 mcp SDK + 五种驱动）                        │
 │    · 懒加载、懒建连接、每次调用重读注册表                                  │
 │    · 工具：test_connection / list_datasources / list_tables /              │
-│            describe_table / sample_rows / execute_sql / explain_query /    │
-│            get_ddl                                                          │
+│            describe_table / list_relations / sample_rows / execute_sql /   │
+│            explain_query / get_ddl                                          │
 │    · 三道闸门、行数上限、超时、错误分级                                     │
 └────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -226,15 +226,16 @@
 | FR-MCP-5 | `execute_sql` | 执行**任意单条**语句（不只查询），带 `max_rows`；写语句返回 `affectedRows` | P0 |
 | FR-MCP-6 | `explain_query` | 执行计划，按方言降级（Oracle 用 `EXPLAIN PLAN`，MySQL/PG 用 `EXPLAIN`） | P2 |
 | FR-MCP-7 | `get_ddl` | 取建表语句（0.6.0 加入） | P1 |
+| FR-MCP-7b | `list_relations` | 一个 schema 的全部外键，一次拿到 join 路径 | P1 |
 | FR-MCP-8 | `test_connection` | 用保存的源或内联连接串做一次真实登录探测 | P0 |
 | FR-MCP-9 | `session_scope` | **Host 侧原生工具**（非 MCP），限制本会话可见的数据源（0.9.0） | P1 |
 | FR-MCP-10 | instructions | 服务端说明：先看结构再查数、不要拼接用户输入、结果截断含义 | P1 |
 | FR-MCP-11 | 超时 | MCP 行 `toolCallTimeoutMs=60000`；Python 内 `timeout_ms` 上限 120s | P0 |
 | FR-MCP-12 | 并发 | 进程内串行；不同数据源不共享连接；单源连接池上限 4 | P0 |
 
-> 前八项是 Python 服务发布的工具（`server/main.py` 的 `@mcp.tool()`），`session_scope`
+> 前九项是 Python 服务发布的工具（`server/main.py` 的 `@mcp.tool()`），`session_scope`
 > 由 `src/tools.js` 注册在 Host 上 —— 它改的是 Host 的 `sessions.json`，Python 看不到，
-> 因此也只对 DSH 智能体生效。工具页可以逐个关掉前八项，`session_scope` 故意不可关。
+> 因此也只对 DSH 智能体生效。工具页可以逐个关掉前九项，`session_scope` 故意不可关。
 
 **方言要点（实现约束）**
 

@@ -332,7 +332,9 @@ def _cell(value, full_text: bool = False):
         # keep a readable fragment instead of the full wall of text. A caller
         # that asked for `full_text` gets the value as stored.
         if not full_text and TEXT_POLICY != "full" and len(text) > TEXT_SUMMARY_AT:
-            return f"{text[:TEXT_FRAGMENT]}…(共{len(text)}字)…{text[-TEXT_FRAGMENT:]}"
+            # The marker is English like every other string this server emits: the
+            # reader is a model, and the host exposes no locale service to ask.
+            return f"{text[:TEXT_FRAGMENT]}…({len(text)} chars)…{text[-TEXT_FRAGMENT:]}"
         return text
     if full_text:
         # Still bounded: one cell must not be able to blow up the response.
@@ -358,7 +360,6 @@ def _rows(cursor, max_rows: int, full_text: bool = False) -> tuple[list[str], li
     return columns, rows, truncated
 
 
-
 def _quote(kind: str, name: str) -> str:
     text = str(name)
     if kind == "mysql":
@@ -370,14 +371,29 @@ def _quote(kind: str, name: str) -> str:
     return '"' + text.replace('"', '""') + '"'
 
 
-def qualified(profile: dict, table: str) -> str:
+def _quote_exact(kind: str, name: str) -> str:
+    """Quote a name the catalog already resolved, keeping its case.
+
+    `_quote` assumes the name was written the way Oracle stores unquoted
+    identifiers (upper case). Once `_oracle_catalog_name` has told us the real
+    spelling — which may be lower case for a table created with a quoted name —
+    folding it again would point at a table that does not exist.
+    """
+    text = str(name)
+    if kind == "mysql":
+        return "`" + text.replace("`", "``") + "`"
+    return '"' + text.replace('"', '""') + '"'
+
+
+def qualified(profile: dict, table: str, exact: bool = False) -> str:
     kind = profile.get("kind")
     schema = (profile.get("config") or {}).get("schema") or None
     if kind == "oracle":
         schema = (schema or (profile.get("config") or {}).get("user") or "").upper() or None
+    quote = _quote_exact if exact else _quote
     if schema and kind in ("postgres", "gauss", "oracle", "mysql"):
-        return f"{_quote(kind, schema)}.{_quote(kind, table)}"
-    return _quote(kind, table)
+        return f"{_quote(kind, schema)}.{quote(kind, table)}"
+    return quote(kind, table)
 
 
 def _limit_clause(kind: str, limit: int) -> str:
@@ -1025,12 +1041,343 @@ def list_tables(profile: dict, connection, schema: str | None, limit: int = 500)
     return result
 
 
+# --------------------------------------------------------------------------- #
+# relations, indexes, comments and size
+#
+# `describe_table` answers "what is in this table". These helpers answer the four
+# follow-up questions a model has before it writes a join: what does it point at,
+# how is it indexed, what does the team call it, and roughly how big is it. Each
+# one returns [] or None when the engine or the permissions cannot answer, so a
+# missing comment never fails a describe call.
+
+
+def _index_columns(definition: str) -> list[str]:
+    """Columns named in a `pg_indexes.indexdef` string.
+
+    The definition is `CREATE [UNIQUE] INDEX … USING btree (a, b)`; the column
+    list is the first balanced parenthesis group. Expressions such as `lower(x)`
+    come back as written, which is what the model needs to recognise the index.
+    """
+    text = str(definition or "")
+    start = text.find("(")
+    if start < 0:
+        return []
+    depth = 0
+    piece: list[str] = []
+    parts: list[str] = []
+    for char in text[start:]:
+        if char == "(":
+            depth += 1
+            if depth == 1:
+                continue
+        elif char == ")":
+            depth -= 1
+            if depth == 0:
+                parts.append("".join(piece))
+                break
+        elif char == "," and depth == 1:
+            parts.append("".join(piece))
+            piece = []
+            continue
+        piece.append(char)
+    return [part.strip().strip('"') for part in parts if part.strip()]
+
+
+def _sqlite_foreign_keys(cursor, table: str) -> list[dict]:
+    cursor.execute(f"PRAGMA foreign_key_list({_quote('sqlite', table)})")
+    return [
+        {"column": row[3], "refTable": row[2], "refColumn": row[4], "name": None}
+        for row in cursor.fetchall()
+    ]
+
+
+def _sqlite_indexes(cursor, table: str) -> list[dict]:
+    cursor.execute(f"PRAGMA index_list({_quote('sqlite', table)})")
+    listing = cursor.fetchall()
+    indexes: list[dict] = []
+    for row in listing:
+        name = row[1]
+        cursor.execute(f"PRAGMA index_info({_quote('sqlite', name)})")
+        indexes.append(
+            {
+                "name": name,
+                "columns": [item[2] for item in cursor.fetchall()],
+                "unique": bool(row[2]),
+            }
+        )
+    return indexes
+
+
+def _pg_foreign_keys(cursor, table: str, owner: str) -> list[dict]:
+    cursor.execute(
+        "select kcu.column_name, ccu.table_name, ccu.column_name, tc.constraint_name "
+        "from information_schema.table_constraints tc "
+        "join information_schema.key_column_usage kcu "
+        "  on kcu.constraint_name = tc.constraint_name and kcu.table_schema = tc.table_schema "
+        "join information_schema.constraint_column_usage ccu "
+        "  on ccu.constraint_name = tc.constraint_name and ccu.table_schema = tc.table_schema "
+        "where tc.constraint_type = 'FOREIGN KEY' "
+        "  and tc.table_name = %s and tc.table_schema = %s "
+        "order by tc.constraint_name, kcu.ordinal_position",
+        (table, owner),
+    )
+    return [
+        {"column": column, "refTable": ref_table, "refColumn": ref_column, "name": name}
+        for column, ref_table, ref_column, name in cursor.fetchall()
+    ]
+
+
+def _pg_indexes(cursor, table: str, owner: str) -> list[dict]:
+    cursor.execute(
+        "select indexname, indexdef from pg_indexes where schemaname = %s and tablename = %s order by indexname",
+        (owner, table),
+    )
+    return [
+        {
+            "name": name,
+            "columns": _index_columns(definition),
+            "unique": str(definition or "").upper().startswith("CREATE UNIQUE"),
+        }
+        for name, definition in cursor.fetchall()
+    ]
+
+
+def _pg_comments(cursor, table: str, owner: str) -> tuple[str | None, dict[str, str]]:
+    cursor.execute(
+        "select obj_description(c.oid, 'pg_class') from pg_class c "
+        "join pg_namespace n on n.oid = c.relnamespace where c.relname = %s and n.nspname = %s",
+        (table, owner),
+    )
+    row = cursor.fetchone()
+    comment = str(row[0]) if row and row[0] else None
+    cursor.execute(
+        "select a.attname, col_description(c.oid, a.attnum) from pg_class c "
+        "join pg_namespace n on n.oid = c.relnamespace "
+        "join pg_attribute a on a.attrelid = c.oid and a.attnum > 0 and not a.attisdropped "
+        "where c.relname = %s and n.nspname = %s",
+        (table, owner),
+    )
+    return comment, {str(name): str(text) for name, text in cursor.fetchall() if text}
+
+
+def _pg_row_estimate(cursor, table: str, owner: str) -> int | None:
+    # `reltuples` is what ANALYZE recorded; it is -1 on a table never analysed,
+    # and it is an estimate — never turn it into a count(*) here.
+    cursor.execute(
+        "select c.reltuples::bigint from pg_class c "
+        "join pg_namespace n on n.oid = c.relnamespace where c.relname = %s and n.nspname = %s",
+        (table, owner),
+    )
+    row = cursor.fetchone()
+    if not row or row[0] is None:
+        return None
+    value = int(row[0])
+    return value if value >= 0 else None
+
+
+def _mysql_foreign_keys(cursor, table: str, owner: str) -> list[dict]:
+    cursor.execute(
+        "select column_name, referenced_table_name, referenced_column_name, constraint_name "
+        "from information_schema.key_column_usage "
+        "where table_schema = %s and table_name = %s and referenced_table_name is not null "
+        "order by constraint_name, ordinal_position",
+        (owner, table),
+    )
+    return [
+        {"column": column, "refTable": ref_table, "refColumn": ref_column, "name": name}
+        for column, ref_table, ref_column, name in cursor.fetchall()
+    ]
+
+
+def _mysql_indexes(cursor, table: str, owner: str) -> list[dict]:
+    cursor.execute(
+        "select index_name, non_unique, column_name from information_schema.statistics "
+        "where table_schema = %s and table_name = %s order by index_name, seq_in_index",
+        (owner, table),
+    )
+    grouped: dict[str, dict] = {}
+    for name, non_unique, column in cursor.fetchall():
+        entry = grouped.setdefault(
+            str(name),
+            {"name": str(name), "columns": [], "unique": not int(non_unique or 0)},
+        )
+        entry["columns"].append(column)
+    return list(grouped.values())
+
+
+def _mysql_comments(cursor, table: str, owner: str) -> tuple[str | None, dict[str, str]]:
+    cursor.execute(
+        "select table_comment from information_schema.tables where table_schema = %s and table_name = %s",
+        (owner, table),
+    )
+    row = cursor.fetchone()
+    comment = str(row[0]).strip() if row and row[0] and str(row[0]).strip() else None
+    cursor.execute(
+        "select column_name, column_comment from information_schema.columns "
+        "where table_schema = %s and table_name = %s",
+        (owner, table),
+    )
+    return comment, {str(name): str(text) for name, text in cursor.fetchall() if text}
+
+
+def _mysql_row_estimate(cursor, table: str, owner: str) -> int | None:
+    cursor.execute(
+        "select table_rows from information_schema.tables where table_schema = %s and table_name = %s",
+        (owner, table),
+    )
+    row = cursor.fetchone()
+    return int(row[0]) if row and row[0] is not None else None
+
+
+def _oracle_foreign_keys(cursor, table: str, owner: str) -> list[dict]:
+    cursor.execute(
+        "select cc.column_name, rc.table_name, rcc.column_name, c.constraint_name "
+        "from all_constraints c "
+        "join all_cons_columns cc on cc.owner = c.owner and cc.constraint_name = c.constraint_name "
+        "join all_constraints rc on rc.owner = c.r_owner and rc.constraint_name = c.r_constraint_name "
+        "join all_cons_columns rcc on rcc.owner = rc.owner and rcc.constraint_name = rc.constraint_name "
+        "  and rcc.position = cc.position "
+        "where c.constraint_type = 'R' and c.owner = :1 and c.table_name = :2 "
+        "order by c.constraint_name, cc.position",
+        [owner, table],
+    )
+    return [
+        {"column": column, "refTable": ref_table, "refColumn": ref_column, "name": name}
+        for column, ref_table, ref_column, name in cursor.fetchall()
+    ]
+
+
+def _oracle_indexes(cursor, table: str, owner: str) -> list[dict]:
+    cursor.execute(
+        "select i.index_name, i.uniqueness, c.column_name "
+        "from all_indexes i join all_ind_columns c "
+        "  on c.index_owner = i.owner and c.index_name = i.index_name "
+        "where i.table_owner = :1 and i.table_name = :2 order by i.index_name, c.column_position",
+        [owner, table],
+    )
+    grouped: dict[str, dict] = {}
+    for name, uniqueness, column in cursor.fetchall():
+        entry = grouped.setdefault(
+            str(name),
+            {"name": str(name), "columns": [], "unique": str(uniqueness).upper() == "UNIQUE"},
+        )
+        entry["columns"].append(column)
+    return list(grouped.values())
+
+
+def _oracle_comments(cursor, table: str, owner: str) -> tuple[str | None, dict[str, str]]:
+    cursor.execute(
+        "select comments from all_tab_comments where owner = :1 and table_name = :2",
+        [owner, table],
+    )
+    row = cursor.fetchone()
+    comment = str(row[0]).strip() if row and row[0] and str(row[0]).strip() else None
+    cursor.execute(
+        "select column_name, comments from all_col_comments where owner = :1 and table_name = :2",
+        [owner, table],
+    )
+    return comment, {str(name): str(text) for name, text in cursor.fetchall() if text}
+
+
+def _oracle_row_estimate(cursor, table: str, owner: str) -> int | None:
+    cursor.execute(
+        "select num_rows from all_tables where owner = :1 and table_name = :2",
+        [owner, table],
+    )
+    row = cursor.fetchone()
+    return int(row[0]) if row and row[0] is not None else None
+
+
+def _describe_extras(kind: str, cursor, table: str, owner: str | None) -> dict:
+    """The optional half of `describe_table`, never fatal.
+
+    A driver that refuses one of these queries (a missing grant on
+    `information_schema`, a catalog view a GaussDB build does not carry) leaves
+    that field empty and the describe call still succeeds.
+    """
+    extras = {"foreignKeys": [], "indexes": [], "comment": None, "rowEstimate": None}
+    if kind == "sqlite":
+        pairs = (
+            ("foreignKeys", lambda: _sqlite_foreign_keys(cursor, table)),
+            ("indexes", lambda: _sqlite_indexes(cursor, table)),
+        )
+    elif kind in PG_LIKE:
+        pairs = (
+            ("foreignKeys", lambda: _pg_foreign_keys(cursor, table, owner or "public")),
+            ("indexes", lambda: _pg_indexes(cursor, table, owner or "public")),
+            ("rowEstimate", lambda: _pg_row_estimate(cursor, table, owner or "public")),
+        )
+    elif kind == "mysql":
+        pairs = (
+            ("foreignKeys", lambda: _mysql_foreign_keys(cursor, table, owner)),
+            ("indexes", lambda: _mysql_indexes(cursor, table, owner)),
+            ("rowEstimate", lambda: _mysql_row_estimate(cursor, table, owner)),
+        )
+    elif kind == "oracle":
+        pairs = (
+            ("foreignKeys", lambda: _oracle_foreign_keys(cursor, table, owner)),
+            ("indexes", lambda: _oracle_indexes(cursor, table, owner)),
+            ("rowEstimate", lambda: _oracle_row_estimate(cursor, table, owner)),
+        )
+    else:
+        return extras
+    for key, read in pairs:
+        try:
+            extras[key] = read()
+        except Exception:  # noqa: BLE001 - a missing grant must not fail describe
+            extras[key] = [] if key != "rowEstimate" else None
+    return extras
+
+
+def _describe_comments(kind: str, cursor, table: str, owner: str | None) -> tuple[str | None, dict[str, str]]:
+    try:
+        if kind in PG_LIKE:
+            return _pg_comments(cursor, table, owner or "public")
+        if kind == "mysql":
+            return _mysql_comments(cursor, table, owner)
+        if kind == "oracle":
+            return _oracle_comments(cursor, table, owner)
+    except Exception:  # noqa: BLE001 - comments are a nicety, not a requirement
+        pass
+    return None, {}
+
+
+def _oracle_catalog_name(cursor, owner: str | None, table: str) -> str:
+    """The name Oracle actually stores for `table`.
+
+    Oracle folds unquoted identifiers to upper case, but a table created with a
+    quoted lower-case name keeps that case. Ask the catalog which spelling exists
+    instead of guessing, so both kinds of table resolve.
+    """
+    wanted = str(table)
+    for candidate in dict.fromkeys((wanted, wanted.upper())):
+        cursor.execute(
+            "select table_name from all_tables where owner = :1 and table_name = :2 "
+            "union all select view_name from all_views where owner = :1 and view_name = :2",
+            [owner, candidate],
+        )
+        row = cursor.fetchone()
+        if row:
+            return str(row[0])
+    cursor.execute(
+        "select table_name from all_tables where owner = :1 and upper(table_name) = upper(:2) "
+        "union all select view_name from all_views where owner = :1 and upper(view_name) = upper(:2)",
+        [owner, wanted],
+    )
+    row = cursor.fetchone()
+    return str(row[0]) if row else wanted
+
+
 def describe_table(profile: dict, connection, table: str, schema: str | None) -> dict:
     kind = profile.get("kind")
     config = profile.get("config") or {}
     effective = schema or config.get("schema") or None
     columns: list[dict] = []
     primary: list[str] = []
+    owner: str | None = None
+    comment: str | None = None
+    column_comments: dict[str, str] = {}
+    extras: dict = {"foreignKeys": [], "indexes": [], "comment": None, "rowEstimate": None}
     cursor = connection.cursor()
     try:
         if kind == "sqlite":
@@ -1084,10 +1431,13 @@ def describe_table(profile: dict, connection, table: str, schema: str | None) ->
                 column["primaryKey"] = column["name"] in primary
         elif kind == "oracle":
             owner = (effective or config.get("user") or "").upper() or None
+            # Ask the catalog which spelling it stores: an unquoted table is
+            # folded to upper case, a quoted lower-case one keeps its case.
+            resolved = _oracle_catalog_name(cursor, owner, table)
             cursor.execute(
                 "select column_name, data_type, data_length, data_precision, data_scale, nullable, data_default "
                 "from all_tab_columns where owner = :1 and table_name = :2 order by column_id",
-                [owner, table.upper()],
+                [owner, resolved],
             )
             for name, data_type, length, precision, scale, nullable, default in cursor.fetchall():
                 type_name = data_type
@@ -1108,23 +1458,131 @@ def describe_table(profile: dict, connection, table: str, schema: str | None) ->
                 "select cc.column_name from all_constraints c join all_cons_columns cc "
                 "  on c.owner = cc.owner and c.constraint_name = cc.constraint_name "
                 "where c.constraint_type = 'P' and c.owner = :1 and c.table_name = :2 order by cc.position",
-                [owner, table.upper()],
+                [owner, resolved],
             )
             primary = [row[0] for row in cursor.fetchall()]
             for column in columns:
                 column["primaryKey"] = column["name"] in primary
+            table = resolved
         else:
             raise DbError("user_error", f"unsupported datasource kind: {kind}")
+        comment, column_comments = _describe_comments(kind, cursor, table, owner)
+        extras = _describe_extras(kind, cursor, table, owner)
     finally:
         cursor.close()
     if not columns:
         raise DbError("user_error", f"table not found: {table}", "call list_tables to see the available tables")
-    return {"table": table, "schema": effective, "columns": columns, "primaryKey": primary}
+    for column in columns:
+        if column_comments.get(column["name"]):
+            column["comment"] = column_comments[column["name"]]
+    return {
+        "table": table,
+        "schema": effective,
+        "columns": columns,
+        "primaryKey": primary,
+        "foreignKeys": extras["foreignKeys"],
+        "indexes": extras["indexes"],
+        "comment": comment or extras.get("comment"),
+        "rowEstimate": extras["rowEstimate"],
+    }
+
+
+# --------------------------------------------------------------------------- #
+# relations
+
+
+def _relations_sql(kind: str) -> tuple[str, bool]:
+    """One query that lists every foreign key in a schema.
+
+    Returns the statement and whether it takes the owner as a parameter. Doing it
+    in one round trip matters: the model asks this before writing joins, and a
+    per-table loop turns one tool call into a hundred.
+    """
+    if kind == "sqlite":
+        return "", False
+    if kind in PG_LIKE:
+        return (
+            "select tc.table_name, kcu.column_name, ccu.table_name, ccu.column_name, tc.constraint_name "
+            "from information_schema.table_constraints tc "
+            "join information_schema.key_column_usage kcu "
+            "  on kcu.constraint_name = tc.constraint_name and kcu.table_schema = tc.table_schema "
+            "join information_schema.constraint_column_usage ccu "
+            "  on ccu.constraint_name = tc.constraint_name and ccu.table_schema = tc.table_schema "
+            "where tc.constraint_type = 'FOREIGN KEY' and tc.table_schema = %s "
+            "order by tc.table_name, tc.constraint_name, kcu.ordinal_position",
+            True,
+        )
+    if kind == "mysql":
+        return (
+            "select table_name, column_name, referenced_table_name, referenced_column_name, constraint_name "
+            "from information_schema.key_column_usage "
+            "where table_schema = %s and referenced_table_name is not null "
+            "order by table_name, constraint_name, ordinal_position",
+            True,
+        )
+    if kind == "oracle":
+        return (
+            "select c.table_name, cc.column_name, rc.table_name, rcc.column_name, c.constraint_name "
+            "from all_constraints c "
+            "join all_cons_columns cc on cc.owner = c.owner and cc.constraint_name = c.constraint_name "
+            "join all_constraints rc on rc.owner = c.r_owner and rc.constraint_name = c.r_constraint_name "
+            "join all_cons_columns rcc on rcc.owner = rc.owner and rcc.constraint_name = rc.constraint_name "
+            "  and rcc.position = cc.position "
+            "where c.constraint_type = 'R' and c.owner = :1 "
+            "order by c.table_name, c.constraint_name, cc.position",
+            True,
+        )
+    return "", False
+
+
+def list_relations(profile: dict, connection, schema: str | None, limit: int = 500) -> dict:
+    """Every foreign key in one schema, as flat rows ready to become joins."""
+    kind = profile.get("kind")
+    config = profile.get("config") or {}
+    effective = schema or config.get("schema") or None
+    owner = effective or (config.get("database") if kind == "mysql" else "public")
+    if kind == "oracle":
+        owner = (effective or config.get("user") or "").upper() or None
+    relations: list[dict] = []
+    cursor = connection.cursor()
+    try:
+        if kind == "sqlite":
+            # SQLite has no catalog-wide foreign-key view: walk the tables.
+            cursor.execute(
+                "select name from sqlite_master where type = 'table' and name not like 'sqlite_%' order by name"
+            )
+            names = [row[0] for row in cursor.fetchall()]
+            for name in names:
+                for entry in _sqlite_foreign_keys(cursor, name):
+                    relations.append({"table": name, **entry})
+        else:
+            statement, takes_owner = _relations_sql(kind)
+            if not statement:
+                raise DbError("user_error", f"unsupported datasource kind: {kind}")
+            cursor.execute(statement, (owner,) if kind in PG_LIKE or kind == "mysql" else [owner])
+            for table, column, ref_table, ref_column, name in cursor.fetchall():
+                relations.append(
+                    {
+                        "table": table,
+                        "column": column,
+                        "refTable": ref_table,
+                        "refColumn": ref_column,
+                        "name": name,
+                    }
+                )
+    finally:
+        cursor.close()
+    truncated = len(relations) > limit
+    return {
+        "schema": effective,
+        "relations": relations[:limit],
+        "truncated": truncated,
+        "total": len(relations),
+    }
 
 
 # --------------------------------------------------------------------------- #
 # DDL
-
 
 def table_ddl(profile: dict, connection, table: str, schema: str | None = None) -> dict:
     """Return a CREATE TABLE statement for one table.
@@ -1160,10 +1618,14 @@ def table_ddl(profile: dict, connection, table: str, schema: str | None = None) 
 
     info = describe_table(profile, connection, table, schema)
     effective = info.get("schema") or None
+    # `describe_table` resolves the spelling Oracle actually stores; quote that,
+    # not the argument, or a quoted lower-case table comes back upper-cased.
+    resolved = info.get("table") or table
+    quote = _quote_exact if kind == "oracle" else _quote
     if effective and kind in ("postgres", "gauss", "oracle", "mysql"):
-        target = f"{_quote(kind, effective)}.{_quote(kind, table)}"
+        target = f"{_quote(kind, effective)}.{quote(kind, resolved)}"
     else:
-        target = _quote(kind, table)
+        target = quote(kind, resolved)
 
     lines: list[str] = []
     for column in info["columns"]:
@@ -1288,7 +1750,17 @@ def connection_autocommit(kind: str) -> bool:
 
 
 def sample_rows(profile: dict, connection, table: str, limit: int, schema: str | None) -> dict:
-    sql = f"SELECT * FROM {qualified(profile, table)}{_limit_clause(profile.get('kind'), limit)}"
+    kind = profile.get("kind")
+    if kind == "oracle":
+        # Resolve the spelling the catalog stores before quoting: `_quote` folds
+        # to upper case, which misses a table created with a quoted lower-case name.
+        owner = ((schema or (profile.get("config") or {}).get("schema") or (profile.get("config") or {}).get("user") or "") or "").upper() or None
+        cursor = connection.cursor()
+        try:
+            table = _oracle_catalog_name(cursor, owner, table)
+        finally:
+            cursor.close()
+    sql = f"SELECT * FROM {qualified(profile, table, exact=True)}{_limit_clause(kind, limit)}"
     result = execute_sql(profile, connection, sql, limit)
     result["table"] = table
     result["schema"] = schema or (profile.get("config") or {}).get("schema") or None

@@ -95,7 +95,8 @@ memory before `max_rows` trims it; writes keep the ordinary cursor.
 | ---- | ---------- | ------- |
 | `list_datasources` | — | `[{ id, name, kind, target, readOnly, isDefault }]` |
 | `list_tables` | `datasource?`, `schema?` | `{ datasource, tables: [{ schema, name, type }], schemas: [string] }` |
-| `describe_table` | `table`, `datasource?`, `schema?` | `{ columns: [{ name, type, nullable, default, primaryKey }] }` |
+| `describe_table` | `table`, `datasource?`, `schema?` | `{ columns: [{ name, type, nullable, default, primaryKey, comment? }], primaryKey, foreignKeys, indexes, comment, rowEstimate }` |
+| `list_relations` | `datasource?`, `schema?` | `{ relations: [{ table, column, refTable, refColumn, name }], truncated, total }` |
 | `sample_rows` | `table`, `datasource?`, `limit=20`, `schema?` | `{ columns, rows, rowCount, truncated }` |
 | `execute_sql` | `sql`, `datasource?`, `max_rows?`, `full_text?` | `{ columns, rows, rowCount, truncated, elapsedMs }`, or `{ affectedRows }` for a write |
 | `explain_query` | `sql`, `datasource?` | `{ sql, plan }` (engine-specific text) |
@@ -103,7 +104,7 @@ memory before `max_rows` trims it; writes keep the ordinary cursor.
 | `test_connection` | `datasource?` or `kind`+`config`+`password?`, `read_only?` | `{ ok, latencyMs, message, detail: { stage, server, database, user, schema } }` |
 | `session_scope` | `datasources?`, `all?` | the limit saved for this conversation; `all: true` or an empty list lifts it |
 
-`session_scope` is not an MCP tool: the Host registers it next to the eight bridged
+`session_scope` is not an MCP tool: the Host registers it next to the nine bridged
 ones so a conversation can narrow itself. While a limit is saved for the calling
 conversation, `list_datasources` only returns the allowed rows, a call that names
 another source fails with `user_error`, and a call that omits `datasource` either
@@ -187,10 +188,12 @@ and `execute_sql` when the model does not name one. Out-of-range values fall bac
 defaults.
 `textPolicy` is `auto` (default) or `full`: how a cell longer than 200 characters is
 rendered into the model context. `auto` keeps the first and last 50 characters around a
-`…(共N字)…` marker, `full` returns the value untouched, and blob cells are compressed to a
-size tag either way. The policy is applied when the result is rendered, so the rows
-themselves are never truncated. An unknown value falls back to `auto`; the Python server
-reads it from `DB_MCP_TEXT_POLICY` at spawn time, so changing it restarts the child.
+`…(N chars)…` marker, `full` returns the value untouched, and blob cells are compressed to a
+size tag either way. The marker is English like every other string the Python server emits:
+it has no locale service to ask, and a reader that is a model does not need one. The policy
+is applied when the result is rendered, so the rows themselves are never truncated. An
+unknown value falls back to `auto`; the Python server reads it from `DB_MCP_TEXT_POLICY` at
+spawn time, so changing it restarts the child.
 `disabledTools` lists tool names without the `mcp__db__` prefix (for example `["get_ddl"]`):
 those are left out of the agent's registry, while the Python server keeps serving them over
 stdio and HTTP.

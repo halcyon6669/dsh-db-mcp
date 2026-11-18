@@ -23,6 +23,19 @@ report of each version in more detail.
 
 ### Added
 
+- **`describe_table` answers the join questions, and `list_relations` answers them
+  for a whole schema.** Knowing the columns is not enough to write a correct join:
+  the model also needs what each column points at, which columns are indexed, what
+  the team calls the table, and roughly how big it is. `describe_table` now returns
+  `foreignKeys`, `indexes` (name, columns, unique), the table and per-column
+  `comment`, and `rowEstimate` — the planner's number, not a `count(*)`. The new
+  `list_relations` returns every foreign key in one schema as flat rows
+  `{table, column, refTable, refColumn, name}`, so a multi-table query costs one call
+  instead of one describe per table. Anything the engine or the grants cannot answer
+  comes back as `[]` or `null` rather than failing the call, and an Oracle table
+  created with a quoted lower-case name now resolves: the catalog is asked which
+  spelling it stores instead of folding the name to upper case.
+
 - **A statement deadline, and reads that stop fetching early.** `connect_timeout` was
   the only bound on a call, so a runaway query could occupy the child until the server
   gave up, and a `SELECT` over a large table pulled the whole result set into memory
