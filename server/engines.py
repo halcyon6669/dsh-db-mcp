@@ -232,6 +232,21 @@ def _allowed_pragma(sql: str, kind: str) -> bool:
     return True
 
 
+def _returns_rows(sql: str) -> bool:
+    """Whether a statement is worth a server-side cursor.
+
+    Only these shapes produce a result set the caller iterates. A `SET`, `SHOW` or
+    a bare `EXPLAIN` returns a handful of rows, and PostgreSQL refuses to put them
+    behind a named cursor at all (it rewrites to `DECLARE … CURSOR FOR <sql>`).
+    """
+    keyword = writes.keyword(sql)
+    if keyword == "with":
+        # A data-modifying CTE returns its RETURNING rows, so it does read; a plain
+        # `with … select` is a read either way. Both are safe behind a cursor.
+        return True
+    return keyword in ("select", "values", "table")
+
+
 def read_only_statement(sql: str, kind: str) -> bool:
     """Whether this one statement only reads, for this engine.
 
@@ -1014,12 +1029,33 @@ def list_tables(profile: dict, connection, schema: str | None, limit: int = 500)
             rows = [[name, "view" if "VIEW" in str(kind_of).upper() else "table", owner] for owner, name, kind_of in cursor.fetchall()]
         elif kind == "oracle":
             owner = (effective or config.get("user") or "").upper() or None
-            cursor.execute(
-                "select owner, table_name, 'TABLE' from all_tables where owner = :1 "
-                "union all select owner, view_name, 'VIEW' from all_views where owner = :2 "
-                "order by 1, 2",
-                [owner, owner],
-            )
+            # Oracle keeps its own catalogue objects (MVIEW$_ADV_* and friends) in
+            # the same namespace as the user's tables, so `all_tables` alone lists
+            # mostly Oracle's bookkeeping. `ALL_OBJECTS.ORACLE_MAINTAINED = 'N'`
+            # is the flag that separates them, and it is what a browser of the
+            # schema wants. Pre-12c catalogues have no such column, so that query
+            # falls back to the plain listing rather than failing.
+            try:
+                cursor.execute(
+                    "select t.owner, t.table_name, 'TABLE' from all_tables t "
+                    "join all_objects o on o.owner = t.owner and o.object_name = t.table_name "
+                    "  and o.object_type = 'TABLE' "
+                    "where o.owner = :1 and o.oracle_maintained = 'N' "
+                    "union all "
+                    "select v.owner, v.view_name, 'VIEW' from all_views v "
+                    "join all_objects o on o.owner = v.owner and o.object_name = v.view_name "
+                    "  and o.object_type = 'VIEW' "
+                    "where o.owner = :2 and o.oracle_maintained = 'N' "
+                    "order by 1, 2",
+                    [owner, owner],
+                )
+            except Exception:  # noqa: BLE001 - a catalogue older than 12c
+                cursor.execute(
+                    "select owner, table_name, 'TABLE' from all_tables where owner = :1 "
+                    "union all select owner, view_name, 'VIEW' from all_views where owner = :2 "
+                    "order by 1, 2",
+                    [owner, owner],
+                )
             rows = [[name, "view" if kind_of == "VIEW" else "table", owner_name] for owner_name, name, kind_of in cursor.fetchall()]
         else:
             raise DbError("user_error", f"unsupported datasource kind: {kind}")
@@ -1109,11 +1145,16 @@ def _sqlite_indexes(cursor, table: str) -> list[dict]:
 
 
 def _pg_foreign_keys(cursor, table: str, owner: str) -> list[dict]:
+    # A constraint name only has to be unique within its table, so the join needs
+    # table_name too: otherwise two tables that both call a key `fk_owner` swap
+    # column lists. (Oracle's constraint names are unique per owner, so its
+    # queries join on owner and name alone.)
     cursor.execute(
         "select kcu.column_name, ccu.table_name, ccu.column_name, tc.constraint_name "
         "from information_schema.table_constraints tc "
         "join information_schema.key_column_usage kcu "
         "  on kcu.constraint_name = tc.constraint_name and kcu.table_schema = tc.table_schema "
+        "  and kcu.table_name = tc.table_name "
         "join information_schema.constraint_column_usage ccu "
         "  on ccu.constraint_name = tc.constraint_name and ccu.table_schema = tc.table_schema "
         "where tc.constraint_type = 'FOREIGN KEY' "
@@ -1350,20 +1391,23 @@ def _oracle_catalog_name(cursor, owner: str | None, table: str) -> str:
     instead of guessing, so both kinds of table resolve.
     """
     wanted = str(table)
+    # oracledb (thin) counts every placeholder occurrence positionally, so the
+    # same `:1` written twice in a `union all` still wants two values. Number the
+    # four slots distinctly instead of repeating two.
+    check = (
+        "select table_name from all_tables where owner = :1 and table_name = :2 "
+        "union all select view_name from all_views where owner = :3 and view_name = :4"
+    )
+    fuzzy = (
+        "select table_name from all_tables where owner = :1 and upper(table_name) = upper(:2) "
+        "union all select view_name from all_views where owner = :3 and upper(view_name) = upper(:4)"
+    )
     for candidate in dict.fromkeys((wanted, wanted.upper())):
-        cursor.execute(
-            "select table_name from all_tables where owner = :1 and table_name = :2 "
-            "union all select view_name from all_views where owner = :1 and view_name = :2",
-            [owner, candidate],
-        )
+        cursor.execute(check, [owner, candidate, owner, candidate])
         row = cursor.fetchone()
         if row:
             return str(row[0])
-    cursor.execute(
-        "select table_name from all_tables where owner = :1 and upper(table_name) = upper(:2) "
-        "union all select view_name from all_views where owner = :1 and upper(view_name) = upper(:2)",
-        [owner, wanted],
-    )
+    cursor.execute(fuzzy, [owner, wanted, owner, wanted])
     row = cursor.fetchone()
     return str(row[0]) if row else wanted
 
@@ -1421,7 +1465,12 @@ def describe_table(profile: dict, connection, table: str, schema: str | None) ->
             cursor.execute(
                 "select kcu.column_name from information_schema.table_constraints tc "
                 "join information_schema.key_column_usage kcu "
+                # MySQL names every primary key `PRIMARY`, so the constraint name
+                # alone does not identify a table: without the table_name term the
+                # join pulls in the key columns of every table in the schema, and a
+                # single-column primary key comes back once per table.
                 "  on kcu.constraint_name = tc.constraint_name and kcu.table_schema = tc.table_schema "
+                "  and kcu.table_name = tc.table_name "
                 f"where tc.constraint_type = 'PRIMARY KEY' and tc.table_name = {placeholder} and tc.table_schema = {placeholder} "
                 "order by kcu.ordinal_position",
                 (table, owner),
@@ -1506,6 +1555,7 @@ def _relations_sql(kind: str) -> tuple[str, bool]:
             "from information_schema.table_constraints tc "
             "join information_schema.key_column_usage kcu "
             "  on kcu.constraint_name = tc.constraint_name and kcu.table_schema = tc.table_schema "
+            "  and kcu.table_name = tc.table_name "
             "join information_schema.constraint_column_usage ccu "
             "  on ccu.constraint_name = tc.constraint_name and ccu.table_schema = tc.table_schema "
             "where tc.constraint_type = 'FOREIGN KEY' and tc.table_schema = %s "
@@ -1521,6 +1571,9 @@ def _relations_sql(kind: str) -> tuple[str, bool]:
             True,
         )
     if kind == "oracle":
+        # `all_constraints` covers Oracle's own catalogue tables too, and those
+        # carry dozens of internal foreign keys. Join `all_objects` to keep only
+        # the tables the user created.
         return (
             "select c.table_name, cc.column_name, rc.table_name, rcc.column_name, c.constraint_name "
             "from all_constraints c "
@@ -1528,6 +1581,8 @@ def _relations_sql(kind: str) -> tuple[str, bool]:
             "join all_constraints rc on rc.owner = c.r_owner and rc.constraint_name = c.r_constraint_name "
             "join all_cons_columns rcc on rcc.owner = rc.owner and rcc.constraint_name = rc.constraint_name "
             "  and rcc.position = cc.position "
+            "join all_objects o on o.owner = c.owner and o.object_name = c.table_name "
+            "  and o.object_type = 'TABLE' and o.oracle_maintained = 'N' "
             "where c.constraint_type = 'R' and c.owner = :1 "
             "order by c.table_name, c.constraint_name, cc.position",
             True,
@@ -1650,15 +1705,20 @@ def table_ddl(profile: dict, connection, table: str, schema: str | None = None) 
 # queries
 
 
-def _read_cursor(connection, kind: str, is_write: bool):
+def _read_cursor(connection, kind: str, is_write: bool, statement: str = ""):
     """A cursor that does not pull the whole result set into memory.
 
     A client-side cursor fetches every row on `execute()`, so `max_rows` only
     trimmed what was *rendered* while the driver had already buffered a million
     rows. A server-side cursor sends the query and reads rows on demand, which is
     what makes the row cap a real bound on memory.
+
+    Only a statement that returns rows may be wrapped: PostgreSQL's named cursor
+    becomes `DECLARE … CURSOR FOR <sql>`, and a `SET`, `SHOW` or `EXPLAIN` is not
+    legal there. Those go through the ordinary cursor — they return a handful of
+    rows at most.
     """
-    if is_write:
+    if is_write or not _returns_rows(statement):
         return connection.cursor()
     try:
         if kind in PG_LIKE:
@@ -1684,7 +1744,7 @@ def execute_sql(profile: dict, connection, sql: str, max_rows: int, full_text: b
     is_write = not read_only_statement(statement, kind)
     if kind == "sqlite":
         _arm_sqlite_timeout(connection)
-    cursor = _read_cursor(connection, kind, is_write)
+    cursor = _read_cursor(connection, kind, is_write, statement)
     affected = None
     try:
         if kind == "oracle" and profile.get("readOnly"):

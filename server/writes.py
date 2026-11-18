@@ -32,7 +32,15 @@ DDL_STARTERS = (
 
 
 class WriteBlocked(Exception):
-    """A statement the source's DDL switch does not allow."""
+    """A statement the source's DDL switch does not allow.
+
+    `code` matches the shape of `DbError` and `StoreError`, so `main._error` can
+    report it without a special case. It says `user_error` because that is what
+    the caller is told: `engines.ensure_readable` turns this into a `DbError`, and
+    a refusal is a mistake in the request, not a fault of the engine.
+    """
+
+    code = "user_error"
 
     def __init__(self, message: str, hint: str | None = None):
         super().__init__(message)

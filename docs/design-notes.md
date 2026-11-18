@@ -215,7 +215,7 @@
 - 服务名 `db` → 工具名 `mcp__db__execute_sql`。
 - 所有工具第一个参数 `datasource`（省略时先找 `isDefault`，再退回第一项）。
 - 返回结构化结果：`columns[{name,type}]`、`rows[][]`、`rowCount`、`truncated`、`elapsedMs`；写操作返回 `affectedRows`。
-- 错误分级：`user_error`（参数错/源不存在）、`db_error`（SQL/权限）、`infra_error`（驱动/超时/进程）。
+- 错误分级：`user_error`（参数错/源不存在/写入被守卫拒绝）、`db_error`（SQL 语法错、权限、表不存在等驱动抛出的错误）、`timeout`（语句超过 `DB_MCP_STATEMENT_TIMEOUT_MS` 被中止）、`infra_error`（驱动没装、venv 坏了、注册表读不了——只留给「插件自己没走到那一步」）。
 
 | ID | 工具 | 作用 | 优先级 |
 |---|---|---|---|
@@ -368,7 +368,7 @@ Host `Config` 只剩引导阶段需要的几项：
 | SQLite 文件被删 | 预览/查询报 `db_error`，配置保留，提示重指路径 |
 | 数据源 id 冲突 | 保存拒绝并高亮字段 |
 | 密码含特殊字符/中文 | 全链路正常（凭据库 + JSON 转义） |
-| 查询超时 | 返回 `infra_error: timeout`，连接回收，无悬挂会话 |
+| 查询超时 | 返回 `timeout`（语句超过 `DB_MCP_STATEMENT_TIMEOUT_MS`），连接回收，无悬挂会话 |
 | 结果含二进制 | 以 `<binary N bytes>` 占位，不把二进制塞进上下文 |
 | 单元格超长文本 | 截断到 2000 字符并标记 |
 | Oracle `serviceName` 写错 | 报「服务名不可用」，不笼统报连接失败 |

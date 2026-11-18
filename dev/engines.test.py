@@ -911,6 +911,78 @@ class Relations(unittest.TestCase):
         self.assertEqual(result["total"], 0)
 
 
+class RecordingCursor(RoutingCursor):
+    """RoutingCursor that also keeps the bind values, in order.
+
+    oracledb counts every placeholder occurrence positionally, and a repeated
+    `:1` written twice in a `union all` still wants two values. Only the count
+    is observable here, and the count is exactly what went wrong.
+    """
+
+    def __init__(self, answers: dict, fail: tuple = ()):
+        super().__init__(answers, fail)
+        self.binds: list[list] = []
+
+    def execute(self, sql, params=None) -> None:
+        self.binds.append(list(params) if params is not None else [])
+        super().execute(sql, params)
+
+
+class SqlShapes(unittest.TestCase):
+    """The shapes of the statements the extras ask, checked against real engines.
+
+    Each case here is a bug that only appeared against a live server: unit tests
+    with canned rows cannot see a missing join term or a bind count.
+    """
+
+    def test_mysql_primary_key_query_pins_the_table_name(self):
+        # MySQL calls every primary key `PRIMARY`, so the constraint name alone
+        # joins the key columns of every table in the schema: a single-column key
+        # came back as `id, id, id, id` on a three-table database.
+        cursor = RoutingCursor(
+            {
+                "from information_schema.columns": [("id", "int", "NO", None, None, None, None)],
+                "PRIMARY KEY": [("id",)],
+            }
+        )
+        engines.describe_table(profile("mysql"), FakeConnection(cursor), "orders", None)
+        primary = [text for text in cursor.executed if "PRIMARY KEY" in text]
+        self.assertTrue(primary, "the primary-key query never ran")
+        self.assertIn("kcu.table_name = tc.table_name", primary[0])
+
+    def test_postgres_foreign_key_query_pins_the_table_name(self):
+        # Constraint names are unique per table in PostgreSQL, not per schema, so
+        # the same missing term pulled in keys from sibling tables.
+        cursor = RoutingCursor({"FOREIGN KEY": []})
+        engines._pg_foreign_keys(cursor, "orders", "public")
+        self.assertIn("kcu.table_name = tc.table_name", cursor.executed[0])
+
+    def test_oracle_lists_only_tables_a_user_made(self):
+        # `all_tables` in a SYSTEM schema is mostly Oracle's own catalogue
+        # (MVIEW$_ADV_*, 19 objects on an empty database). ORACLE_MAINTAINED is
+        # the flag that separates them.
+        statement, takes_owner = engines._relations_sql("oracle")
+        self.assertTrue(takes_owner)
+        self.assertIn("oracle_maintained = 'N'", statement)
+
+    def test_oracle_catalog_name_binds_every_placeholder(self):
+        # `union all` repeats :1 and :2, and oracledb wants four values for four
+        # occurrences even though only two names are written.
+        cursor = RecordingCursor({"table_name": [("lower_t",)]})
+        self.assertEqual(engines._oracle_catalog_name(cursor, "TEST", "lower_t"), "lower_t")
+        self.assertEqual([len(binds) for binds in cursor.binds], [4])
+
+    def test_a_session_setting_does_not_get_a_server_side_cursor(self):
+        # psycopg rewrites a named cursor as `DECLARE … CURSOR FOR <sql>`, and a
+        # `SET` is not legal there: it came back as a syntax error.
+        plain = FakeCursor(description=[], rows=[])
+        named = FakeCursor(description=[], rows=[])
+        connection = ServerSideCursorConnection(plain, named)
+        engines.execute_sql(profile("postgres"), connection, "set search_path to public", 200)
+        self.assertEqual(connection.named_calls, 0)
+        self.assertEqual(plain.executed, ["set search_path to public"])
+
+
 class CellPolicy(unittest.TestCase):
     """`_cell` summarises long text under `auto`, keeps it under `full`."""
 

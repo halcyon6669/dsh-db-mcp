@@ -136,9 +136,14 @@ def _error(error: Exception) -> dict:
         if error.hint:
             payload["error"]["hint"] = error.hint
         return payload
+    # A driver exception that reached this far is almost always about the SQL
+    # itself (a syntax error, a missing table) rather than about the plugin's own
+    # machinery, so it is a `db_error`. `infra_error` is reserved for the cases
+    # that really are ours — see `engines` where the driver is imported and the
+    # connection is opened.
     return {
         "ok": False,
-        "error": {"code": "infra_error", "message": f"{type(error).__name__}: {error}"},
+        "error": {"code": "db_error", "message": f"{type(error).__name__}: {error}"},
     }
 
 
