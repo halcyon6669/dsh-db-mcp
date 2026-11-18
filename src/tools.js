@@ -467,6 +467,7 @@ export function createBridge({
     }
     const current = settings ? await settings().catch(() => ({ allowWrite: false })) : { allowWrite: false };
     const allowWrite = current && current.allowWrite === true;
+    const textPolicy = current && current.textPolicy ? current.textPolicy : 'auto';
     disabledTools = Array.isArray(current && current.disabledTools)
       ? current.disabledTools.map((name) => String(name || '').trim()).filter(Boolean)
       : [];
@@ -491,6 +492,7 @@ export function createBridge({
           PYTHONUTF8: '1',
           DB_MCP_RUNTIME: runtimeDir,
           DB_MCP_ALLOW_WRITE: allowWrite ? '1' : '0',
+          DB_MCP_TEXT_POLICY: textPolicy,
         },
         label: `db-mcp (${candidate})`,
       });
@@ -704,6 +706,7 @@ export function createBridge({
         PYTHONUTF8: '1',
         DB_MCP_RUNTIME: runtimeDir,
         DB_MCP_ALLOW_WRITE: current && current.allowWrite === true ? '1' : '0',
+        DB_MCP_TEXT_POLICY: current && current.textPolicy ? current.textPolicy : 'auto',
       }),
       windowsHide: true,
     });

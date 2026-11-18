@@ -1115,6 +1115,12 @@ export function createHost(options = {}) {
     return limits
   }
 
+  /** How long text cells are rendered into the model context. */
+  const TEXT_POLICIES = ['auto', 'full', 'headtail']
+  function textPolicy(value) {
+    return TEXT_POLICIES.includes(value) ? value : 'auto'
+  }
+
   async function readSettings() {
     const read = await readJson(settingsFile)
     const value = cleanRecord(read.value)
@@ -1134,6 +1140,7 @@ export function createHost(options = {}) {
             .slice(0, 32)
         : [],
       limits: rowLimits(value.limits),
+      textPolicy: textPolicy(value.textPolicy),
       httpPort:
         Number.isInteger(port) && port >= HTTP_PORT_MIN && port <= HTTP_PORT_MAX ? port : HTTP_PORT_DEFAULT,
       updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : null,
@@ -1158,6 +1165,7 @@ export function createHost(options = {}) {
               .map((name) => name.trim())
               .slice(0, 32),
       limits: rowLimits(patch.limits === undefined ? current.limits : patch.limits),
+      textPolicy: textPolicy(patch.textPolicy === undefined ? current.textPolicy : patch.textPolicy),
       httpPort: port,
       updatedAt: isoNow(),
     }
@@ -2091,7 +2099,8 @@ export function createHost(options = {}) {
           return sendJson(response, 200, {
             ok: true,
             disabled: settingsNow.disabledTools || [],
-      limits: settingsNow.limits,
+            limits: settingsNow.limits,
+            textPolicy: settingsNow.textPolicy,
             tools: listing.tools,
             scopeTool: listing.scopeTool,
           })
@@ -2172,6 +2181,7 @@ export function createHost(options = {}) {
           auditLog: payload.auditLog,
           disabledTools: payload.disabledTools,
           limits: payload.limits,
+          textPolicy: payload.textPolicy,
           httpEnabled: payload.httpEnabled,
           httpPort: payload.httpPort,
         })
@@ -2179,7 +2189,8 @@ export function createHost(options = {}) {
         if (
           payload.allowWrite !== undefined ||
           payload.disabledTools !== undefined ||
-          payload.limits !== undefined
+          payload.limits !== undefined ||
+          payload.textPolicy !== undefined
         ) {
           void bridge.restart().catch(() => {})
         }
@@ -2187,7 +2198,7 @@ export function createHost(options = {}) {
            process has to be replaced too — restarting only the stdio one leaves
            every outside client on the old answer. The stdio restart above and
            this one are independent; neither waits for the other. */
-        if (payload.allowWrite !== undefined) {
+        if (payload.allowWrite !== undefined || payload.textPolicy !== undefined) {
           void bridge.restartHttp().catch(() => {})
         }
         return sendJson(response, 200, { ok: true, settings })

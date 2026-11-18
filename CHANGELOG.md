@@ -23,6 +23,15 @@ report of each version in more detail.
 
 ### Added
 
+- **Long text in query results is summarised before it reaches the model.** A new
+  "Long text in results" setting on the Tools card picks how cell values are
+  rendered into the model context: `Auto` keeps a head/tail fragment (first and
+  last 50 characters) of every cell longer than 200 characters, `Full` returns
+  everything, and `Head+Tail` is the same as `Auto`. The policy applies in the
+  render step, so the underlying rows are never thrown away — the model just
+  stops being flooded by walls of text. Binary/blob cells are untouched (they
+  were already compressed to a size tag).
+
 - **A ticked block of sources drags as one.** Grab the handle of any checked row
   and the whole selection travels together, keeping its own order, and lands above
   or below the row it was dropped on. Dropping on a group moves all of them.

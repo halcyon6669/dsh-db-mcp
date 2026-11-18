@@ -246,5 +246,57 @@ class RenderContract(unittest.TestCase):
         self.assertEqual(result["affectedRows"], 2)
 
 
+class CellPolicy(unittest.TestCase):
+    """`_cell` summarises long text under `auto`/`headtail`, keeps it under `full`."""
+
+    def _set_policy(self, policy: str) -> None:
+        engines.TEXT_POLICY = policy
+
+    def test_short_text_is_untouched_under_auto(self):
+        self._set_policy("auto")
+        self.assertEqual(engines._cell("hello"), "hello")
+
+    def test_long_text_is_summarised_under_auto(self):
+        self._set_policy("auto")
+        long = "x" * 300
+        rendered = engines._cell(long)
+        self.assertTrue(rendered.startswith("x" * 50))
+        self.assertTrue(rendered.endswith("x" * 50))
+        self.assertIn("…(共300字)…", rendered)
+        self.assertLess(len(rendered), 200)
+
+    def test_headtail_behaves_like_auto(self):
+        self._set_policy("headtail")
+        long = "a" * 250
+        rendered = engines._cell(long)
+        self.assertTrue(rendered.startswith("a" * 50))
+        self.assertTrue(rendered.endswith("a" * 50))
+        self.assertIn("…(共250字)…", rendered)
+
+    def test_full_keeps_the_whole_cell(self):
+        self._set_policy("full")
+        long = "b" * 300
+        self.assertEqual(engines._cell(long), long)
+
+    def test_max_text_truncation_still_applies_under_full(self):
+        self._set_policy("full")
+        huge = "c" * (engines.MAX_TEXT + 100)
+        rendered = engines._cell(huge)
+        self.assertEqual(len(rendered), engines.MAX_TEXT + len("… (+100)"))
+        self.assertIn("(+100)", rendered)
+
+    def test_blob_is_never_summarised(self):
+        self._set_policy("auto")
+        blob = b"\x01\x02" * 5000
+        rendered = engines._cell(blob)
+        self.assertTrue(rendered.startswith(f"<{len(blob)} bytes> "))
+        self.assertNotIn("(共", rendered)
+
+    def test_numbers_and_nulls_are_untouched_under_auto(self):
+        self._set_policy("auto")
+        self.assertEqual(engines._cell(None), None)
+        self.assertEqual(engines._cell(42), 42)
+
+
 if __name__ == "__main__":
     sys.exit(unittest.main(verbosity=2))

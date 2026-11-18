@@ -135,7 +135,10 @@ for real before you commit the source.
 flagged `isDefault` (or the first one in the registry).
 Queries run **in the conversation**; the panel is for managing connections, not a
 SQL console. The **Tools** tab can hide the ones you never use — fewer distractions,
-smaller tool list in the model's context.
+smaller tool list in the model's context. The same tab picks how long text cells
+are rendered into the model: `Auto` keeps a head/tail fragment of cells longer than
+200 characters, `Full` returns them untouched. Rows are never discarded, only the
+text the model sees is bounded.
 
 ## Safety
 
