@@ -50,9 +50,11 @@ process the panel manages. Every client reads the same `datasources.json` and
 `secrets.json`, so a source added in the panel shows up everywhere without a restart
 of the client — only of the MCP server itself.
 
-Two things are DSH-only and are **not** available to those clients: the audit log
-(written by the plugin's host half) and the per-conversation limit (it keys off the
-DSH conversation id). Read-only enforcement still applies, because it lives in Python.
+One rule is DSH-only and is **not** available to those clients: the per-conversation
+limit (it keys off the DSH conversation id). The audit log used to be in that group and
+no longer is: the HTTP child records its own calls, so an outside client's tool call
+lands in the same `logs/audit.jsonl` the panel reads. Read-only enforcement still
+applies, because it lives in Python.
 
 The **Tools** tab shows **Tools the agent sees** — one row per tool with
 a switch. Switching a tool off stops the plugin from publishing it, so the model never

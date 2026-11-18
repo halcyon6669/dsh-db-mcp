@@ -23,6 +23,15 @@ report of each version in more detail.
 
 ### Added
 
+- **Outside MCP clients reach the audit log.** A client pointed straight at the
+  HTTP endpoint (VS Code, Cursor…) never passes through the Host, so its calls left
+  no line in `logs/audit.jsonl` — the very calls you would most want a record of.
+  The Python server now writes the log itself, in the shape the panel already parses
+  (no result rows, SQL cut to 2000 characters, rotating to `audit.1.jsonl` at
+  512 KiB). Each process writes only for itself: the Host keeps recording the stdio
+  child's calls, the HTTP child records its own, so one call still yields one line
+  and the agent's trail is unchanged.
+
 - **`describe_table` answers the join questions, and `list_relations` answers them
   for a whole schema.** Knowing the columns is not enough to write a correct join:
   the model also needs what each column points at, which columns are indexed, what

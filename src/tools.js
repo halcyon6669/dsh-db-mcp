@@ -735,6 +735,11 @@ export function createBridge({
         DB_MCP_RUNTIME: runtimeDir,
         DB_MCP_ALLOW_WRITE: current && current.allowWrite === true ? '1' : '0',
         DB_MCP_TEXT_POLICY: current && current.textPolicy ? current.textPolicy : 'auto',
+        // This child serves clients that never pass through the Host, so it has
+        // to write its own audit lines. The stdio child deliberately does not
+        // get this: the Host records those calls, and one call must not be
+        // logged twice.
+        DB_MCP_AUDIT: '1',
       }),
       windowsHide: true,
     });

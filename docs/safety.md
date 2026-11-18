@@ -53,7 +53,7 @@ the host half can apply to one. That line is the whole table:
 | `readOnly` per source | Python, re-read from the registry on every call | yes | yes |
 | `allowDdl` | Python, before the target schema is even resolved | yes | yes |
 | Per-conversation limit (`mcp__db__session_scope`) | Host, keyed by the DSH conversation id | yes | no — an outside client has no conversation to key off |
-| Audit log | Host, written by the wrapper around each tool call | yes | no — outside calls leave no line in `logs/audit.jsonl` |
+| Audit log | Python, one line per call from the process that ran it | yes | yes — the HTTP child writes the same file |
 | Row-count defaults (`sample_rows`, `execute_sql` in the panel) | Host, injected into the arguments before the call | yes | no — but the server's own hard cap still applies |
 | Rows switched off on the *Tools* tab | Host, filtered when the tools are registered | yes | no — the Python server still publishes every tool |
 
@@ -186,6 +186,12 @@ Every MCP tool call appends one JSON line to `<runtime>/logs/audit.jsonl` (0600)
 time, tool, source, duration, row count, the SQL truncated to 2000 characters, and
 the error when it failed. Result rows are never logged. The file rotates to
 `audit.1.jsonl` at 512 KiB and logging can be switched off with `auditLog: false`.
+
+The line is written by the Python process that ran the call, not by the Host. That
+matters for outside clients: a VS Code or Cursor pointed straight at the HTTP
+endpoint never passes through the Host, so a Host-side wrapper could not see it.
+Each process writes only for itself — the Host records the stdio child's calls, the
+HTTP child records its own — so one call still leaves exactly one line.
 
 The panel shows the last dozen entries **on your own clock**, date included, so a
 call from yesterday is not mistaken for one from an hour ago; the file keeps UTC so

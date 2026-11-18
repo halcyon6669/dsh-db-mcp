@@ -220,6 +220,13 @@ data source.
 {"at":"2026-11-08T06:20:28.000Z","tool":"mcp__db__execute_sql","datasource":"pg-demo","ok":true,"ms":41,"rows":3,"sql":"select id, name from customers order by id"}
 ```
 
+The writer is the Python process that ran the call, which is what lets a call that
+came straight into the HTTP endpoint appear here. `DB_MCP_AUDIT=1` in the child's
+environment marks it as the one owning the file; the Host sets it for the HTTP child
+only and records the stdio child's calls itself, so a call never produces two lines.
+`auditLog: false` in `settings.json` stops the Python writer too — it re-reads the
+file on every call, so no restart is needed.
+
 ### Data source fields
 
 | Kind | `config` keys |
@@ -321,8 +328,10 @@ The bundle row in the profile accepts these options (all optional):
 | `debug` | `false` | log Host activity to the DSH console |
 
 The Python side reads `DB_MCP_RUNTIME`, `DB_MCP_ALLOW_WRITE`, `DB_MCP_TEXT_POLICY`,
-`DB_MCP_MAX_ROWS`, `DB_MCP_MAX_ROWS_HARD` and `DB_MCP_STATEMENT_TIMEOUT_MS`; the Host
-sets the first three when spawning. `DB_MCP_STATEMENT_TIMEOUT_MS` is read by the
+`DB_MCP_AUDIT`, `DB_MCP_MAX_ROWS`, `DB_MCP_MAX_ROWS_HARD` and
+`DB_MCP_STATEMENT_TIMEOUT_MS`; the Host sets the first four when spawning — and sets
+`DB_MCP_AUDIT=1` for the HTTP child only, because that child is the sole writer for
+calls that arrive over HTTP. `DB_MCP_STATEMENT_TIMEOUT_MS` is read by the
 Python child itself, so setting it in the environment before DSH starts is enough —
 it does not have to be a bundle option.
 

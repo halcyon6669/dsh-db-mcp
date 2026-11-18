@@ -11,6 +11,8 @@ edited in the panel are visible without a restart. Tools never return passwords.
 
 from __future__ import annotations
 
+import functools
+import inspect
 import json
 import os
 import sys
@@ -19,6 +21,7 @@ from typing import Any, Optional
 
 from mcp.server.fastmcp import FastMCP
 
+import audit
 import engines
 import writes
 import store
@@ -183,7 +186,45 @@ def _inline_profile(kind: str, config: Any, read_only: Optional[bool]) -> dict:
     }
 
 
+def _audited(fn):
+    """Record one audit line per call, when this process owns the log.
+
+    The Host's wrapper only sees the calls it forwarded itself, so a client pointed
+    straight at the HTTP endpoint would otherwise leave no trace. Every tool goes
+    through here; `audit.record` is a no-op unless the Host set `DB_MCP_AUDIT=1`,
+    which it does for the HTTP child only — so the stdio path keeps exactly one
+    writer and the file never gets two lines for one call.
+
+    `functools.wraps` keeps the signature FastMCP reads for the tool schema.
+    """
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        started = time.time()
+        # FastMCP calls tools by keyword, but a direct call in the tests may not:
+        # zip the extra positional ones back onto the parameter names so the
+        # recorded line always carries `datasource`, `sql` and `table`.
+        call = dict(kwargs)
+        names = list(inspect.signature(fn).parameters)
+        for index, value in enumerate(args):
+            if index < len(names):
+                call.setdefault(names[index], value)
+        outcome = None
+        failure = None
+        try:
+            outcome = fn(*args, **kwargs)
+            return outcome
+        except BaseException as error:  # noqa: BLE001 - re-raised, but logged first
+            failure = error
+            raise
+        finally:
+            audit.record(fn.__name__, call, started, outcome, failure)
+
+    return wrapper
+
+
 @mcp.tool()
+@_audited
 def test_connection(
     datasource: Optional[str] = None,
     kind: Optional[str] = None,
@@ -214,6 +255,7 @@ def test_connection(
 
 
 @mcp.tool()
+@_audited
 def list_datasources() -> dict:
     """List the database connections the user registered in DSH.
 
@@ -232,6 +274,7 @@ def list_datasources() -> dict:
 
 
 @mcp.tool()
+@_audited
 def list_tables(datasource: Optional[str] = None, schema: Optional[str] = None) -> dict:
     """List the tables and views of one datasource.
 
@@ -250,6 +293,7 @@ def list_tables(datasource: Optional[str] = None, schema: Optional[str] = None) 
 
 
 @mcp.tool()
+@_audited
 def describe_table(table: str, datasource: Optional[str] = None, schema: Optional[str] = None) -> dict:
     """Describe one table: columns, types, nullability, defaults and primary key.
 
@@ -272,6 +316,7 @@ def describe_table(table: str, datasource: Optional[str] = None, schema: Optiona
 
 
 @mcp.tool()
+@_audited
 def list_relations(datasource: Optional[str] = None, schema: Optional[str] = None) -> dict:
     """List every foreign key in one schema, so a join path is one call away.
 
@@ -291,6 +336,7 @@ def list_relations(datasource: Optional[str] = None, schema: Optional[str] = Non
 
 
 @mcp.tool()
+@_audited
 def sample_rows(
     table: str,
     datasource: Optional[str] = None,
@@ -311,6 +357,7 @@ def sample_rows(
 
 
 @mcp.tool()
+@_audited
 def execute_sql(
     sql: str,
     datasource: Optional[str] = None,
@@ -342,6 +389,7 @@ def execute_sql(
 
 
 @mcp.tool()
+@_audited
 def explain_query(sql: str, datasource: Optional[str] = None) -> dict:
     """Show the query plan of one statement, without running it.
 
@@ -359,6 +407,7 @@ def explain_query(sql: str, datasource: Optional[str] = None) -> dict:
 
 
 @mcp.tool()
+@_audited
 def get_ddl(table: str, datasource: Optional[str] = None, schema: Optional[str] = None) -> dict:
     """Show the CREATE TABLE statement of one table.
 
