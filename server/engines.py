@@ -543,33 +543,40 @@ def _pg_sslmode(config: dict) -> str | None:
     return None
 
 
-def _mysql_ssl(config: dict):
-    """An `ssl.SSLContext` for PyMySQL, or None to leave TLS off.
+def _mysql_tls(config: dict) -> dict:
+    """Keyword arguments that decide TLS for PyMySQL.
 
-    PyMySQL takes either a dict or a context; a context is used here so the
-    three DBeaver levels map to something exact. `preferred` cannot be honoured
-    — PyMySQL has no opportunistic TLS — so it falls back to the previous
-    behaviour (plaintext) and the docs say so.
+    PyMySQL 2.x negotiates TLS whenever the server offers it, so *not* passing
+    anything is already `prefer` — that is why the earlier version of this
+    function was wrong: `disable` returned None, which left the driver doing
+    opportunistic TLS, and a source that said `disable` was still encrypted.
+
+    Three shapes come back: `{}` for the driver default, `{"ssl_disabled": True}`
+    to refuse TLS outright, and `{"ssl": context}` for the levels that pin a
+    verification mode. `allow` means "plaintext first", which PyMySQL cannot do
+    — it has no fallback — so it maps to plaintext rather than to TLS.
     """
     value = str(config.get("sslMode") or "").strip().lower()
-    if not value or value in ("disable", "disabled", "preferred", "prefer"):
-        return None
+    if value in ("disable", "disabled", "allow"):
+        return {"ssl_disabled": True}
+    if not value or value in ("preferred", "prefer"):
+        return {}
     if value in ("required", "require"):
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
         context.check_hostname = False
         context.verify_mode = ssl.CERT_NONE
-        return context
+        return {"ssl": context}
     if value in ("verify_ca", "verify-ca"):
         context = ssl.create_default_context()
         context.check_hostname = False
         context.verify_mode = ssl.CERT_REQUIRED
-        return context
+        return {"ssl": context}
     if value in ("verify_identity", "verify-identity", "verify-full", "verify_full"):
         context = ssl.create_default_context()
         context.check_hostname = True
         context.verify_mode = ssl.CERT_REQUIRED
-        return context
-    return None
+        return {"ssl": context}
+    return {}
 
 
 def _pg_options(profile: dict) -> str | None:
@@ -833,7 +840,6 @@ def _connect_mysql(profile: dict, config: dict, password: str | None):
         import pymysql
     except ImportError as error:  # pragma: no cover - environment problem
         raise DbError("infra_error", f"PyMySQL is not installed: {error}", "run the plugin's Python setup again")
-    ssl_context = _mysql_ssl(config)
     try:
         connection = pymysql.connect(
             host=config.get("host") or "localhost",
@@ -844,7 +850,7 @@ def _connect_mysql(profile: dict, config: dict, password: str | None):
             connect_timeout=10,
             charset=config.get("charset") or "utf8mb4",
             autocommit=False,
-            **({"ssl": ssl_context} if ssl_context is not None else {}),
+            **_mysql_tls(config),
         )
     except Exception as error:  # noqa: BLE001 - driver specific exception types
         raise DbError("db_error", f"MySQL connection failed: {error}")

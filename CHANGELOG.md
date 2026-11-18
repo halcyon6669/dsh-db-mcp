@@ -134,6 +134,14 @@ report of each version in more detail.
   openGauss still skips certificate verification — that limitation is now written
   down in [docs/safety.md](docs/safety.md#tls) instead of being implicit.
 
+- **MySQL `disable` did not disable TLS.** PyMySQL 2.x negotiates TLS on its own
+  whenever the server offers it, so "pass no `ssl` argument" left the connection
+  encrypted: a source marked `disable` still came up with `Ssl_cipher` set. The
+  driver only refuses TLS when it is told `ssl_disabled=True`, which is what the
+  plugin now passes for `disable`, `disabled` and `allow`. `prefer` and an unset
+  field keep the driver default — opportunistic TLS, which is what `prefer` means
+  on this engine.
+
 - **A DBeaver connection behind an SSH tunnel was imported as if it were local.**
   DBeaver keeps the tunnel in `configuration.handlers` and writes the tunnel's
   *local* end into the connection fields, so the import produced a source pointing

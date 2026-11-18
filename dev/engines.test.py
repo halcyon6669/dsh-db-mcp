@@ -515,24 +515,31 @@ class SslMapping(unittest.TestCase):
         self.assertIsNone(engines._pg_sslmode({"sslMode": "on"}))
 
     def test_mysql_required_skips_verification(self):
-        context = engines._mysql_ssl({"sslMode": "required"})
+        context = engines._mysql_tls({"sslMode": "required"})["ssl"]
         self.assertIsNotNone(context)
         self.assertFalse(context.check_hostname)
         self.assertEqual(context.verify_mode, engines.ssl.CERT_NONE)
 
     def test_mysql_verify_identity_checks_the_hostname(self):
-        context = engines._mysql_ssl({"sslMode": "verify_identity"})
+        context = engines._mysql_tls({"sslMode": "verify_identity"})["ssl"]
         self.assertTrue(context.check_hostname)
         self.assertEqual(context.verify_mode, engines.ssl.CERT_REQUIRED)
 
     def test_mysql_verify_ca_checks_the_chain_only(self):
-        context = engines._mysql_ssl({"sslMode": "verify_ca"})
+        context = engines._mysql_tls({"sslMode": "verify_ca"})["ssl"]
         self.assertFalse(context.check_hostname)
         self.assertEqual(context.verify_mode, engines.ssl.CERT_REQUIRED)
 
-    def test_mysql_unset_and_disabled_leave_tls_off(self):
-        for mode in (None, "", "disable", "disabled", "preferred", "prefer"):
-            self.assertIsNone(engines._mysql_ssl({"sslMode": mode} if mode is not None else {}))
+    def test_mysql_disable_actually_turns_tls_off(self):
+        # PyMySQL 2.x negotiates TLS whenever the server offers it, so returning
+        # "no argument" for `disable` left the connection encrypted. The driver
+        # needs `ssl_disabled` to refuse it.
+        for mode in ("disable", "disabled", "allow"):
+            self.assertEqual(engines._mysql_tls({"sslMode": mode}), {"ssl_disabled": True})
+
+    def test_mysql_unset_and_prefer_leave_the_driver_default(self):
+        for mode in (None, "", "preferred", "prefer"):
+            self.assertEqual(engines._mysql_tls({"sslMode": mode} if mode is not None else {}), {})
 
 
 class RenderContract(unittest.TestCase):

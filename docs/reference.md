@@ -242,18 +242,24 @@ characters; `group` ≤ 48.
 
 ### `sslMode`
 
-Unset keeps the driver's own default (psycopg `prefer`, PyMySQL plaintext), so a
-source saved before the field existed behaves as it did. The two engines spell the
-levels differently; the plugin accepts either spelling on either engine and maps it:
+Unset keeps the driver's own default (psycopg `prefer`, PyMySQL negotiates TLS
+whenever the server offers it), so a source saved before the field existed behaves
+as it did. The two engines spell the levels differently; the plugin accepts either
+spelling on either engine and maps it:
 
 | Value | PostgreSQL (`psycopg`) | MySQL (`PyMySQL`) |
 | ----- | ---------------------- | ----------------- |
-| `disable` | no TLS | no TLS |
+| `disable` | no TLS | no TLS — the driver is told `ssl_disabled` |
 | `allow` / `preferred` | try plaintext first | no TLS — PyMySQL has no opportunistic mode |
-| `prefer` | try TLS first (default) | no TLS |
+| `prefer` | try TLS first (default) | driver default — TLS when the server offers it |
 | `require` / `required` | TLS, no certificate check | TLS, no certificate check |
 | `verify-ca` / `verify_ca` | TLS, chain checked | TLS, chain checked |
 | `verify-full` / `verify_identity` | TLS, chain and hostname checked | TLS, chain and hostname checked |
+
+MySQL needed a correction here: PyMySQL 2.x already negotiates TLS on its own, so
+`disable` cannot be expressed by *omitting* the argument — it has to pass
+`ssl_disabled=True`, which is what the plugin does now. Before that fix a source
+marked `disable` was still encrypted whenever the server supported it.
 
 An unrecognised value is ignored rather than failing the connection, so a typo
 cannot turn a working source into a broken one — it just leaves the default in
