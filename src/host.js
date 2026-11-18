@@ -53,6 +53,12 @@ const AUDIT_LIMIT_BYTES = 512 * 1024
 const PYTHON_CACHE_MS = 30_000
 const MAX_BODY_BYTES = 1024 * 1024
 const MAX_SOURCES = 32
+// Archived conversations keep their limits so unarchiving can hand them back.
+// The set is bounded: an archive nobody ever opens again must not grow forever.
+const MAX_ARCHIVED = 64
+// Titles come from the session log, which is a disk read; one panel refresh asks
+// for every listed conversation, so a short cache keeps that cheap.
+const TITLE_CACHE_MS = 60_000
 // Entry name other MCP clients see in their own configuration.
 const CLIENT_ENTRY = 'dsh-db-mcp'
 const HTTP_PORT_DEFAULT = 8765
@@ -1175,25 +1181,54 @@ export function createHost(options = {}) {
 
   const scopesFile = join(dir, SCOPES_FILE)
 
-  async function readScopes() {
-    const read = await readJson(scopesFile)
-    const raw = read.value && cleanRecord(read.value.sessions) ? read.value.sessions : {}
-    const sessions = {}
-    for (const [session, entry] of Object.entries(raw)) {
-      if (!session || !entry || typeof entry !== 'object') continue
-      const ids = Array.isArray(entry.ids)
-        ? entry.ids
-            .filter((id) => typeof id === 'string' && id.trim())
-            .map((id) => id.trim())
-            .slice(0, MAX_SOURCES)
-        : []
-      sessions[session] = { ids, updatedAt: typeof entry.updatedAt === 'string' ? entry.updatedAt : null }
-    }
-    return { file: scopesFile, error: read.error || null, sessions }
+  /** One stored limit, or null when the entry cannot be trusted. */
+  function cleanScope(entry) {
+    if (!entry || typeof entry !== 'object') return null
+    const ids = Array.isArray(entry.ids)
+      ? entry.ids
+          .filter((id) => typeof id === 'string' && id.trim())
+          .map((id) => id.trim())
+          .slice(0, MAX_SOURCES)
+      : []
+    return { ids, updatedAt: typeof entry.updatedAt === 'string' ? entry.updatedAt : null }
   }
 
-  async function writeScopes(sessions) {
-    await writeJsonAtomic(scopesFile, { schemaVersion: SCHEMA_VERSION, sessions }, 0o600)
+  /**
+   * `sessions` holds live limits; `archived` holds the ones parked by archiving
+   * so unarchiving can give them back. Both are plain id → limit maps.
+   */
+  async function readScopes() {
+    const read = await readJson(scopesFile)
+    const value = read.value || {}
+    const live = value && cleanRecord(value.sessions) === value.sessions ? value.sessions : {}
+    const parked = value && cleanRecord(value.archived) === value.archived ? value.archived : {}
+    const sessions = {}
+    for (const [session, entry] of Object.entries(live)) {
+      const clean = session ? cleanScope(entry) : null
+      if (clean) sessions[session] = clean
+    }
+    const archived = {}
+    for (const [session, entry] of Object.entries(parked)) {
+      const clean = session ? cleanScope(entry) : null
+      if (clean) archived[session] = clean
+    }
+    return { file: scopesFile, error: read.error || null, sessions, archived }
+  }
+
+  async function writeScopes(sessions, archived) {
+    const payload = { schemaVersion: SCHEMA_VERSION, sessions }
+    // Only written once something has been parked, so a fresh install keeps the
+    // file it always had.
+    if (archived && Object.keys(archived).length > 0) payload.archived = archived
+    await writeJsonAtomic(scopesFile, payload, 0o600)
+  }
+
+  /** Keep the parked set bounded: newest first, oldest dropped past the cap. */
+  function trimArchived(archived) {
+    const entries = Object.entries(archived)
+    if (entries.length <= MAX_ARCHIVED) return archived
+    entries.sort((a, b) => String(b[1].updatedAt || '').localeCompare(String(a[1].updatedAt || '')))
+    return Object.fromEntries(entries.slice(0, MAX_ARCHIVED))
   }
 
   async function setSessionScope(sessionId, ids) {
@@ -1211,67 +1246,183 @@ export function createHost(options = {}) {
     }
     const current = await readScopes()
     const sessions = { ...current.sessions }
+    const archived = { ...current.archived }
+    // An explicit choice for this conversation wins over a parked copy either way.
+    delete archived[session]
     if (wanted.length === 0) delete sessions[session]
     else sessions[session] = { ids: wanted, updatedAt: isoNow() }
-    await writeScopes(sessions)
-    return { ids: wanted, sessions }
+    await writeScopes(sessions, archived)
+    return { ids: wanted, sessions, archived }
   }
 
-  /** Drop the limits of the sessions the caller names; unknown ids are ignored. */
+  /**
+   * Drop the limits of the sessions the caller names; unknown ids are ignored.
+   * A manual removal also forgets any parked copy, so a conversation the user
+   * cleared on purpose does not come back on the next unarchive.
+   */
   async function removeSessionScopes(sessionsToDrop) {
     const wanted = new Set(
       (Array.isArray(sessionsToDrop) ? sessionsToDrop : []).map((id) => String(id || '').trim()).filter(Boolean),
     )
-    if (wanted.size === 0) return { removed: [], sessions: (await readScopes()).sessions }
+    if (wanted.size === 0) {
+      const listing = await readScopes()
+      return { removed: [], sessions: listing.sessions, archived: listing.archived }
+    }
     const current = await readScopes()
     const sessions = { ...current.sessions }
+    const archived = { ...current.archived }
     const removed = []
+    let parkedChanged = false
     for (const session of wanted) {
       if (sessions[session]) {
         delete sessions[session]
         removed.push(session)
       }
+      if (archived[session]) {
+        delete archived[session]
+        parkedChanged = true
+      }
     }
-    if (removed.length > 0) await writeScopes(sessions)
-    return { removed, sessions }
+    if (removed.length > 0 || parkedChanged) await writeScopes(sessions, archived)
+    return { removed, sessions, archived }
   }
 
-  /** Forget every conversation limit at once. */
+  /**
+   * Archiving hides a conversation from the panel, so its limit has to leave the
+   * visible list — but the user asked for that limit, and unarchiving brings the
+   * conversation back. Park it instead of dropping it.
+   */
+  async function parkSessionScope(sessionId) {
+    const session = String(sessionId || '').trim()
+    if (!session) return null
+    const current = await readScopes()
+    const entry = current.sessions[session]
+    if (!entry) return null
+    const sessions = { ...current.sessions }
+    delete sessions[session]
+    const archived = trimArchived({ ...current.archived, [session]: entry })
+    await writeScopes(sessions, archived)
+    return entry
+  }
+
+  /** Hand a parked limit back when its conversation leaves the archive. */
+  async function restoreSessionScope(sessionId) {
+    const session = String(sessionId || '').trim()
+    if (!session) return null
+    const current = await readScopes()
+    const entry = current.archived[session]
+    if (!entry) return null
+    const archived = { ...current.archived }
+    delete archived[session]
+    const sessions = { ...current.sessions, [session]: entry }
+    await writeScopes(sessions, archived)
+    return entry
+  }
+
+  /** Forget every conversation limit at once, parked ones included. */
   async function clearSessionScopes() {
     const current = await readScopes()
     const removed = Object.keys(current.sessions)
-    if (removed.length > 0) await writeScopes({})
-    return { removed, sessions: {} }
+    const parked = Object.keys(current.archived)
+    if (removed.length > 0 || parked.length > 0) await writeScopes({}, {})
+    return { removed, archived: parked, sessions: {} }
+  }
+
+  /**
+   * The title the user sees in the session list. `ctx.sessionQuery` folds it from
+   * the session log, so it works for archived conversations too; it is optional
+   * because the panel must render without it.
+   */
+  const titleCache = new Map()
+  async function sessionTitles(ids) {
+    const wanted = (Array.isArray(ids) ? ids : []).map((id) => String(id || '').trim()).filter(Boolean)
+    if (wanted.length === 0) return {}
+    const ctx = options.ctx
+    const engine = ctx && typeof ctx.get === 'function' ? ctx.get('sessionQuery') : null
+    const now = Date.now()
+    const out = {}
+    for (const id of wanted) {
+      const hit = titleCache.get(id)
+      if (hit && now - hit.at < TITLE_CACHE_MS) {
+        if (hit.title) out[id] = hit.title
+        continue
+      }
+      let title = null
+      if (engine && typeof engine.readTitle === 'function') {
+        try {
+          const snapshot = await engine.readTitle(id)
+          if (snapshot && typeof snapshot.title === 'string' && snapshot.title.trim()) title = snapshot.title.trim()
+        } catch {
+          // A missing or unreadable log simply leaves the row without a title.
+        }
+      }
+      titleCache.set(id, { at: now, title })
+      if (title) out[id] = title
+    }
+    return out
+  }
+
+  /** One listing entry per limited conversation, with the title when known. */
+  async function describeScopes(listing) {
+    const sessions = listing.sessions || {}
+    const archived = listing.archived || {}
+    const titles = await sessionTitles([...Object.keys(sessions), ...Object.keys(archived)])
+    const describe = (session, entry) => ({
+      session,
+      ids: entry.ids,
+      updatedAt: entry.updatedAt,
+      title: titles[session] || null,
+    })
+    return {
+      sessions: Object.entries(sessions).map(([session, entry]) => describe(session, entry)),
+      archived: Object.entries(archived).map(([session, entry]) => describe(session, entry)),
+    }
   }
 
   /**
    * A conversation that disappears should not keep a limit nobody can see any
    * more: the panel only lists live sessions, so a stale entry would accumulate
-   * forever. Both a disposed Session and an archived one count as gone.
+   * forever. Disposal is final; archiving is not, so that case parks the limit
+   * and unarchiving hands it back.
    */
   function watchSessionLifecycle() {
     const ctx = options.ctx
     if (!ctx) return () => {}
+    const on = typeof ctx.on === 'function' ? ctx.on.bind(ctx) : null
     const forget = (sessionId) => {
       const id = String(sessionId || '').trim()
       if (!id) return
       void removeSessionScopes([id]).catch(() => {})
     }
-    const offDisposed =
-      typeof ctx.on === 'function'
-        ? ctx.on('session/disposed', (session) => {
-            if (session && session.id) forget(session.id)
-          })
-        : null
-    const offArchived =
-      typeof ctx.on === 'function'
-        ? ctx.on('workspace/session-archived', (request) => {
-            if (request && request.sessionId) forget(request.sessionId)
-          })
-        : null
+    const park = (sessionId) => {
+      const id = String(sessionId || '').trim()
+      if (!id) return
+      void parkSessionScope(id).catch(() => {})
+    }
+    const restore = (sessionId) => {
+      const id = String(sessionId || '').trim()
+      if (!id) return
+      void restoreSessionScope(id).catch(() => {})
+    }
+    const offDisposed = on
+      ? on('session/disposed', (session) => {
+          if (session && session.id) forget(session.id)
+        })
+      : null
+    const offArchived = on
+      ? on('workspace/session-archived', (request) => {
+          if (request && request.sessionId) park(request.sessionId)
+        })
+      : null
+    const offUnarchiving = on
+      ? on('workspace/session-unarchiving', (request) => {
+          if (request && request.sessionId) restore(request.sessionId)
+        })
+      : null
     return () => {
       if (typeof offDisposed === 'function') offDisposed()
       if (typeof offArchived === 'function') offArchived()
+      if (typeof offUnarchiving === 'function') offUnarchiving()
     }
   }
 
@@ -2165,11 +2316,13 @@ export function createHost(options = {}) {
         }
         if (route === '/scopes') {
           const listing = await readScopes()
+          const described = await describeScopes(listing)
           return sendJson(response, 200, {
             ok: listing.error === null,
             file: listing.file,
             error: listing.error,
-            sessions: Object.entries(listing.sessions).map(([session, entry]) => ({ session, ...entry })),
+            sessions: described.sessions,
+            archived: described.archived,
           })
         }
         if (route === '/audit') {
@@ -2264,24 +2417,28 @@ export function createHost(options = {}) {
       if (route === '/scopes') {
         const result = await setSessionScope(payload.session, payload.datasources)
         if (result.error) return sendJson(response, 400, { ok: false, error: result.error })
+        const described = await describeScopes(result)
         return sendJson(response, 200, {
           ok: true,
           session: String(payload.session || ''),
           datasources: result.ids,
-          sessions: Object.entries(result.sessions || {}).map(([session, entry]) => ({ session, ...entry })),
+          sessions: described.sessions,
+          archived: described.archived,
         })
       }
       if (route === '/scopes/delete') {
         const result = await removeSessionScopes([payload.session])
+        const described = await describeScopes(result)
         return sendJson(response, 200, {
           ok: true,
           removed: result.removed,
-          sessions: Object.entries(result.sessions || {}).map(([session, entry]) => ({ session, ...entry })),
+          sessions: described.sessions,
+          archived: described.archived,
         })
       }
       if (route === '/scopes/clear') {
         const result = await clearSessionScopes()
-        return sendJson(response, 200, { ok: true, removed: result.removed, sessions: [] })
+        return sendJson(response, 200, { ok: true, removed: result.removed, sessions: [], archived: [] })
       }
       if (route === '/python/setup') {
         const result = await setupPython()

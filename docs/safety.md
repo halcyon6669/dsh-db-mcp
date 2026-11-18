@@ -125,9 +125,15 @@ limit is removed. Conversations with no saved limit keep access to every source,
 the *Conversation limits* card on the *Data source list* tab lists the conversations
 that are limited — folded into one summary line, with a remove button per conversation,
 a "Clear all", and an automatic removal when a conversation is disposed or archived, so
-the list cannot grow without bound. The card is always there, saying "no conversation is
-limited" when the list is empty. The limit is a per-conversation convenience, not a
-security boundary: the files under the runtime directory stay readable by your account.
+the list cannot grow without bound. Archiving is not deletion: the limit is parked in
+the same file and handed back when the conversation is unarchived, because a limit you
+set on purpose should survive a trip through the archive. Removing a limit by hand
+forgets the parked copy too, so an unarchive cannot bring back something you deleted.
+The card is always there, saying "no conversation is limited" when the list is empty.
+Each row shows the conversation's title when the host knows it, and the full id beneath
+it — the id is what the file keys on, so it is never abbreviated. The limit is a
+per-conversation convenience, not a security boundary: the files under the runtime
+directory stay readable by your account.
 
 ## Audit log
 

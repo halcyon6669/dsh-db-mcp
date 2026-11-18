@@ -237,6 +237,9 @@ window.__ModuleLoader__.load({
         'scopes.remove': 'Remove this limit',
         'scopes.removed': 'Conversation limit removed.',
         'scopes.cleared': 'Every conversation limit is cleared.',
+        'scopes.allSources': 'all data sources',
+        'scopes.parked': 'archived',
+        'scopes.parkedHint': '{n} archived conversation(s) keep their limit and get it back when unarchived.',
         'diag.venv': 'Python venv',
         'diag.packages': 'Python packages',
         'diag.venvMissing': 'not created yet',
@@ -509,6 +512,9 @@ window.__ModuleLoader__.load({
         'scopes.remove': '移除这条限制',
         'scopes.removed': '已移除该会话的限制。',
         'scopes.cleared': '已清除全部会话限制。',
+        'scopes.allSources': '全部数据源',
+        'scopes.parked': '已归档',
+        'scopes.parkedHint': '{n} 个已归档会话保留着限制，取消归档后会恢复。',
         'diag.venv': 'Python 虚拟环境',
         'diag.packages': 'Python 依赖',
         'diag.venvMissing': '尚未创建',
@@ -1576,27 +1582,68 @@ window.__ModuleLoader__.load({
       }
       .dbmcp-scope {
         display: flex;
-        align-items: center;
+        align-items: flex-start;
         gap: 8px;
-        padding: 3px 8px;
+        padding: 5px 8px;
         border: 1px solid var(--dsw-alias-border-l1);
         border-radius: 8px;
         background: var(--dsw-alias-bg-base);
         min-width: 0;
       }
-      .dbmcp-scope-id {
-        flex: 0 0 auto;
-        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      /* A parked row is informational: it cannot be removed from here because
+         the limit belongs to a conversation that is out of the list. */
+      .dbmcp-scope.is-parked {
+        border-style: dashed;
+        background: var(--dsw-alias-bg-layer-1);
+      }
+      .dbmcp-scope-main {
+        flex: 1 1 auto;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+      .dbmcp-scope-line {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+        min-width: 0;
+        flex-wrap: wrap;
+      }
+      .dbmcp-scope-title {
         font-size: 12px;
+        font-weight: 500;
+        color: var(--dsw-alias-label-primary);
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      /* The id is shown in full: it is the only thing the user can match against
+         their own logs, so it wraps instead of being shortened. */
+      .dbmcp-scope-id {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 11px;
         color: var(--dsw-alias-label-secondary);
+        word-break: break-all;
       }
       .dbmcp-scope-ids {
-        flex: 1 1 auto;
         min-width: 0;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
         margin: 0;
+      }
+      .dbmcp-scope-tag {
+        flex: 0 0 auto;
+        font-size: 11px;
+        color: var(--dsw-alias-label-secondary);
+        border: 1px solid var(--dsw-alias-border-l1);
+        border-radius: 999px;
+        padding: 0 6px;
+      }
+      .dbmcp-scope-parked-note {
+        margin: 4px 0 0;
       }
       .dbmcp-scope-remove {
         flex: 0 0 auto;
@@ -3172,12 +3219,6 @@ window.__ModuleLoader__.load({
       return head.length > 140 ? `${head.slice(0, 137)}…` : head
     }
 
-    /** Conversation ids are long uuids; the panel only needs to tell them apart. */
-    function shortSession(value) {
-      const text = String(value || '')
-      return text.length > 10 ? `…${text.slice(-8)}` : text || '—'
-    }
-
     /** UTC offset of the viewer's clock, e.g. "UTC+08:00". */
     function zoneLabel() {
       const offset = -new Date().getTimezoneOffset()
@@ -4512,7 +4553,7 @@ function groupTables(tables) {
             .then((payload) => setEnv(payload))
             .catch(() => {})
           void apiGet('/scopes')
-            .then((payload) => setScopes(payload.sessions || []))
+            .then((payload) => setScopes({ sessions: payload.sessions || [], archived: payload.archived || [] }))
             .catch(() => {})
           void apiGet('/http/status')
             .then((payload) => setHttp(payload))
@@ -4719,7 +4760,7 @@ function groupTables(tables) {
       const removeScope = async (session) => {
         try {
           const payload = await apiPost('/scopes/delete', { session })
-          setScopes(payload.sessions || [])
+          setScopes({ sessions: payload.sessions || [], archived: payload.archived || [] })
           setNotice({ message: t('scopes.removed'), isError: false })
         } catch (error) {
           setNotice({ message: String((error && error.message) || error), isError: true })
@@ -4730,7 +4771,7 @@ function groupTables(tables) {
       const clearScopes = async () => {
         try {
           await apiPost('/scopes/clear', {})
-          setScopes([])
+          setScopes({ sessions: [], archived: [] })
           setNotice({ message: t('scopes.cleared'), isError: false })
         } catch (error) {
           setNotice({ message: String((error && error.message) || error), isError: true })
@@ -5713,9 +5754,55 @@ function groupTables(tables) {
          conversation grows without bound. An empty list still shows the card,
          with one line saying nothing is limited, so the feature is findable. */
       const renderScopes = () => {
-        const list = scopes || []
+        const list = (scopes && scopes.sessions) || []
+        const parked = (scopes && scopes.archived) || []
         const rules = list.reduce((sum, entry) => sum + ((entry.ids || []).length), 0)
-        const empty = list.length === 0
+        const empty = list.length === 0 && parked.length === 0
+        const row = (entry, isParked) =>
+          h(
+            'div',
+            {
+              className: isParked ? 'dbmcp-scope is-parked' : 'dbmcp-scope',
+              key: `${isParked ? 'a' : 'l'}:${entry.session}`,
+            },
+            h(
+              'div',
+              { className: 'dbmcp-scope-main' },
+              h(
+                'div',
+                { className: 'dbmcp-scope-line' },
+                entry.title
+                  ? h('span', { className: 'dbmcp-scope-title', title: entry.title }, entry.title)
+                  : null,
+                /* The full id is what the user can match against their own
+                   records, so it is shown in full rather than shortened. */
+                h(
+                  'code',
+                  { className: 'dbmcp-scope-id', title: entry.session },
+                  entry.session || '—',
+                ),
+              ),
+              h(
+                'div',
+                { className: 'dbmcp-hint dbmcp-scope-ids' },
+                (entry.ids || []).join(', ') || t('scopes.allSources'),
+              ),
+            ),
+            isParked
+              ? h('span', { className: 'dbmcp-scope-tag' }, t('scopes.parked'))
+              : h(
+                  'button',
+                  {
+                    type: 'button',
+                    className: 'dbmcp-scope-remove',
+                    title: t('scopes.remove'),
+                    'aria-label': t('scopes.remove'),
+                    disabled: busy,
+                    onClick: () => void removeScope(entry.session),
+                  },
+                  '×',
+                ),
+          )
         return h(
           Card,
           {
@@ -5753,26 +5840,15 @@ function groupTables(tables) {
             : h(
                 'div',
                 { className: 'dbmcp-scope-box' },
-                list.map((entry) =>
-                  h(
-                    'div',
-                    { className: 'dbmcp-scope', key: entry.session, title: entry.session },
-                    h('span', { className: 'dbmcp-scope-id' }, shortSession(entry.session)),
-                    h('span', { className: 'dbmcp-hint dbmcp-scope-ids' }, (entry.ids || []).join(', ')),
-                    h(
-                      'button',
-                      {
-                        type: 'button',
-                        className: 'dbmcp-scope-remove',
-                        title: t('scopes.remove'),
-                        'aria-label': t('scopes.remove'),
-                        disabled: busy,
-                        onClick: () => void removeScope(entry.session),
-                      },
-                      '×',
+                list.map((entry) => row(entry, false)),
+                parked.length === 0
+                  ? null
+                  : h(
+                      'p',
+                      { className: 'dbmcp-hint dbmcp-scope-parked-note' },
+                      fmt(t('scopes.parkedHint'), { n: parked.length }),
                     ),
-                  ),
-                ),
+                parked.map((entry) => row(entry, true)),
               ),
         )
       }

@@ -150,7 +150,8 @@ try {
   /* A disposed or archived conversation must not keep a limit that the panel can
      no longer show. Those listeners only exist when a live plugin passes ctx, so
      this needs its own host with a stub ctx; the HTTP half is switched off first
-     so no Python child is spawned. */
+     so no Python child is spawned. Disposal is final, but archiving is not: the
+     limit is parked and unarchiving hands it back. */
   const listeners = {}
   const stubCtx = {
     on: (event, handler) => {
@@ -167,6 +168,11 @@ try {
       'both lifecycle events are listened for',
       typeof listeners['session/disposed'] === 'function' &&
         typeof listeners['workspace/session-archived'] === 'function',
+      Object.keys(listeners).join(','),
+    )
+    check(
+      'unarchiving is listened for too',
+      typeof listeners['workspace/session-unarchiving'] === 'function',
       Object.keys(listeners).join(','),
     )
     await post('/scopes', { session: 'gone-1', datasources: ['alpha'] })
@@ -186,7 +192,46 @@ try {
     listeners['workspace/session-archived']({ sessionId: 'gone-2' })
     await new Promise((resolve) => setTimeout(resolve, 150))
     const afterArchive = await get('/scopes')
-    check('an archived conversation loses its limit', afterArchive.body.sessions.length === 0, JSON.stringify(afterArchive.body.sessions))
+    check(
+      'an archived conversation leaves the visible list',
+      afterArchive.body.sessions.length === 0,
+      JSON.stringify(afterArchive.body.sessions),
+    )
+    check(
+      'an archived conversation keeps its limit parked',
+      (afterArchive.body.archived || []).length === 1 &&
+        afterArchive.body.archived[0].session === 'gone-2' &&
+        afterArchive.body.archived[0].ids.join(',') === 'beta',
+      JSON.stringify(afterArchive.body.archived),
+    )
+
+    listeners['workspace/session-unarchiving']({ sessionId: 'gone-2' })
+    await new Promise((resolve) => setTimeout(resolve, 150))
+    const afterUnarchive = await get('/scopes')
+    check(
+      'unarchiving gives the limit back',
+      afterUnarchive.body.sessions.length === 1 &&
+        afterUnarchive.body.sessions[0].session === 'gone-2' &&
+        afterUnarchive.body.sessions[0].ids.join(',') === 'beta',
+      JSON.stringify(afterUnarchive.body.sessions),
+    )
+    check(
+      'nothing stays parked after unarchiving',
+      (afterUnarchive.body.archived || []).length === 0,
+      JSON.stringify(afterUnarchive.body.archived),
+    )
+
+    /* Removing a limit by hand must not leave a parked copy behind, or the next
+       unarchive would bring back something the user deleted on purpose. */
+    listeners['workspace/session-archived']({ sessionId: 'gone-2' })
+    await new Promise((resolve) => setTimeout(resolve, 150))
+    await post('/scopes/delete', { session: 'gone-2' })
+    const afterDelete = await get('/scopes')
+    check(
+      'a manual removal also forgets the parked copy',
+      (afterDelete.body.sessions || []).length === 0 && (afterDelete.body.archived || []).length === 0,
+      JSON.stringify(afterDelete.body),
+    )
   } finally {
     await watched.dispose?.().catch(() => {})
     await post('/settings', { httpEnabled: true })

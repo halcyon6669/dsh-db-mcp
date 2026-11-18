@@ -44,7 +44,13 @@ report of each version in more detail.
   conversation a remove button and the whole set a "Clear all", and a conversation
   that is disposed or archived loses its limit automatically, so the list cannot grow
   forever. With no limit in place the card stays and says so, rather than hiding a
-  feature that only appears once the agent has already used it.
+  feature that only appears once the agent has already used it. Each row names the
+  conversation when the host knows its title and always shows the full id beneath —
+  the id is what the file keys on, so abbreviating it made two conversations look
+  alike. Archiving parks the limit instead of deleting it, and unarchiving hands it
+  back: a limit you set on purpose should survive a trip through the archive. Removing
+  one by hand forgets the parked copy as well, so an unarchive cannot resurrect
+  something you deleted.
 
 ### Changed
 

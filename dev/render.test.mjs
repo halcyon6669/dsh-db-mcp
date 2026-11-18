@@ -688,6 +688,14 @@ check('scopes card: the empty state has a line of its own', /empty \? t\('scopes
 check('scopes card: the folded line counts conversations and rules', /fmt\(t\('scopes\.summary'\), \{ n: list\.length, rules \}\)/.test(scopesCard))
 check('scopes card: every row can be removed', /onClick: \(\) => void removeScope\(entry\.session\)/.test(scopesCard))
 check('scopes card: the whole set can be cleared', /onClick: clearScopes/.test(scopesCard))
+check(
+  'scopes card: the conversation id is shown in full',
+  /entry\.session \|\| '—'/.test(scopesCard) && !/shortSession/.test(source),
+  scopesCard.slice(0, 120),
+)
+check('scopes card: a known title is shown above the id', /entry\.title\s*\n?\s*\? h\('span', \{ className: 'dbmcp-scope-title'/.test(scopesCard))
+check('scopes card: archived conversations keep a parked section', /parked\.map\(\(entry\) => row\(entry, true\)\)/.test(scopesCard))
+check('scopes card: parked rows explain why they are still listed', /t\('scopes\.parkedHint'\)/.test(scopesCard))
 
 // the component's own header still took a min-height plus a bottom margin when
 // it rendered empty — about thirty pixels of nothing above the list.

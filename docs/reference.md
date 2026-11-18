@@ -23,8 +23,8 @@ are `GET`; every mutation is `POST` (the same-origin check compares `Origin` wit
 | `GET /tools` | every tool the Python server offers, with its `enabled` state and row-limit metadata, plus the current `limits` and `textPolicy`, so the panel can switch them |
 | `POST /clients/configure` | write this server into one client's config (`{ client }`) |
 | `GET /settings` · `POST /settings` | global write switch, audit switch, row limits and the long-text setting |
-| `GET /scopes` · `POST /scopes` | per-conversation data-source limits (`{ session, datasources }`; an empty list lifts the limit) |
-| `POST /scopes/delete` · `POST /scopes/clear` | drop one conversation's limit (`{ session }`) or every limit at once; both return what they removed |
+| `GET /scopes` · `POST /scopes` | per-conversation data-source limits (`{ session, datasources }`; an empty list lifts the limit). `GET` returns `{ sessions, archived }`, each row `{ session, ids, updatedAt, title }` — `title` is the conversation's folded title when the host can read it, else `null`; `archived` holds the limits parked by archiving |
+| `POST /scopes/delete` · `POST /scopes/clear` | drop one conversation's limit (`{ session }`) or every limit at once; both return what they removed. Deleting also drops the parked copy, so unarchiving cannot resurrect it |
 | `GET /audit?limit=N` | tail of the tool-call audit log (default 20, max 200) |
 | `GET /python/env` · `GET /python/status` | interpreter, venv path, installed driver versions |
 | `POST /python/setup` | create the venv and install `server/requirements.txt` |
