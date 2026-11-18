@@ -117,6 +117,36 @@ try {
   const missing = await post('/scopes', {})
   check('a session id is required', missing.status === 400 && /conversation id/.test(String(missing.body?.error || '')))
 
+  /* Limits are written by the agent over MCP, so the panel is the only place a
+     stale one can be removed. Both removals answer with the surviving list. */
+  await post('/scopes', { session: 's-1', datasources: ['alpha'] })
+  await post('/scopes', { session: 's-2', datasources: ['beta'] })
+  const removedOne = await post('/scopes/delete', { session: 's-1' })
+  check(
+    'POST /scopes/delete drops one conversation',
+    removedOne.status === 200 &&
+      JSON.stringify(removedOne.body.removed) === JSON.stringify(['s-1']) &&
+      removedOne.body.sessions.length === 1 &&
+      removedOne.body.sessions[0].session === 's-2',
+    JSON.stringify(removedOne.body),
+  )
+  const removedAgain = await post('/scopes/delete', { session: 's-1' })
+  check(
+    'deleting a conversation with no limit removes nothing',
+    removedAgain.status === 200 && removedAgain.body.removed.length === 0,
+    JSON.stringify(removedAgain.body),
+  )
+  const clearedAll = await post('/scopes/clear', {})
+  check(
+    'POST /scopes/clear drops every conversation',
+    clearedAll.status === 200 &&
+      JSON.stringify(clearedAll.body.removed) === JSON.stringify(['s-2']) &&
+      clearedAll.body.sessions.length === 0,
+    JSON.stringify(clearedAll.body),
+  )
+  const afterClear = await get('/scopes')
+  check('clearing leaves nothing behind', afterClear.body.sessions.length === 0)
+
   /* ---- HTTP endpoint and outside clients ---- */
   // The endpoint only auto-starts inside a live plugin, so a bare host reports
   // its configured port and a null URL until something starts it.

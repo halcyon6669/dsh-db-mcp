@@ -1217,6 +1217,64 @@ export function createHost(options = {}) {
     return { ids: wanted, sessions }
   }
 
+  /** Drop the limits of the sessions the caller names; unknown ids are ignored. */
+  async function removeSessionScopes(sessionsToDrop) {
+    const wanted = new Set(
+      (Array.isArray(sessionsToDrop) ? sessionsToDrop : []).map((id) => String(id || '').trim()).filter(Boolean),
+    )
+    if (wanted.size === 0) return { removed: [], sessions: (await readScopes()).sessions }
+    const current = await readScopes()
+    const sessions = { ...current.sessions }
+    const removed = []
+    for (const session of wanted) {
+      if (sessions[session]) {
+        delete sessions[session]
+        removed.push(session)
+      }
+    }
+    if (removed.length > 0) await writeScopes(sessions)
+    return { removed, sessions }
+  }
+
+  /** Forget every conversation limit at once. */
+  async function clearSessionScopes() {
+    const current = await readScopes()
+    const removed = Object.keys(current.sessions)
+    if (removed.length > 0) await writeScopes({})
+    return { removed, sessions: {} }
+  }
+
+  /**
+   * A conversation that disappears should not keep a limit nobody can see any
+   * more: the panel only lists live sessions, so a stale entry would accumulate
+   * forever. Both a disposed Session and an archived one count as gone.
+   */
+  function watchSessionLifecycle() {
+    const ctx = options.ctx
+    if (!ctx) return () => {}
+    const forget = (sessionId) => {
+      const id = String(sessionId || '').trim()
+      if (!id) return
+      void removeSessionScopes([id]).catch(() => {})
+    }
+    const offDisposed =
+      typeof ctx.on === 'function'
+        ? ctx.on('session/disposed', (session) => {
+            if (session && session.id) forget(session.id)
+          })
+        : null
+    const offArchived =
+      typeof ctx.on === 'function'
+        ? ctx.on('workspace/session-archived', (request) => {
+            if (request && request.sessionId) forget(request.sessionId)
+          })
+        : null
+    return () => {
+      if (typeof offDisposed === 'function') offDisposed()
+      if (typeof offArchived === 'function') offArchived()
+    }
+  }
+
   async function appendAudit(entry) {
     const settings = await readSettings()
     if (!settings.auditLog) return
@@ -2213,6 +2271,18 @@ export function createHost(options = {}) {
           sessions: Object.entries(result.sessions || {}).map(([session, entry]) => ({ session, ...entry })),
         })
       }
+      if (route === '/scopes/delete') {
+        const result = await removeSessionScopes([payload.session])
+        return sendJson(response, 200, {
+          ok: true,
+          removed: result.removed,
+          sessions: Object.entries(result.sessions || {}).map(([session, entry]) => ({ session, ...entry })),
+        })
+      }
+      if (route === '/scopes/clear') {
+        const result = await clearSessionScopes()
+        return sendJson(response, 200, { ok: true, removed: result.removed, sessions: [] })
+      }
       if (route === '/python/setup') {
         const result = await setupPython()
         return sendJson(response, result.status, result.body)
@@ -2282,6 +2352,10 @@ export function createHost(options = {}) {
       .catch(() => null)
   }
 
+  // A disposed or archived conversation must not leave a limit behind that the
+  // panel can never show again.
+  const stopWatchingSessions = watchSessionLifecycle()
+
   return {
     version: PLUGIN_VERSION,
     handle,
@@ -2295,6 +2369,7 @@ export function createHost(options = {}) {
       groupsAfterDelete,
     },
     dispose: async () => {
+      if (typeof stopWatchingSessions === 'function') stopWatchingSessions()
       await bridge.dispose()
     },
   }

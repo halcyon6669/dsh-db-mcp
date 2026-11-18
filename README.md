@@ -142,16 +142,16 @@ text the model sees is bounded.
 
 ## Safety
 
-- **Read-only by default**, with four independent gates: a global write switch, a
-  per-source flag, the schemas that source may write to, and a separate DDL switch.
-  All must be open before a statement may write.
-- **Writes are confined to chosen schemas.** Turning a source writable asks which
-  schemas it may write to, one checkbox each; a statement aimed anywhere else is
-  refused before it reaches the database. Reads stay unrestricted. The guard runs in
-  the Python server, so the panel, the agent and the HTTP endpoint all obey it.
+- **Read-only by default**, with three independent gates: a global write switch in the
+  status strip of the source list, a per-source flag, and a separate DDL switch. All
+  must be open before a statement may write.
+- **A writable source may write to every schema its login can see.** The boundary is
+  the database itself: a login that can write one schema can write any schema it was
+  granted. Reads stay unrestricted. The guard runs in the Python server, so the panel,
+  the agent and the HTTP endpoint all obey it.
 - **DDL is opt-in.** `create`, `alter`, `drop`, `truncate`, `rename`, `grant` and
-  `revoke` are refused unless the source was granted DDL in that same dialog; the
-  schemas above still bound where such a statement may land.
+  `revoke` are refused unless the source's DDL switch is on; `insert`, `update` and
+  `delete` are unaffected.
 - **Passwords stay local, encrypted at rest.** `secrets.json` holds an AES-256-GCM
   envelope per source, the key lives beside it in `secret.key` (mode `0600`); no HTTP
   route ever returns a password, and the Python child receives a short environment

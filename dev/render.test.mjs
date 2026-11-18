@@ -649,6 +649,32 @@ if (stripTree) {
   check('strip: no repeated version pill', versionPill.length === 0, `got ${versionPill.length}`)
 }
 
+/* The global write switch used to be a row inside the diagnostics card, reading
+   as one more fact among facts. It belongs with the sources it governs, so it
+   now sits on this strip — and only when the panel hands it a handler. */
+const stripProps = {
+  t,
+  data: { mcp: { phase: 'ready' }, plugin: { version: '0.7.5' } },
+  sources: [{ id: 'pg', name: 'PostgreSQL demo', kind: 'postgres', lastProbe: { ok: true } }],
+  failedSources: [],
+  groupNames: [],
+  filter: 'all',
+  setFilter: noop,
+  query: '',
+  setQuery: noop,
+}
+const writeTree = StatusStrip({ ...stripProps, allowWrite: true, onWrite: noop, busy: false })
+const writeSpots = collect(writeTree, (node) => node.props.className === 'dbmcp-status-write')
+check('strip: the write switch has a home', writeSpots.length === 1, `got ${writeSpots.length}`)
+check('strip: the switch says which way it is set', texts(writeTree).includes('write.on'), texts(writeTree).join('|'))
+const writeOff = StatusStrip({ ...stripProps, allowWrite: false, onWrite: noop })
+check('strip: the off state reads out too', texts(writeOff).includes('write.off'), texts(writeOff).join('|'))
+const noHandler = StatusStrip(stripProps)
+check(
+  'strip: no switch when the panel has no handler',
+  collect(noHandler, (node) => node.props.className === 'dbmcp-status-write').length === 0,
+)
+
 // A card that carries no title draws its own header (the list card does), and
 // the component's own header still took a min-height plus a bottom margin when
 // it rendered empty — about thirty pixels of nothing above the list.

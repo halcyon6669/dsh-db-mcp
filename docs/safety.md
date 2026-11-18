@@ -13,22 +13,22 @@ log and the per-conversation limit — stop at DSH's edge.
 
 Three independent gates decide whether a statement may write:
 
-1. **Global switch** — `allowWrite` in `<runtime>/settings.json`, toggled on the
-   *Runtime* tab. Off by default; while off every write is refused with
-   `user_error` and a hint pointing at the switch.
+1. **Global switch** — `allowWrite` in `<runtime>/settings.json`, toggled in the
+   status strip at the top of the *Data source list* tab. Off by default; while off
+   every write is refused with `user_error` and a hint pointing at the switch.
 2. **Per-source flag** — `readOnly` on the source, on by default. A switch on the
    row flips it in one click, and the word beside the switch says which way it is
-   set. The row carries exactly two controls — this one and the DDL switch below —
-   and everything else on it (a broken secret, the probe result) is plain text, so
-   the things that can be operated are the things that look operable.
+   set. Apart from that switch and the DDL one below it, everything on the row (a
+   broken secret, the probe result) is plain text, so the things that can be
+   operated are the things that look operable.
 3. **DDL** — `allowDdl` on the source, off by default, and its own switch right
    beside the writable one. Writing rows and changing the shape of the database are
    different decisions: a source that is happy to take an `insert` may still be one
    whose tables belong to somebody else. While it is off, `create`, `alter`, `drop`,
    `truncate`, `rename`, `grant` and `revoke` are refused before they reach the
    database; `insert`, `update` and `delete` are unaffected. The switch only means
-   anything while the source is writable, so a read-only row greys it out rather
-   than hiding it.
+   anything while the source is writable, so a read-only row does not show it at
+   all — a control that can never be used is noise on the row.
 
 A writable source may write to every schema its login can see — there is no
 per-schema allow list any more. The remaining boundary is the database itself: a
@@ -121,9 +121,11 @@ While a limit is saved for that conversation:
 
 Say *"stop limiting this conversation"* (or call the tool with `all: true`) and the
 limit is removed. Conversations with no saved limit keep access to every source, and
-the *Runtime* tab lists the conversations that are limited so you can see it at a
-glance. The limit is a per-conversation convenience, not a security boundary: the
-files under the runtime directory stay readable by your account.
+the *Tools* tab lists the conversations that are limited — folded into one summary
+line, with a remove button per conversation, a "Clear all", and an automatic
+removal when a conversation is disposed or archived, so the list cannot grow
+without bound. The limit is a per-conversation convenience, not a security boundary:
+the files under the runtime directory stay readable by your account.
 
 ## Audit log
 

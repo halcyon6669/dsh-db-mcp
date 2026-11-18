@@ -20,10 +20,11 @@ are `GET`; every mutation is `POST` (the same-origin check compares `Origin` wit
 | `GET /http/status` | streamable-HTTP endpoint state: running, host, port, `url` (`http://host:port/dsh-db-mcp`), `sseUrl`, stderr tail |
 | `POST /http/start` · `POST /http/stop` | start (optional `{ port }`) or stop the HTTP endpoint |
 | `GET /clients` | the endpoint URL plus every supported outside client: config file, detected, configured |
-| `GET /tools` | every tool the Python server offers, with its `enabled` state, so the panel can switch them |
+| `GET /tools` | every tool the Python server offers, with its `enabled` state and row-limit metadata, plus the current `limits` and `textPolicy`, so the panel can switch them |
 | `POST /clients/configure` | write this server into one client's config (`{ client }`) |
-| `GET /settings` · `POST /settings` | global write switch and audit switch |
+| `GET /settings` · `POST /settings` | global write switch, audit switch, row limits and the long-text policy |
 | `GET /scopes` · `POST /scopes` | per-conversation data-source limits (`{ session, datasources }`; an empty list lifts the limit) |
+| `POST /scopes/delete` · `POST /scopes/clear` | drop one conversation's limit (`{ session }`) or every limit at once; both return what they removed |
 | `GET /audit?limit=N` | tail of the tool-call audit log (default 20, max 200) |
 | `GET /python/env` · `GET /python/status` | interpreter, venv path, installed driver versions |
 | `POST /python/setup` | create the venv and install `server/requirements.txt` |
@@ -170,10 +171,17 @@ anything that can read both files as your user can still decrypt them. Delete
 `secret.key` to make every stored password unreadable at once; the panel then asks
 for them again instead of reporting a bogus authentication failure.
 
-`settings.json` holds `{ "allowWrite": false, "auditLog": true, "httpEnabled": true, "httpPort": 8765, "disabledTools": [], "updatedAt": "…" }`.
+`settings.json` holds `{ "allowWrite": false, "auditLog": true, "httpEnabled": true, "httpPort": 8765, "disabledTools": [], "textPolicy": "auto", "updatedAt": "…" }`.
 `limits` holds `{ "sampleRows": 20, "maxRows": 200 }`: the row counts handed to `sample_rows`
 and `execute_sql` when the model does not name one. Out-of-range values fall back to those
 defaults.
+`textPolicy` is `auto` (default), `full` or `headtail`: how a cell longer than 200
+characters is rendered into the model context. `auto` and `headtail` keep the first and
+last 50 characters around a `…(共N字)…` marker, `full` returns the value untouched, and
+blob cells are compressed to a size tag either way. The policy is applied when the
+result is rendered, so the rows themselves are never truncated. An unknown value falls
+back to `auto`; the Python server reads it from `DB_MCP_TEXT_POLICY` at spawn time, so
+changing it restarts the child.
 `disabledTools` lists tool names without the `mcp__db__` prefix (for example `["get_ddl"]`):
 those are left out of the agent's registry, while the Python server keeps serving them over
 stdio and HTTP.
@@ -264,8 +272,9 @@ The bundle row in the profile accepts these options (all optional):
 | `mcpServerName` | `db` | prefix after `mcp__` when publishing tools |
 | `debug` | `false` | log Host activity to the DSH console |
 
-The Python side reads `DB_MCP_RUNTIME`, `DB_MCP_ALLOW_WRITE`, `DB_MCP_MAX_ROWS` and
-`DB_MCP_MAX_ROWS_HARD`; the Host sets the first two when spawning.
+The Python side reads `DB_MCP_RUNTIME`, `DB_MCP_ALLOW_WRITE`, `DB_MCP_TEXT_POLICY`,
+`DB_MCP_MAX_ROWS` and `DB_MCP_MAX_ROWS_HARD`; the Host sets the first three when
+spawning.
 
 ## Runtime requirements
 

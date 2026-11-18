@@ -215,17 +215,27 @@ window.__ModuleLoader__.load({
         'diag.registry': 'Registry file',
         'diag.sources': 'Data sources',
         'diag.mcp': 'MCP server',
-        'diag.scopes': 'Conversation limits',
-        'diag.scopesNone': 'No limit: every conversation can use every data source',
         'diag.mcpPending': 'not wired yet',
         'diag.mcpLive': '{count} tool(s) live',
         'diag.mcpFailed': 'failed:',
         'diag.uptime': 'Host uptime',
         'diag.tip': 'Tip',
         'diag.restartNeeded': 'Restart the DSH desktop app once — the plugin entry is imported at process start, so the tool bridge only activates after a restart.',
-        'diag.write': 'Global write access',
-        'diag.writeOn': 'on — a source must still allow writes itself',
-        'diag.writeOff': 'off — every write statement is refused',
+        'write.on': 'writes allowed',
+        'write.off': 'writes blocked',
+        'write.hint': 'On: a source must still allow writes itself. Off: every write statement is refused.',
+        'render.title': 'Result rendering',
+        'render.hint': 'How much of a result reaches the model. The row defaults apply when the agent does not name a count itself.',
+        'render.sampleRows': 'Sample rows',
+        'render.maxRows': 'Query rows',
+        'scopes.title': 'Conversation limits',
+        'scopes.summary': '{n} conversation(s) limited · {rules} rule(s)',
+        'scopes.show': 'Show',
+        'scopes.hide': 'Hide',
+        'scopes.clear': 'Clear all',
+        'scopes.remove': 'Remove this limit',
+        'scopes.removed': 'Conversation limit removed.',
+        'scopes.cleared': 'Every conversation limit is cleared.',
         'diag.venv': 'Python venv',
         'diag.packages': 'Python packages',
         'diag.venvMissing': 'not created yet',
@@ -248,7 +258,7 @@ window.__ModuleLoader__.load({
         'action.unlockSource': 'Click to allow writes on this source',
         'notice.nowReadOnly': '{name} is read-only now.',
         'notice.nowWritable': '{name} accepts writes now.',
-        'notice.nowWritableLocked': '{name} accepts writes now, but the global write switch is still off — turn it on under Runtime.',
+        'notice.nowWritableLocked': '{name} accepts writes now, but the global write switch is still off — turn it on at the top of the Sources page.',
         'sources.ddl': 'DDL',
         'sources.ddlHint': 'This source may run create, alter, drop and truncate.',
         'sources.ddlBlockedHint': 'This source accepts insert, update and delete, but refuses create, alter and drop.',
@@ -476,17 +486,27 @@ window.__ModuleLoader__.load({
         'diag.registry': '注册表文件',
         'diag.sources': '数据源数量',
         'diag.mcp': 'MCP 服务名',
-        'diag.scopes': '会话访问范围',
-        'diag.scopesNone': '未设置：任何会话都能访问全部数据源',
         'diag.mcpPending': '尚未接入',
         'diag.mcpLive': '{count} 个工具已就绪',
         'diag.mcpFailed': '启动失败：',
         'diag.uptime': 'Host 已运行',
         'diag.tip': '提示',
         'diag.restartNeeded': '需要重启一次 DSH 桌面应用：插件入口只在进程启动时导入，重启后工具桥接才会生效。',
-        'diag.write': '全局写权限',
-        'diag.writeOn': '已开启（单个数据源仍须自己允许写）',
-        'diag.writeOff': '已关闭（所有写语句都会被拒绝）',
+        'write.on': '允许写',
+        'write.off': '禁止写',
+        'write.hint': '开启后单个数据源仍须自己允许写；关闭时所有写语句都会被拒绝。',
+        'render.title': '结果呈现',
+        'render.hint': '结果有多少进入模型上下文。行数只在 AI 没有自己指定数量时生效。',
+        'render.sampleRows': '默认行数',
+        'render.maxRows': '查询行数',
+        'scopes.title': '会话访问范围',
+        'scopes.summary': '{n} 个会话受限 · 共 {rules} 条规则',
+        'scopes.show': '展开',
+        'scopes.hide': '收起',
+        'scopes.clear': '全部清除',
+        'scopes.remove': '移除这条限制',
+        'scopes.removed': '已移除该会话的限制。',
+        'scopes.cleared': '已清除全部会话限制。',
         'diag.venv': 'Python 虚拟环境',
         'diag.packages': 'Python 依赖',
         'diag.venvMissing': '尚未创建',
@@ -509,7 +529,7 @@ window.__ModuleLoader__.load({
         'action.unlockSource': '点击允许写',
         'notice.nowReadOnly': '{name} 已改为只读。',
         'notice.nowWritable': '{name} 现在允许写。',
-        'notice.nowWritableLocked': '{name} 现在允许写，但全局写开关还关着——到「运行时诊断」里打开它。',
+        'notice.nowWritableLocked': '{name} 现在允许写，但全局写开关还关着——到「数据源」页顶部把它打开。',
         'sources.ddl': 'DDL',
         'sources.ddlHint': '此数据源可执行 create、alter、drop、truncate。',
         'sources.ddlBlockedHint': '此数据源接受 insert、update、delete，但拒绝 create、alter、drop。',
@@ -1435,32 +1455,37 @@ window.__ModuleLoader__.load({
       .dbmcp-tool .dbmcp-switch {
         margin-left: 1px;
       }
-      .dbmcp-tool-limit {
-        flex: 0 0 96px;
+      .dbmcp-limit-unit { font-size: 12px; color: var(--dsw-alias-label-secondary); }
+      /* One card holds the numbers and the long-text policy, so the fields line
+         up as a row of labels instead of trailing off the tool list. */
+      .dbmcp-render-fields {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: flex-start;
+        gap: 16px;
+      }
+      .dbmcp-render-field {
+        display: inline-flex;
+        flex-direction: column;
+        gap: 4px;
+        min-width: 0;
+      }
+      .dbmcp-render-label {
+        font-size: 12px;
+        color: var(--dsw-alias-label-secondary);
+        white-space: nowrap;
+      }
+      .dbmcp-render-input {
         display: inline-flex;
         align-items: center;
-        justify-content: flex-end;
         gap: 6px;
-        margin-left: auto;
       }
-      .dbmcp-tool-limit .dbmcp-limit {
+      .dbmcp-render-field .dbmcp-limit {
         width: 72px;
         padding: 2px 6px;
         font-size: 12px;
         text-align: center;
         font-variant-numeric: tabular-nums;
-      }
-      .dbmcp-limit-unit { font-size: 12px; color: var(--dsw-alias-label-secondary); }
-      .dbmcp-textpolicy {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        margin-top: 12px;
-      }
-      .dbmcp-textpolicy-label {
-        font-size: 12px;
-        color: var(--dsw-alias-label-secondary);
-        white-space: nowrap;
       }
       .dbmcp-textpolicy-select {
         width: auto;
@@ -1526,26 +1551,58 @@ window.__ModuleLoader__.load({
         font-size: 13px;
         line-height: 1.5;
       }
-      .dbmcp-scope-list {
+      /* One chip per conversation does not scale past a handful, so the list is
+         folded by default and scrolls inside a fixed height once opened. */
+      .dbmcp-scope-box {
         display: flex;
-        flex-wrap: wrap;
+        flex-direction: column;
         gap: 6px;
-        min-width: 0;
+        margin-top: 10px;
+        max-height: 240px;
+        overflow-y: auto;
       }
       .dbmcp-scope {
-        display: inline-flex;
+        display: flex;
         align-items: center;
-        gap: 6px;
-        padding: 1px 8px;
+        gap: 8px;
+        padding: 3px 8px;
         border: 1px solid var(--dsw-alias-border-l1);
         border-radius: 8px;
         background: var(--dsw-alias-bg-base);
         min-width: 0;
       }
       .dbmcp-scope-id {
+        flex: 0 0 auto;
         font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
         font-size: 12px;
         color: var(--dsw-alias-label-secondary);
+      }
+      .dbmcp-scope-ids {
+        flex: 1 1 auto;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        margin: 0;
+      }
+      .dbmcp-scope-remove {
+        flex: 0 0 auto;
+        padding: 0 4px;
+        border: 0;
+        background: transparent;
+        color: var(--dsw-alias-label-secondary);
+        font-size: 14px;
+        line-height: 1.4;
+        cursor: pointer;
+        border-radius: 5px;
+      }
+      .dbmcp-scope-remove:hover:not(:disabled) {
+        background: var(--dsw-alias-bg-layer-2);
+        color: var(--dsw-alias-label-primary);
+      }
+      .dbmcp-scope-remove:disabled {
+        cursor: default;
+        opacity: 0.5;
       }
       .dbmcp-row {
         display: grid;
@@ -1776,6 +1833,19 @@ window.__ModuleLoader__.load({
       }
       .dbmcp-status-spacer {
         flex: 1 1 auto;
+      }
+      /* The write switch lives here rather than in diagnostics: turning writes on
+         is a decision about these sources, made where the sources are listed. */
+      .dbmcp-status-write {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        flex: 0 0 auto;
+      }
+      .dbmcp-status-switch-label {
+        font-size: 12px;
+        color: var(--dsw-alias-label-secondary);
+        white-space: nowrap;
       }
       .dbmcp-status-label {
         font-weight: 600;
@@ -4253,6 +4323,7 @@ function groupTables(tables) {
     /** Quiet strip above the list: bridge health, totals, filters and search. */
   function StatusStrip(props) {
     const { t, data, sources, failedSources, groupNames, filter, setFilter, query, setQuery } = props
+    const { allowWrite, onWrite, busy } = props
     if (!data) return null
     const mcpReady = Boolean(data.mcp && data.mcp.phase === 'ready')
     const failed = failedSources.length
@@ -4298,6 +4369,23 @@ function groupTables(tables) {
             : null,
         ),
         h('span', { className: 'dbmcp-status-spacer' }),
+        typeof onWrite === 'function'
+          ? h(
+              'span',
+              { className: 'dbmcp-status-write' },
+              h(Switch, {
+                checked: allowWrite === true,
+                title: t('write.hint'),
+                disabled: busy === true,
+                onChange: (next) => onWrite(next),
+              }),
+              h(
+                'span',
+                { className: 'dbmcp-status-switch-label' },
+                allowWrite === true ? t('write.on') : t('write.off'),
+              ),
+            )
+          : null,
         h('div', { className: 'dbmcp-status-search' }, h(TextInput, {
           value: query,
           onChange: setQuery,
@@ -4381,6 +4469,7 @@ function groupTables(tables) {
       const [env, setEnv] = React.useState(null)
       const [installing, setInstalling] = React.useState(false)
       const [scopes, setScopes] = React.useState(null)
+      const [scopesOpen, setScopesOpen] = React.useState(false)
       const [http, setHttp] = React.useState(null)
       const [clients, setClients] = React.useState(null)
       const [tools, setTools] = React.useState(null)
@@ -4592,11 +4681,34 @@ function groupTables(tables) {
         }
       }
 
-      const toggleWrite = async (next) => {        try {
+      const toggleWrite = async (next) => {
+        try {
           const payload = await apiPost('/settings', { allowWrite: next })
           setSettings(payload.settings || { allowWrite: next })
           setNotice({ message: next ? t('notice.writeOn') : t('notice.writeOff'), isError: false })
           load()
+        } catch (error) {
+          setNotice({ message: String((error && error.message) || error), isError: true })
+        }
+      }
+
+      /** Drop the limits the agent put on one conversation. */
+      const removeScope = async (session) => {
+        try {
+          const payload = await apiPost('/scopes/delete', { session })
+          setScopes(payload.sessions || [])
+          setNotice({ message: t('scopes.removed'), isError: false })
+        } catch (error) {
+          setNotice({ message: String((error && error.message) || error), isError: true })
+        }
+      }
+
+      /** Drop every conversation limit at once. */
+      const clearScopes = async () => {
+        try {
+          await apiPost('/scopes/clear', {})
+          setScopes([])
+          setNotice({ message: t('scopes.cleared'), isError: false })
         } catch (error) {
           setNotice({ message: String((error && error.message) || error), isError: true })
         }
@@ -5324,7 +5436,20 @@ function groupTables(tables) {
       }
 
       const renderStatus = () =>
-        h(StatusStrip, { t, data, sources, failedSources, groupNames, filter, setFilter, query, setQuery })
+        h(StatusStrip, {
+          t,
+          data,
+          sources,
+          failedSources,
+          groupNames,
+          filter,
+          setFilter,
+          query,
+          setQuery,
+          allowWrite: Boolean(settings && settings.allowWrite),
+          onWrite: toggleWrite,
+          busy,
+        })
 
       /** One row per supported outside client: detected, configured, one click away. */
       const renderClientRow = (client) =>
@@ -5439,8 +5564,8 @@ function groupTables(tables) {
                   className: tool.enabled ? 'dbmcp-tool' : 'dbmcp-tool is-off',
                   title: tool.description || tool.name,
                   /* The whole row flips, the way the old label did. The switch
-                     stops its own click, and the number box stops its, so a
-                     click either lands on exactly one control or on the row. */
+                     stops its own click, so a click either lands on exactly one
+                     control or on the row. */
                   onClick: () => {
                     if (!busy) void toggleTool(tool.name, tool.enabled === false)
                   },
@@ -5457,65 +5582,159 @@ function groupTables(tables) {
                   h('code', { className: 'dbmcp-tool-name' }, tool.full || tool.name),
                   h('span', { className: 'dbmcp-tool-desc' }, firstLine(tool.description)),
                 ),
-                tool.limit
-                  ? h(
-                      'span',
-                      {
-                        className: 'dbmcp-tool-limit',
-                        title: fmt(t('tools.limitHint'), { max: tool.limit.max }),
-                      },
-                      h('input', {
-                        type: 'number',
-                        className: 'dbmcp-input dbmcp-limit',
-                        min: tool.limit.min,
-                        max: tool.limit.max,
-                        step: 1,
-                        value: limitDraft[tool.limit.key] !== undefined ? limitDraft[tool.limit.key] : tool.limit.value,
-                        'aria-label': fmt(t('tools.limitLabel'), { argument: tool.limit.argument }),
-                        disabled: busy,
-                        onClick: (event) => event.stopPropagation(),
-                        onChange: (event) => setLimitDraft({ ...limitDraft, [tool.limit.key]: event.target.value }),
-                        onBlur: () => commitLimit(tool.limit),
-                        onKeyDown: (event) => {
-                          if (event.key === 'Enter') {
-                            event.preventDefault()
-                            event.currentTarget.blur()
-                          }
-                        },
-                      }),
-                      h('span', { className: 'dbmcp-limit-unit' }, t('tools.rows')),
-                    )
-                  : null,
               ),
             ),
           ),
           tools && tools.disabled && tools.disabled.length
             ? h('p', { className: 'dbmcp-hint' }, fmt(t('tools.offCount'), { n: tools.disabled.length }))
             : null,
+        )
+
+      /* The row counts and the long-text policy are not per-tool decisions, but
+         they used to hang off the two rows that carry them — one lone select
+         under a list of eight switches, and a number box parked far away from
+         the name it belonged to. They now share one card of their own. */
+      const limitRules = (() => {
+        const seen = new Map()
+        for (const tool of tools && tools.tools ? tools.tools : []) {
+          if (tool.limit && !seen.has(tool.limit.key)) seen.set(tool.limit.key, tool.limit)
+        }
+        return [...seen.values()]
+      })()
+
+      const limitName = (rule) =>
+        rule.key === 'sampleRows'
+          ? t('render.sampleRows')
+          : rule.key === 'maxRows'
+            ? t('render.maxRows')
+            : rule.argument
+
+      const renderResults = () =>
+        h(
+          Card,
+          { title: t('render.title') },
+          h('p', { className: 'dbmcp-hint' }, t('render.hint')),
           h(
             'div',
-            { className: 'dbmcp-textpolicy' },
-            h(
-              'label',
-              { className: 'dbmcp-textpolicy-label', title: t('tools.textPolicyHint') },
-              t('tools.textPolicy'),
+            { className: 'dbmcp-render-fields' },
+            limitRules.map((rule) =>
+              h(
+                'label',
+                {
+                  key: rule.key,
+                  className: 'dbmcp-render-field',
+                  title: fmt(t('tools.limitHint'), { max: rule.max }),
+                },
+                h('span', { className: 'dbmcp-render-label' }, limitName(rule)),
+                h(
+                  'span',
+                  { className: 'dbmcp-render-input' },
+                  h('input', {
+                    type: 'number',
+                    className: 'dbmcp-input dbmcp-limit',
+                    min: rule.min,
+                    max: rule.max,
+                    step: 1,
+                    value: limitDraft[rule.key] !== undefined ? limitDraft[rule.key] : rule.value,
+                    'aria-label': fmt(t('tools.limitLabel'), { argument: rule.argument }),
+                    disabled: busy,
+                    onClick: (event) => event.stopPropagation(),
+                    onChange: (event) => setLimitDraft({ ...limitDraft, [rule.key]: event.target.value }),
+                    onBlur: () => commitLimit(rule),
+                    onKeyDown: (event) => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault()
+                        event.currentTarget.blur()
+                      }
+                    },
+                  }),
+                  h('span', { className: 'dbmcp-limit-unit' }, t('tools.rows')),
+                ),
+              ),
             ),
             h(
-              'select',
-              {
-                className: 'dbmcp-input dbmcp-textpolicy-select',
-                value: textPolicyDraft !== undefined ? textPolicyDraft : (tools && tools.textPolicy) || 'auto',
-                disabled: busy,
-                onClick: (event) => event.stopPropagation(),
-                onChange: (event) => setTextPolicyDraft(event.target.value),
-                onBlur: () => commitTextPolicy(),
-              },
-              h('option', { value: 'auto' }, t('tools.textAuto')),
-              h('option', { value: 'full' }, t('tools.textFull')),
-              h('option', { value: 'headtail' }, t('tools.textHeadtail')),
+              'label',
+              { className: 'dbmcp-render-field', title: t('tools.textPolicyHint') },
+              h('span', { className: 'dbmcp-render-label' }, t('tools.textPolicy')),
+              h(
+                'select',
+                {
+                  className: 'dbmcp-input dbmcp-textpolicy-select',
+                  value: textPolicyDraft !== undefined ? textPolicyDraft : (tools && tools.textPolicy) || 'auto',
+                  disabled: busy,
+                  onClick: (event) => event.stopPropagation(),
+                  onChange: (event) => setTextPolicyDraft(event.target.value),
+                  onBlur: () => commitTextPolicy(),
+                },
+                h('option', { value: 'auto' }, t('tools.textAuto')),
+                h('option', { value: 'full' }, t('tools.textFull')),
+                h('option', { value: 'headtail' }, t('tools.textHeadtail')),
+              ),
             ),
           ),
         )
+
+      /* A conversation limit has no other screen: it is set by the agent through
+         MCP, so the panel is the only place it can be read or removed. Folded by
+         default because one chip per conversation grows without bound. */
+      const renderScopes = () => {
+        const list = scopes || []
+        if (list.length === 0) return null
+        const rules = list.reduce((sum, entry) => sum + ((entry.ids || []).length), 0)
+        return h(
+          Card,
+          {
+            title: t('scopes.title'),
+            aside: String(list.length),
+            actions: h(
+              'div',
+              { className: 'dbmcp-inline' },
+              h(
+                'button',
+                {
+                  type: 'button',
+                  className: 'dbmcp-btn is-small',
+                  disabled: busy,
+                  onClick: () => setScopesOpen(!scopesOpen),
+                },
+                scopesOpen ? t('scopes.hide') : t('scopes.show'),
+              ),
+              h(
+                'button',
+                { type: 'button', className: 'dbmcp-btn is-small', disabled: busy, onClick: clearScopes },
+                t('scopes.clear'),
+              ),
+            ),
+          },
+          h('p', { className: 'dbmcp-hint' }, fmt(t('scopes.summary'), { n: list.length, rules })),
+          scopesOpen
+            ? h(
+                'div',
+                { className: 'dbmcp-scope-box' },
+                list.map((entry) =>
+                  h(
+                    'div',
+                    { className: 'dbmcp-scope', key: entry.session, title: entry.session },
+                    h('span', { className: 'dbmcp-scope-id' }, shortSession(entry.session)),
+                    h('span', { className: 'dbmcp-hint dbmcp-scope-ids' }, (entry.ids || []).join(', ')),
+                    h(
+                      'button',
+                      {
+                        type: 'button',
+                        className: 'dbmcp-scope-remove',
+                        title: t('scopes.remove'),
+                        'aria-label': t('scopes.remove'),
+                        disabled: busy,
+                        onClick: () => void removeScope(entry.session),
+                      },
+                      '×',
+                    ),
+                  ),
+                ),
+              )
+            : null,
+        )
+      }
 
       let body
       if (state.status === 'loading') {
@@ -5657,42 +5876,6 @@ function groupTables(tables) {
               ),
               h(
                 Row,
-                { label: t('diag.scopes') },
-                scopes && scopes.length
-                  ? h(
-                      'span',
-                      { className: 'dbmcp-scope-list' },
-                      scopes.map((entry) =>
-                        h(
-                          'span',
-                          { className: 'dbmcp-scope', key: entry.session, title: entry.session },
-                          h('span', { className: 'dbmcp-scope-id' }, shortSession(entry.session)),
-                          h('span', { className: 'dbmcp-hint' }, (entry.ids || []).join(', ')),
-                        ),
-                      ),
-                    )
-                  : h('span', { className: 'dbmcp-hint' }, t('diag.scopesNone')),
-              ),
-              h(
-                Row,
-                { label: t('diag.write') },
-                h(
-                  'span',
-                  { className: 'dbmcp-inline' },
-                  h(Switch, {
-                    checked: Boolean(settings && settings.allowWrite),
-                    title: t('diag.write'),
-                    onChange: (next) => toggleWrite(next),
-                  }),
-                  h(
-                    'span',
-                    { className: 'dbmcp-hint' },
-                    settings && settings.allowWrite ? t('diag.writeOn') : t('diag.writeOff'),
-                  ),
-                ),
-              ),
-              h(
-                Row,
                 { label: t('diag.venv') },
                 env && env.venvPython ? env.venvPython : h('span', { className: 'dbmcp-hint' }, t('diag.venvMissing')),
               ),
@@ -5724,6 +5907,8 @@ function groupTables(tables) {
           ),
           tab !== 'clients' ? null : renderClients(),
           tab !== 'tools' ? null : renderTools(),
+          tab !== 'tools' ? null : renderResults(),
+          tab !== 'tools' ? null : renderScopes(),
           tab !== 'audit'
             ? null
             : h(            Card,

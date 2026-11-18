@@ -107,8 +107,8 @@ the source all live there. Below the masthead, seven tabs:
 | New data source | one connection string, user, password; also used for editing |
 | Import from DBeaver | scan, tick, import |
 | Connect | the HTTP endpoint and the outside agents it can be written into |
-| Runtime | Host facts, tool count, global write switch, venv and driver versions |
-| Tools | every tool the Python server publishes, with its on/off switch |
+| Runtime | Host facts, tool count, venv and driver versions |
+| Tools | every tool the Python server publishes, with its on/off switch, plus a Result rendering card (row defaults, long-text policy) and any conversation limits |
 | Audit log | the last dozen tool calls, converted to your time zone |
 
 **New data source** and **Import from DBeaver** swap only the card under the tabs —
@@ -116,8 +116,9 @@ the masthead and tabs stay put, and every earlier step is still a tab away.
 
 The list opens with a status strip: whether the MCP bridge is up, the total number of
 sources, how many probed healthy, and which ones failed (with their names), with the
-search box on the right of that first row. Filter chips — **All**, one chip per group,
-**Ungrouped** and **Only failures** — take the second row. The box matches the name,
+global write switch and the search box on the right of that first row. Filter chips —
+**All**, one chip per group, **Ungrouped** and **Only failures** — take the second
+row. The box matches the name,
 identifier, host, kind and the last probe message; chips and the box narrow the list
 together, and a failed source keeps its red row and an expandable **Error details**
 block either way.

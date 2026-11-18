@@ -24,7 +24,7 @@ report of each version in more detail.
 ### Added
 
 - **Long text in query results is summarised before it reaches the model.** A new
-  "Long text in results" setting on the Tools card picks how cell values are
+  "Long text" setting on the Result rendering card picks how cell values are
   rendered into the model context: `Auto` keeps a head/tail fragment (first and
   last 50 characters) of every cell longer than 200 characters, `Full` returns
   everything, and `Head+Tail` is the same as `Auto`. The policy applies in the
@@ -36,7 +36,25 @@ report of each version in more detail.
   and the whole selection travels together, keeping its own order, and lands above
   or below the row it was dropped on. Dropping on a group moves all of them.
 
+- **Conversation limits can be removed from the panel.** The limits an agent sets
+  through `session_scope` used to be permanent: the only thing that could clear one
+  was the agent itself, and the panel merely listed them. Every limit now has a
+  remove button, the whole set has a "Clear all", and a conversation that is
+  disposed or archived loses its limit automatically, so the list no longer grows
+  forever.
+
 ### Changed
+
+- **The Result rendering card collects the three output settings.** The row counts
+  and the long-text policy are not per-tool decisions, so they no longer hang off
+  the tool rows — where one number box sat far from the name it belonged to and the
+  policy select trailed the end of the list. The Tools tab now has one card with the
+  sample-row default, the query-row maximum and the long-text policy, side by side.
+
+- **The global write switch moved to the Sources page.** It lived in the Runtime
+  tab among read-only facts, so the one control on that page read as another line of
+  diagnostics. It now sits in the sources status strip, next to the sources whose
+  writes it governs, and the Runtime tab is pure information again.
 
 - **Emptying a group deletes it.** Deleting the last source in a group removes the
   group too, instead of leaving behind an empty section nobody created. A group that
