@@ -23,6 +23,18 @@ report of each version in more detail.
 
 ### Added
 
+- **A statement deadline, and reads that stop fetching early.** `connect_timeout` was
+  the only bound on a call, so a runaway query could occupy the child until the server
+  gave up, and a `SELECT` over a large table pulled the whole result set into memory
+  before `max_rows` trimmed the output. Every statement now carries a deadline —
+  `DB_MCP_STATEMENT_TIMEOUT_MS`, default 30 s, `0` to disable — pushed down to the
+  engine (`statement_timeout` on PostgreSQL/openGauss, `max_execution_time` on MySQL,
+  `call_timeout` on Oracle, a progress handler on SQLite), and a timeout comes back as
+  `code: "timeout"` with a hint saying how to change it. Reads run on a server-side
+  cursor (psycopg named cursor, PyMySQL `SSCursor`) and stop at `max_rows + 1`; writes
+  keep the ordinary cursor. MySQL applies its limit to `SELECT` only, which the
+  reference states.
+
 - **`execute_sql` takes `full_text`.** The long-text setting decides the default, but
   a single call can now ask for the whole value: `full_text: true` skips both the
   fragment summary and the 4000-character cap, for the case where the model is about

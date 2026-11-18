@@ -94,6 +94,27 @@ def allow_write() -> bool:
     return os.environ.get("DB_MCP_ALLOW_WRITE", "0") == "1"
 
 
+# How long one statement may run. A query that runs for minutes holds a server
+# slot and the caller has no way to cancel it — the model is simply waiting. 0
+# disables the limit for people who need a long report to finish.
+DEFAULT_STATEMENT_TIMEOUT_MS = 30_000
+
+
+def statement_timeout_ms() -> int:
+    """Read the limit from the environment; a bad value keeps the default."""
+    raw = (os.environ.get("DB_MCP_STATEMENT_TIMEOUT_MS") or "").strip()
+    if not raw:
+        return DEFAULT_STATEMENT_TIMEOUT_MS
+    try:
+        value = int(raw)
+    except ValueError:
+        return DEFAULT_STATEMENT_TIMEOUT_MS
+    return max(0, value)
+
+
+STATEMENT_TIMEOUT_MS = statement_timeout_ms()
+
+
 # How long cell values are rendered before they are summarised. The panel lets
 # the user pick the policy; the default keeps long text out of the model context
 # while preserving a head/tail fragment the model can reason about.
@@ -402,6 +423,62 @@ def _connect_sqlite(profile: dict, config: dict):
     return connection, connection.close
 
 
+# --------------------------------------------------------------------------- #
+# statement timeout
+
+# Driver messages that mean "the server stopped this because it ran too long".
+# Every engine words it differently and some of them (SQLite) only say
+# "interrupted", so the check has to be a list rather than one substring.
+TIMEOUT_MARKERS = (
+    "timeout",
+    "timed out",
+    "canceling statement",
+    "interrupted",
+    "max_execution_time",
+    "max_statement_time",
+    "ora-01013",
+    "ora-12170",
+)
+
+
+def _is_timeout(error: BaseException) -> bool:
+    text = str(error).lower()
+    return any(marker in text for marker in TIMEOUT_MARKERS)
+
+
+def _timeout_error(kind: str, error: BaseException) -> DbError:
+    seconds = STATEMENT_TIMEOUT_MS / 1000.0
+    return DbError(
+        "timeout",
+        f"the statement ran longer than {seconds:g}s and was stopped: {error}",
+        "narrow the query (a WHERE clause, a smaller LIMIT, fewer columns) or raise "
+        "DB_MCP_STATEMENT_TIMEOUT_MS; 0 turns the limit off",
+    )
+
+
+def _arm_sqlite_timeout(connection) -> None:
+    """Interrupt a SQLite statement that runs past the limit.
+
+    SQLite has no server-side timeout, but it calls a progress handler every N
+    virtual-machine steps and stops the statement when the handler returns
+    non-zero. That is the only way to bound a runaway query without a second
+    thread.
+    """
+    if STATEMENT_TIMEOUT_MS <= 0 or not hasattr(connection, "set_progress_handler"):
+        return
+    deadline = time.monotonic() + STATEMENT_TIMEOUT_MS / 1000.0
+    connection.set_progress_handler(lambda: 1 if time.monotonic() > deadline else 0, 10_000)
+
+
+def _disarm_sqlite_timeout(connection) -> None:
+    if not hasattr(connection, "set_progress_handler"):
+        return
+    try:
+        connection.set_progress_handler(None, 0)
+    except Exception:  # noqa: BLE001 - a closed connection needs no cleanup
+        pass
+
+
 PG_SSL_MODES = ("disable", "allow", "prefer", "require", "verify-ca", "verify-full")
 MYSQL_SSL_MODES = (
     "disable",
@@ -464,12 +541,27 @@ def _mysql_ssl(config: dict):
     return None
 
 
+def _pg_options(profile: dict) -> str | None:
+    """`options` for libpq: the read-only switch and the statement timeout.
+
+    Both are session settings, so they have to be on the connection itself —
+    psycopg has no per-cursor timeout, and setting it after connect leaves a
+    window where the first statement is unbounded.
+    """
+    parts = []
+    if profile.get("readOnly"):
+        parts.append("-c default_transaction_read_only=on")
+    if STATEMENT_TIMEOUT_MS > 0:
+        parts.append(f"-c statement_timeout={STATEMENT_TIMEOUT_MS}")
+    return " ".join(parts) or None
+
+
 def _connect_postgres(profile: dict, config: dict, password: str | None):
     try:
         import psycopg
     except ImportError as error:  # pragma: no cover - environment problem
         raise DbError("infra_error", f"psycopg is not installed: {error}", "run the plugin's Python setup again")
-    options = "-c default_transaction_read_only=on" if profile.get("readOnly") else None
+    options = _pg_options(profile)
     sslmode = _pg_sslmode(config)
     try:
         connection = psycopg.connect(
@@ -678,6 +770,11 @@ def _connect_gauss(profile: dict, config: dict, password: str | None):
 
         connection = py_opengauss.open(_gauss_iri(config, password))
         wrapped = _GaussConnection(connection)
+        if STATEMENT_TIMEOUT_MS > 0:
+            try:
+                wrapped.cursor().execute(f"SET statement_timeout = {int(STATEMENT_TIMEOUT_MS)}")
+            except Exception:  # noqa: BLE001 - older builds refuse the setting
+                pass
         if profile.get("readOnly"):
             try:
                 wrapped.cursor().execute("SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY")
@@ -720,6 +817,15 @@ def _connect_mysql(profile: dict, config: dict, password: str | None):
         )
     except Exception as error:  # noqa: BLE001 - driver specific exception types
         raise DbError("db_error", f"MySQL connection failed: {error}")
+    if STATEMENT_TIMEOUT_MS > 0:
+        # `max_execution_time` is the only server-side limit MySQL offers, and it
+        # applies to SELECT statements alone — an UPDATE that runs for an hour is
+        # not stopped by it. Said plainly here so the docs can say it too.
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute(f"SET SESSION max_execution_time = {int(STATEMENT_TIMEOUT_MS)}")
+        except Exception:  # noqa: BLE001 - servers before 5.7.8 have no such setting
+            pass
     if profile.get("readOnly"):
         try:
             with connection.cursor() as cursor:
@@ -746,6 +852,14 @@ def _connect_oracle(profile: dict, config: dict, password: str | None):
         connection = oracledb.connect(user=config.get("user") or None, password=password, dsn=dsn)
     except Exception as error:  # noqa: BLE001 - driver specific exception types
         raise DbError("db_error", f"Oracle connection failed: {error}")
+    if STATEMENT_TIMEOUT_MS > 0:
+        # oracledb takes the limit per call (`Connection.call_timeout`, in
+        # milliseconds), and it covers the round trip rather than the server's
+        # own execution time. It is the only knob the driver exposes.
+        try:
+            connection.call_timeout = int(STATEMENT_TIMEOUT_MS)
+        except Exception:  # noqa: BLE001 - older driver builds ignore it
+            pass
     return connection, connection.close
 
 
@@ -1074,6 +1188,30 @@ def table_ddl(profile: dict, connection, table: str, schema: str | None = None) 
 # queries
 
 
+def _read_cursor(connection, kind: str, is_write: bool):
+    """A cursor that does not pull the whole result set into memory.
+
+    A client-side cursor fetches every row on `execute()`, so `max_rows` only
+    trimmed what was *rendered* while the driver had already buffered a million
+    rows. A server-side cursor sends the query and reads rows on demand, which is
+    what makes the row cap a real bound on memory.
+    """
+    if is_write:
+        return connection.cursor()
+    try:
+        if kind in PG_LIKE:
+            # psycopg3's named cursor needs a transaction block; the caller is in
+            # one already (the connection is not autocommit), so this is safe.
+            return connection.cursor(name="db_mcp_read")
+        if kind == "mysql":
+            import pymysql
+
+            return connection.cursor(pymysql.cursors.SSCursor)
+    except Exception:  # noqa: BLE001 - fall back to the plain cursor
+        pass
+    return connection.cursor()
+
+
 def execute_sql(profile: dict, connection, sql: str, max_rows: int, full_text: bool = False) -> dict:
     ensure_readable(sql, profile)
     kind = profile.get("kind")
@@ -1082,7 +1220,9 @@ def execute_sql(profile: dict, connection, sql: str, max_rows: int, full_text: b
     # The first keyword is not enough: `with x as (delete … returning *) select …`
     # starts with `with` but changes rows, and used to be rolled back here.
     is_write = not read_only_statement(statement, kind)
-    cursor = connection.cursor()
+    if kind == "sqlite":
+        _arm_sqlite_timeout(connection)
+    cursor = _read_cursor(connection, kind, is_write)
     affected = None
     try:
         if kind == "oracle" and profile.get("readOnly"):
@@ -1090,8 +1230,13 @@ def execute_sql(profile: dict, connection, sql: str, max_rows: int, full_text: b
                 cursor.execute("SET TRANSACTION READ ONLY")
             except Exception:  # noqa: BLE001 - not every session allows the switch
                 pass
-        cursor.execute(statement)
-        columns, rows, truncated = _rows(cursor, max_rows, full_text)
+        try:
+            cursor.execute(statement)
+            columns, rows, truncated = _rows(cursor, max_rows, full_text)
+        except Exception as error:  # noqa: BLE001 - re-raised as a DbError below
+            if _is_timeout(error):
+                raise _timeout_error(kind, error) from error
+            raise
 
         if is_write:
             affected = _affected_rows(cursor)
@@ -1110,6 +1255,8 @@ def execute_sql(profile: dict, connection, sql: str, max_rows: int, full_text: b
             connection.commit()
     finally:
         cursor.close()
+        if kind == "sqlite":
+            _disarm_sqlite_timeout(connection)
     result = {
         "sql": sql,
         "columns": columns,

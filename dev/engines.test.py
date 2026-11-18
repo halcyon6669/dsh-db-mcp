@@ -10,7 +10,11 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import shutil
+import sqlite3
 import sys
+import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -70,8 +74,10 @@ class FakeConnection:
         self._cursor = cursor
         self.commits = 0
         self.rollbacks = 0
+        self.cursor_calls: list[dict] = []
 
-    def cursor(self):
+    def cursor(self, *args, **kwargs):
+        self.cursor_calls.append({"args": args, "kwargs": dict(kwargs)})
         return self._cursor
 
     def commit(self) -> None:
@@ -79,6 +85,39 @@ class FakeConnection:
 
     def rollback(self) -> None:
         self.rollbacks += 1
+
+
+class ServerSideCursorConnection(FakeConnection):
+    """A connection whose `cursor(name=…)` really returns a different cursor.
+
+    psycopg3 needs the `name` argument to hand back a server-side cursor; a stub
+    that ignores it cannot tell the two paths apart, which is how the memory
+    problem stayed invisible.
+    """
+
+    def __init__(self, plain: FakeCursor, named: FakeCursor):
+        super().__init__(plain)
+        self._plain = plain
+        self._named = named
+        self.named_calls = 0
+
+    def cursor(self, *args, **kwargs):
+        self.cursor_calls.append({"args": args, "kwargs": dict(kwargs)})
+        if kwargs.get("name"):
+            self.named_calls += 1
+            return self._named
+        return self._plain
+
+
+class FakeSqliteConnection(FakeConnection):
+    """Records the progress handler, so arming and disarming are observable."""
+
+    def __init__(self, cursor: FakeCursor):
+        super().__init__(cursor)
+        self.handlers: list = []
+
+    def set_progress_handler(self, handler, steps):
+        self.handlers.append((handler, steps))
 
 
 CONFIG = {
@@ -505,6 +544,205 @@ class RenderContract(unittest.TestCase):
         self.assertEqual(sorted(result), ["affectedRows", "columns", "elapsedMs", "rowCount", "rows", "sql", "truncated"])
         self.assertEqual(result["rowCount"], 0)
         self.assertEqual(result["affectedRows"], 2)
+
+
+class ResourceLimits(unittest.TestCase):
+    """A query that runs too long, or returns too much, is stopped rather than buffered.
+
+    Before this, the only bound was `connect_timeout=10`: a statement could run
+    for as long as the server allowed, and `max_rows` trimmed the *output* of a
+    result set the driver had already loaded in full.
+    """
+
+    def setUp(self):
+        self._previous = os.environ.get("DB_MCP_ALLOW_WRITE")
+        self._previous_timeout = engines.STATEMENT_TIMEOUT_MS
+        os.environ["DB_MCP_ALLOW_WRITE"] = "1"
+
+    def tearDown(self):
+        engines.STATEMENT_TIMEOUT_MS = self._previous_timeout
+        if self._previous is None:
+            os.environ.pop("DB_MCP_ALLOW_WRITE", None)
+        else:
+            os.environ["DB_MCP_ALLOW_WRITE"] = self._previous
+
+    def test_the_default_is_thirty_seconds(self):
+        os.environ.pop("DB_MCP_STATEMENT_TIMEOUT_MS", None)
+        self.assertEqual(engines.statement_timeout_ms(), 30_000)
+
+    def test_a_bad_value_keeps_the_default(self):
+        os.environ["DB_MCP_STATEMENT_TIMEOUT_MS"] = "soon"
+        try:
+            self.assertEqual(engines.statement_timeout_ms(), engines.DEFAULT_STATEMENT_TIMEOUT_MS)
+        finally:
+            os.environ.pop("DB_MCP_STATEMENT_TIMEOUT_MS", None)
+
+    def test_zero_disables_the_limit(self):
+        os.environ["DB_MCP_STATEMENT_TIMEOUT_MS"] = "0"
+        try:
+            self.assertEqual(engines.statement_timeout_ms(), 0)
+        finally:
+            os.environ.pop("DB_MCP_STATEMENT_TIMEOUT_MS", None)
+
+    def test_postgres_gets_the_timeout_and_the_read_only_switch(self):
+        engines.STATEMENT_TIMEOUT_MS = 1500
+        options = engines._pg_options(profile("postgres", read_only=True))
+        self.assertIn("default_transaction_read_only=on", options)
+        self.assertIn("statement_timeout=1500", options)
+
+    def test_postgres_options_vanish_when_nothing_is_set(self):
+        engines.STATEMENT_TIMEOUT_MS = 0
+        self.assertIsNone(engines._pg_options(profile("postgres")))
+
+    def test_a_read_uses_a_server_side_cursor(self):
+        plain = FakeCursor(description=[("n",)], rows=[(1,)])
+        named = FakeCursor(description=[("n",)], rows=[(1,)])
+        connection = ServerSideCursorConnection(plain, named)
+        engines.execute_sql(profile("postgres"), connection, "select 1 as n", 200)
+        self.assertEqual(connection.named_calls, 1)
+        self.assertEqual(named.executed, ["select 1 as n"])
+        self.assertEqual(plain.executed, [])
+
+    def test_a_write_uses_a_plain_cursor(self):
+        # A named cursor cannot run DDL or a DML statement that returns no rows.
+        cursor = FakeCursor(rowcount=3)
+        connection = FakeConnection(cursor)
+        engines.execute_sql(profile("postgres"), connection, "update t set a = 1", 200)
+        self.assertEqual(cursor.executed, ["update t set a = 1"])
+        self.assertEqual(connection.commits, 1)
+
+    def test_mysql_reads_use_the_unbuffered_cursor(self):
+        plain = FakeCursor(description=[("n",)], rows=[(1,)])
+        connection = FakeConnection(plain)
+        # PyMySQL is not a hard dependency of the test run, so the class lookup
+        # is stubbed the same way the driver would supply it.
+        class Cursors:
+            SSCursor = object()
+
+        class FakePymysql:
+            cursors = Cursors
+
+        previous = sys.modules.get("pymysql")
+        sys.modules["pymysql"] = FakePymysql
+        try:
+            engines.execute_sql(profile("mysql"), connection, "select 1 as n", 200)
+        finally:
+            if previous is None:
+                sys.modules.pop("pymysql", None)
+            else:
+                sys.modules["pymysql"] = previous
+        self.assertEqual(len(connection.cursor_calls), 1)
+        self.assertEqual(connection.cursor_calls[0]["args"], (Cursors.SSCursor,))
+
+    def test_sqlite_arms_and_disarms_the_progress_handler(self):
+        engines.STATEMENT_TIMEOUT_MS = 5000
+        cursor = FakeCursor(description=[("n",)], rows=[(1,)])
+        connection = FakeSqliteConnection(cursor)
+        engines.execute_sql(profile("sqlite"), connection, "select 1 as n", 200)
+        self.assertEqual(len(connection.handlers), 2)
+        self.assertIsNotNone(connection.handlers[0][0])
+        self.assertIsNone(connection.handlers[1][0])
+
+    def test_the_progress_handler_stops_a_slow_statement(self):
+        engines.STATEMENT_TIMEOUT_MS = 1
+        cursor = FakeCursor(description=[("n",)], rows=[(1,)])
+        connection = FakeSqliteConnection(cursor)
+        engines.execute_sql(profile("sqlite"), connection, "select 1 as n", 200)
+        handler = connection.handlers[0][0]
+        self.assertEqual(handler(), 0, "a fresh deadline must not interrupt")
+        # Rewind the deadline instead of sleeping for it.
+        engines.STATEMENT_TIMEOUT_MS = 1
+        import time as _time
+
+        original = _time.monotonic
+        try:
+            _time.monotonic = lambda: original() + 10
+            self.assertEqual(handler(), 1)
+        finally:
+            _time.monotonic = original
+
+    def test_a_timeout_becomes_a_timeout_error(self):
+        engines.STATEMENT_TIMEOUT_MS = 2000
+        cursor = FakeCursor()
+        cursor.fail_with = RuntimeError("canceling statement due to statement timeout")
+        connection = FakeConnection(cursor)
+        with self.assertRaises(engines.DbError) as caught:
+            engines.execute_sql(profile("postgres"), connection, "select pg_sleep(60)", 200)
+        self.assertEqual(caught.exception.code, "timeout")
+        self.assertIn("2s", caught.exception.message)
+        self.assertIn("DB_MCP_STATEMENT_TIMEOUT_MS", caught.exception.hint)
+
+    def test_a_plain_error_keeps_its_own_shape(self):
+        cursor = FakeCursor()
+        cursor.fail_with = RuntimeError('relation "nope" does not exist')
+        connection = FakeConnection(cursor)
+        with self.assertRaises(RuntimeError):
+            engines.execute_sql(profile("postgres"), connection, "select * from nope", 200)
+
+
+class SqliteTimeoutOnARealDatabase(unittest.TestCase):
+    """The one engine that can be exercised without a server: a real interrupt.
+
+    A stub connection can show that the progress handler is installed, but not
+    that SQLite actually stops the statement — that only happens when the
+    callback runs from inside the virtual machine.
+    """
+
+    def setUp(self):
+        self._previous_timeout = engines.STATEMENT_TIMEOUT_MS
+        self._previous_write = os.environ.get("DB_MCP_ALLOW_WRITE")
+        os.environ["DB_MCP_ALLOW_WRITE"] = "1"
+        self.dir = tempfile.mkdtemp(prefix="db-mcp-timeout-")
+        self.path = Path(self.dir) / "slow.db"
+        seed = sqlite3.connect(str(self.path))
+        try:
+            seed.execute("create table t (n integer)")
+            seed.commit()
+        finally:
+            seed.close()
+        self.profile = {
+            "id": "slow",
+            "kind": "sqlite",
+            "config": {"file": str(self.path)},
+            "readOnly": False,
+            "allowDdl": False,
+        }
+
+    def tearDown(self):
+        engines.STATEMENT_TIMEOUT_MS = self._previous_timeout
+        if self._previous_write is None:
+            os.environ.pop("DB_MCP_ALLOW_WRITE", None)
+        else:
+            os.environ["DB_MCP_ALLOW_WRITE"] = self._previous_write
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def test_a_runaway_recursive_query_is_interrupted(self):
+        # 2^40 rows: it would run for minutes if nothing stopped it.
+        runaway = (
+            "with recursive c(x) as (select 1 union all select x + 1 from c where x < 1099511627776) "
+            "select count(*) from c"
+        )
+        engines.STATEMENT_TIMEOUT_MS = 150
+        connection, close = engines.connect(self.profile, None)
+        started = time.monotonic()
+        try:
+            with self.assertRaises(engines.DbError) as caught:
+                engines.execute_sql(self.profile, connection, runaway, 200)
+        finally:
+            close()
+        elapsed = time.monotonic() - started
+        self.assertEqual(caught.exception.code, "timeout")
+        self.assertLess(elapsed, 10, "the interrupt has to arrive near the deadline")
+        self.assertIn("DB_MCP_STATEMENT_TIMEOUT_MS", caught.exception.hint)
+
+    def test_a_normal_query_still_finishes(self):
+        engines.STATEMENT_TIMEOUT_MS = 5000
+        connection, close = engines.connect(self.profile, None)
+        try:
+            result = engines.execute_sql(self.profile, connection, "select count(*) as n from t", 200)
+        finally:
+            close()
+        self.assertEqual(result["rows"], [[0]])
 
 
 class CellPolicy(unittest.TestCase):

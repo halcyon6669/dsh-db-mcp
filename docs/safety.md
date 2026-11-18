@@ -157,6 +157,29 @@ it:
   for proxy handlers. If you need those connections, publish the database endpoint
   another way and add it by hand.
 
+## Resource limits
+
+A runaway query is the failure mode that looks like a hang rather than an error, so
+two bounds sit on every call:
+
+- **A statement deadline.** `DB_MCP_STATEMENT_TIMEOUT_MS` (default 30 s, `0` turns it
+  off) is pushed to the engine itself — `statement_timeout` on PostgreSQL and
+  openGauss, `max_execution_time` on MySQL, `call_timeout` on Oracle, a progress
+  handler on SQLite. The engine, not the plugin, stops the work, so the connection
+  stays usable afterwards. MySQL applies it to `SELECT` only; a long `UPDATE` there
+  still runs to completion. A timeout comes back as `code: "timeout"` with a hint
+  naming the variable, which is the signal for the agent to narrow the query rather
+  than retry it.
+- **A server-side cursor for reads.** Without one, the driver pulls the whole result
+  set into memory before `max_rows` trims the output, so a `SELECT` over a large
+  table could exhaust the child process while returning 200 rows. Reads now use a
+  psycopg named cursor or a PyMySQL `SSCursor` and stop fetching at `max_rows + 1`;
+  writes keep the ordinary cursor because a named one cannot run DDL.
+
+Both are about the child process, not about permissions: they bound what a
+well-behaved call can cost, and they do not replace the write switch or the DDL
+opt-in.
+
 ## Audit log
 
 Every MCP tool call appends one JSON line to `<runtime>/logs/audit.jsonl` (0600):

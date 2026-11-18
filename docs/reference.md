@@ -82,6 +82,15 @@ or the very first source created.
 Row limits come from the server: `DB_MCP_MAX_ROWS` (default 200) per call, capped at
 `DB_MCP_MAX_ROWS_HARD` (default 2000).
 
+Every statement also has a deadline: `DB_MCP_STATEMENT_TIMEOUT_MS` (default 30000,
+`0` disables it). It is set per engine — `statement_timeout` on PostgreSQL and
+openGauss, `max_execution_time` on MySQL (which the server applies to `SELECT` only),
+`call_timeout` on Oracle, and a SQLite progress handler. A statement that hits it
+comes back as `{ ok: false, error: { code: "timeout", … } }`, and the hint says how
+to raise or disable the limit. Reads additionally run on a server-side cursor
+(psycopg named cursor, PyMySQL `SSCursor`) so a wide result set is not pulled into
+memory before `max_rows` trims it; writes keep the ordinary cursor.
+
 | Tool | Parameters | Returns |
 | ---- | ---------- | ------- |
 | `list_datasources` | — | `[{ id, name, kind, target, readOnly, isDefault }]` |
@@ -108,7 +117,8 @@ Failures come back as `{ ok: false, error: { code, message, hint? } }` with
 | Code | Meaning |
 | ---- | ------- |
 | `user_error` | the request is wrong: unknown datasource, refused write, bad table name, a DDL statement on a source that has not opted in |
-| `db_error` | the engine refused or failed: authentication, syntax, timeout |
+| `db_error` | the engine refused or failed: authentication, syntax |
+| `timeout` | the statement ran past `DB_MCP_STATEMENT_TIMEOUT_MS` and was stopped |
 | `infra_error` | the plugin could not get that far: interpreter missing, venv broken |
 
 ## Files
@@ -308,8 +318,10 @@ The bundle row in the profile accepts these options (all optional):
 | `debug` | `false` | log Host activity to the DSH console |
 
 The Python side reads `DB_MCP_RUNTIME`, `DB_MCP_ALLOW_WRITE`, `DB_MCP_TEXT_POLICY`,
-`DB_MCP_MAX_ROWS` and `DB_MCP_MAX_ROWS_HARD`; the Host sets the first three when
-spawning.
+`DB_MCP_MAX_ROWS`, `DB_MCP_MAX_ROWS_HARD` and `DB_MCP_STATEMENT_TIMEOUT_MS`; the Host
+sets the first three when spawning. `DB_MCP_STATEMENT_TIMEOUT_MS` is read by the
+Python child itself, so setting it in the environment before DSH starts is enough —
+it does not have to be a bundle option.
 
 ## Runtime requirements
 

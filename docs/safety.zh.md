@@ -74,6 +74,15 @@ Python 服务在启动时读取全局开关，开关一动 Host 就重启它。�
 - **openGauss 不校验证书。** 驱动的 TLS 入口被 shim 接管（Python 3.12 移除了 `ssl.wrap_socket`），shim 以 `CERT_NONE` 运行，所以连到 openGauss 的链路是加密的，但没有认证：中间人可以出示任意证书。这类服务器请放在你能控制的网络里，或者在前面做 TLS 终止。
 - **需要 SSH 隧道的 DBeaver 连接不会被导入。** DBeaver 把隧道放在 `configuration.handlers` 里，而连接字段里写的是隧道的本地端，直接导入会得到一个指向 `localhost` 的数据源。导入列表会把这类连接连同原因一起显示出来，且没有勾选框；走代理的 handler 同样处理。确实需要的话，请换一种方式把数据库端点暴露出来再手动添加。
 
+## 资源上限
+
+失控的查询表现出来像卡死而不是报错，所以每次调用都压着两道上限：
+
+- **语句截止时间。** `DB_MCP_STATEMENT_TIMEOUT_MS`（默认 30 秒，设为 `0` 关闭）被下发给引擎本身 —— PostgreSQL 与 openGauss 用 `statement_timeout`，MySQL 用 `max_execution_time`，Oracle 用 `call_timeout`，SQLite 用 progress handler。动手的是引擎而不是插件，所以中断之后连接仍然可用。MySQL 只对 `SELECT` 生效，超长的 `UPDATE` 仍会跑完。超时以 `code: "timeout"` 返回，hint 里写明这个变量名 —— 这是给 agent 的信号：应该缩小查询，而不是重试。
+- **读查询走服务端游标。** 没有它时，驱动会把整个结果集读进内存，`max_rows` 只截断输出，于是一个大表上的 `SELECT` 可能撑爆子进程却只返回 200 行。现在读查询用 psycopg 的命名游标或 PyMySQL 的 `SSCursor`，取到 `max_rows + 1` 行就停；写语句仍用普通游标，因为命名游标跑不了 DDL。
+
+这两条管的是子进程的开销，不是权限：它们限制一次正常调用最多能花多少资源，不替代全局写开关和 DDL 授权。
+
 ## 审计日志
 
 每次 MCP 工具调用都会往 `<runtime>/logs/audit.jsonl`（0600）追加一行 JSON：时间、工具、数据源、耗时、行数、截断到 2000 字符的 SQL，以及失败时的错误。结果行本身从不记录。文件到 512 KiB 会轮转为 `audit.1.jsonl`，日志可用 `auditLog: false` 关闭。
