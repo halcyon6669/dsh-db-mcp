@@ -127,14 +127,8 @@ window.__ModuleLoader__.load({
       'tools.disable': 'Turn off',
       'tools.rows': 'rows',
       'tools.limitLabel': 'Default rows for {argument}',
-      'tools.limitHint': 'Rows used when the agent does not ask for a number (1-{max}).',
+      'tools.limitHint': 'Rows used when the agent names no count (1-{max}).',
       'tools.limitSaved': 'Default row count saved.',
-      'tools.textPolicy': 'Long text in results',
-      'tools.textPolicyHint': 'How long cell values appear in the model context. Auto keeps a head/tail fragment of every cell longer than 200 characters; Full returns everything; Head+Tail is the same as Auto.',
-      'tools.textAuto': 'Auto (fragment)',
-      'tools.textFull': 'Full',
-      'tools.textHeadtail': 'Head+Tail',
-      'tools.textPolicySaved': 'Long-text policy saved.',
         'sources.count': '{n} configured',
         'sources.empty.title': 'No data source yet',
         'sources.empty.body': 'Add one here, or import the connections DBeaver already keeps on this machine. The agent queries real data through MCP tools, never through this page.',
@@ -224,10 +218,16 @@ window.__ModuleLoader__.load({
         'write.on': 'Global write',
         'write.off': 'Global read-only',
         'write.hint': 'On: a source must still allow writes itself. Off: every write statement is refused.',
-        'render.title': 'Result rendering',
-        'render.hint': 'How much of a result reaches the model. The row defaults apply when the agent does not name a count itself.',
+        'render.title': 'Context optimisation',
         'render.sampleRows': 'Sample rows',
+        'render.sampleRowsHint': 'Rows that sample_rows returns when the agent names no count (1-{max}). A table preview — keep it small.',
         'render.maxRows': 'Query rows',
+        'render.maxRowsHint': 'Rows that execute_sql returns when the agent names no count (1-{max}). The ceiling for one query.',
+        'render.text': 'Long text in results',
+        'render.textHint': 'Cells longer than 200 characters. Fragment keeps the first and last 50 and marks what was cut; Full passes the whole value through.',
+        'render.textFragment': 'Fragment (head+tail)',
+        'render.textFull': 'Full value',
+        'render.textSaved': 'Long-text setting saved.',
         'scopes.title': 'Conversation limits',
         'scopes.summary': '{n} conversation(s) limited · {rules} rule(s)',
         'scopes.show': 'Show',
@@ -401,12 +401,6 @@ window.__ModuleLoader__.load({
       'tools.limitLabel': '{argument} 的默认行数',
       'tools.limitHint': '模型没指定行数时默认返回多少行（1-{max}）。',
       'tools.limitSaved': '默认行数已保存。',
-      'tools.textPolicy': '结果里的长文本',
-      'tools.textPolicyHint': '长单元格内容在模型上下文里的呈现方式。自动：超过 200 字符的单元格保留头尾各 50 字符；完整：原样返回；头+尾：同自动。',
-      'tools.textAuto': '自动（头尾片段）',
-      'tools.textFull': '完整',
-      'tools.textHeadtail': '头+尾',
-      'tools.textPolicySaved': '长文本策略已保存。',
         'sources.count': '已配置 {n} 个',
         'sources.empty.title': '还没有数据源',
         'sources.empty.body': '可以在这里新增，也可以直接导入这台机器上 DBeaver 已有的连接。AI 通过 MCP 工具查询真实数据，不会在这个页面里执行 SQL。',
@@ -495,10 +489,16 @@ window.__ModuleLoader__.load({
         'write.on': '全局写',
         'write.off': '全局只读',
         'write.hint': '开启后单个数据源仍须自己允许写；关闭时所有写语句都会被拒绝。',
-        'render.title': '结果呈现',
-        'render.hint': '结果有多少进入模型上下文。行数只在 AI 没有自己指定数量时生效。',
+        'render.title': '上下文优化',
         'render.sampleRows': '默认行数',
+        'render.sampleRowsHint': 'AI 没指定数量时 sample_rows 返回的行数（1-{max}）。相当于预览表内容，别设太大。',
         'render.maxRows': '查询行数',
+        'render.maxRowsHint': 'AI 没指定数量时 execute_sql 返回的行数（1-{max}）。一次查询的上限。',
+        'render.text': '结果里的长文本',
+        'render.textHint': '超过 200 字符的单元格。片段：保留头尾各 50 字符并标出省略了多少；完整：原样传给模型。',
+        'render.textFragment': '片段（头+尾）',
+        'render.textFull': '完整值',
+        'render.textSaved': '长文本设置已保存。',
         'scopes.title': '会话访问范围',
         'scopes.summary': '{n} 个会话受限 · 共 {rules} 条规则',
         'scopes.show': '展开',
@@ -1456,24 +1456,35 @@ window.__ModuleLoader__.load({
         margin-left: 1px;
       }
       .dbmcp-limit-unit { font-size: 12px; color: var(--dsw-alias-label-secondary); }
-      /* One card holds the numbers and the long-text policy, so the fields line
-         up as a row of labels instead of trailing off the tool list. */
+      /* One card holds the numbers and the long-text setting, one setting per
+         line: a labelled control on top, its explanation underneath. */
       .dbmcp-render-fields {
         display: flex;
-        flex-wrap: wrap;
-        align-items: flex-start;
-        gap: 16px;
+        flex-direction: column;
+        gap: 14px;
       }
       .dbmcp-render-field {
-        display: inline-flex;
+        display: flex;
         flex-direction: column;
-        gap: 4px;
+        gap: 3px;
         min-width: 0;
+      }
+      .dbmcp-render-head {
+        display: flex;
+        align-items: center;
+        gap: 10px;
       }
       .dbmcp-render-label {
         font-size: 12px;
-        color: var(--dsw-alias-label-secondary);
+        font-weight: 500;
+        color: var(--dsw-alias-label-primary);
         white-space: nowrap;
+      }
+      .dbmcp-render-hint {
+        margin: 0;
+        font-size: 12px;
+        line-height: 1.45;
+        color: var(--dsw-alias-label-secondary);
       }
       .dbmcp-render-input {
         display: inline-flex;
@@ -4791,7 +4802,7 @@ function groupTables(tables) {
         try {
           await apiPost('/settings', { textPolicy: next })
           setTextPolicyDraft(undefined)
-          setNotice({ message: t('tools.textPolicySaved'), isError: false })
+          setNotice({ message: t('render.textSaved'), isError: false })
           await load()
         } catch (error) {
           setTextPolicyDraft(undefined)
@@ -5600,7 +5611,8 @@ function groupTables(tables) {
       /* The row counts and the long-text policy are not per-tool decisions, but
          they used to hang off the two rows that carry them — one lone select
          under a list of eight switches, and a number box parked far away from
-         the name it belonged to. They now share one card of their own. */
+         the name it belonged to. They now share one card of their own, one
+         setting per line so each can say what it does. */
       const limitRules = (() => {
         const seen = new Map()
         for (const tool of tools && tools.tools ? tools.tools : []) {
@@ -5616,67 +5628,78 @@ function groupTables(tables) {
             ? t('render.maxRows')
             : rule.argument
 
+      const limitHint = (rule) =>
+        rule.key === 'sampleRows'
+          ? fmt(t('render.sampleRowsHint'), { max: rule.max })
+          : rule.key === 'maxRows'
+            ? fmt(t('render.maxRowsHint'), { max: rule.max })
+            : fmt(t('tools.limitHint'), { max: rule.max })
+
       const renderResults = () =>
         h(
           Card,
           { title: t('render.title') },
-          h('p', { className: 'dbmcp-hint' }, t('render.hint')),
           h(
             'div',
             { className: 'dbmcp-render-fields' },
             limitRules.map((rule) =>
               h(
-                'label',
-                {
-                  key: rule.key,
-                  className: 'dbmcp-render-field',
-                  title: fmt(t('tools.limitHint'), { max: rule.max }),
-                },
-                h('span', { className: 'dbmcp-render-label' }, limitName(rule)),
+                'div',
+                { key: rule.key, className: 'dbmcp-render-field' },
                 h(
-                  'span',
-                  { className: 'dbmcp-render-input' },
-                  h('input', {
-                    type: 'number',
-                    className: 'dbmcp-input dbmcp-limit',
-                    min: rule.min,
-                    max: rule.max,
-                    step: 1,
-                    value: limitDraft[rule.key] !== undefined ? limitDraft[rule.key] : rule.value,
-                    'aria-label': fmt(t('tools.limitLabel'), { argument: rule.argument }),
-                    disabled: busy,
-                    onClick: (event) => event.stopPropagation(),
-                    onChange: (event) => setLimitDraft({ ...limitDraft, [rule.key]: event.target.value }),
-                    onBlur: () => commitLimit(rule),
-                    onKeyDown: (event) => {
-                      if (event.key === 'Enter') {
-                        event.preventDefault()
-                        event.currentTarget.blur()
-                      }
-                    },
-                  }),
-                  h('span', { className: 'dbmcp-limit-unit' }, t('tools.rows')),
+                  'label',
+                  { className: 'dbmcp-render-head' },
+                  h('span', { className: 'dbmcp-render-label' }, limitName(rule)),
+                  h(
+                    'span',
+                    { className: 'dbmcp-render-input' },
+                    h('input', {
+                      type: 'number',
+                      className: 'dbmcp-input dbmcp-limit',
+                      min: rule.min,
+                      max: rule.max,
+                      step: 1,
+                      value: limitDraft[rule.key] !== undefined ? limitDraft[rule.key] : rule.value,
+                      'aria-label': fmt(t('tools.limitLabel'), { argument: rule.argument }),
+                      disabled: busy,
+                      onClick: (event) => event.stopPropagation(),
+                      onChange: (event) => setLimitDraft({ ...limitDraft, [rule.key]: event.target.value }),
+                      onBlur: () => commitLimit(rule),
+                      onKeyDown: (event) => {
+                        if (event.key === 'Enter') {
+                          event.preventDefault()
+                          event.currentTarget.blur()
+                        }
+                      },
+                    }),
+                    h('span', { className: 'dbmcp-limit-unit' }, t('tools.rows')),
+                  ),
                 ),
+                h('p', { className: 'dbmcp-render-hint' }, limitHint(rule)),
               ),
             ),
             h(
-              'label',
-              { className: 'dbmcp-render-field', title: t('tools.textPolicyHint') },
-              h('span', { className: 'dbmcp-render-label' }, t('tools.textPolicy')),
+              'div',
+              { className: 'dbmcp-render-field' },
               h(
-                'select',
-                {
-                  className: 'dbmcp-input dbmcp-textpolicy-select',
-                  value: textPolicyDraft !== undefined ? textPolicyDraft : (tools && tools.textPolicy) || 'auto',
-                  disabled: busy,
-                  onClick: (event) => event.stopPropagation(),
-                  onChange: (event) => setTextPolicyDraft(event.target.value),
-                  onBlur: () => commitTextPolicy(),
-                },
-                h('option', { value: 'auto' }, t('tools.textAuto')),
-                h('option', { value: 'full' }, t('tools.textFull')),
-                h('option', { value: 'headtail' }, t('tools.textHeadtail')),
+                'label',
+                { className: 'dbmcp-render-head' },
+                h('span', { className: 'dbmcp-render-label' }, t('render.text')),
+                h(
+                  'select',
+                  {
+                    className: 'dbmcp-input dbmcp-textpolicy-select',
+                    value: textPolicyDraft !== undefined ? textPolicyDraft : (tools && tools.textPolicy) || 'auto',
+                    disabled: busy,
+                    onClick: (event) => event.stopPropagation(),
+                    onChange: (event) => setTextPolicyDraft(event.target.value),
+                    onBlur: () => commitTextPolicy(),
+                  },
+                  h('option', { value: 'auto' }, t('render.textFragment')),
+                  h('option', { value: 'full' }, t('render.textFull')),
+                ),
               ),
+              h('p', { className: 'dbmcp-render-hint' }, t('render.textHint')),
             ),
           ),
         )

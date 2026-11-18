@@ -37,13 +37,19 @@ def allow_write() -> bool:
 # How long cell values are rendered before they are summarised. The panel lets
 # the user pick the policy; the default keeps long text out of the model context
 # while preserving a head/tail fragment the model can reason about.
-TEXT_POLICIES = ("auto", "full", "headtail")
-TEXT_POLICY = os.environ.get("DB_MCP_TEXT_POLICY", "auto").strip().lower()
-if TEXT_POLICY not in TEXT_POLICIES:
-    TEXT_POLICY = "auto"
-# A cell longer than this many characters is summarised under `auto`/`headtail`.
+TEXT_POLICIES = ("auto", "full")
+
+
+def text_policy(value: str | None) -> str:
+    """Normalise a policy name; anything unknown becomes the default."""
+    name = (value or "").strip().lower()
+    return name if name in TEXT_POLICIES else "auto"
+
+
+TEXT_POLICY = text_policy(os.environ.get("DB_MCP_TEXT_POLICY", "auto"))
+# A cell longer than this many characters is summarised under `auto`.
 TEXT_SUMMARY_AT = 200
-# Fragment kept from each side of a long cell under `auto`/`headtail`.
+# Fragment kept from each side of a long cell under `auto`.
 TEXT_FRAGMENT = 50
 
 MAX_TEXT = 4000
@@ -116,8 +122,8 @@ def _cell(value):
         return f"<{len(raw)} bytes> " + raw[:64].hex()
     text = str(value)
     if len(text) <= MAX_TEXT:
-        # Under `headtail`/`auto` a long-but-not-huge cell still eats a lot of
-        # context; keep a readable fragment instead of the full wall of text.
+        # Under `auto` a long-but-not-huge cell still eats a lot of context;
+        # keep a readable fragment instead of the full wall of text.
         if TEXT_POLICY != "full" and len(text) > TEXT_SUMMARY_AT:
             return f"{text[:TEXT_FRAGMENT]}…(共{len(text)}字)…{text[-TEXT_FRAGMENT:]}"
         return text

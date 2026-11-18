@@ -108,7 +108,7 @@ the source all live there. Below the masthead, seven tabs:
 | Import from DBeaver | scan, tick, import |
 | Connect | the HTTP endpoint and the outside agents it can be written into |
 | Runtime | Host facts, tool count, venv and driver versions |
-| Tools | every tool the Python server publishes, with its on/off switch, plus a Result rendering card (row defaults, long-text policy) and any conversation limits |
+| Tools | every tool the Python server publishes, with its on/off switch, plus a Context optimisation card (row defaults, long-text setting) and any conversation limits |
 | Audit log | the last dozen tool calls, converted to your time zone |
 
 **New data source** and **Import from DBeaver** swap only the card under the tabs —

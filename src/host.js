@@ -1116,7 +1116,7 @@ export function createHost(options = {}) {
   }
 
   /** How long text cells are rendered into the model context. */
-  const TEXT_POLICIES = ['auto', 'full', 'headtail']
+  const TEXT_POLICIES = ['auto', 'full']
   function textPolicy(value) {
     return TEXT_POLICIES.includes(value) ? value : 'auto'
   }

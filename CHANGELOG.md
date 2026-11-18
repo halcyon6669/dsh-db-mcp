@@ -24,13 +24,13 @@ report of each version in more detail.
 ### Added
 
 - **Long text in query results is summarised before it reaches the model.** A new
-  "Long text" setting on the Result rendering card picks how cell values are
-  rendered into the model context: `Auto` keeps a head/tail fragment (first and
-  last 50 characters) of every cell longer than 200 characters, `Full` returns
-  everything, and `Head+Tail` is the same as `Auto`. The policy applies in the
-  render step, so the underlying rows are never thrown away — the model just
-  stops being flooded by walls of text. Binary/blob cells are untouched (they
-  were already compressed to a size tag).
+  "Long text in results" setting on the Context optimisation card picks how cell
+  values are rendered into the model context: `Fragment (head+tail)` keeps the first
+  and last 50 characters of every cell longer than 200 characters and marks how much
+  was cut, `Full value` passes the whole value through. The policy applies in the
+  render step, so the underlying rows are never thrown away — the model just stops
+  being flooded by walls of text. Binary/blob cells are untouched (they were already
+  compressed to a size tag).
 
 - **A ticked block of sources drags as one.** Grab the handle of any checked row
   and the whole selection travels together, keeping its own order, and lands above
@@ -45,11 +45,12 @@ report of each version in more detail.
 
 ### Changed
 
-- **The Result rendering card collects the three output settings.** The row counts
-  and the long-text policy are not per-tool decisions, so they no longer hang off
-  the tool rows — where one number box sat far from the name it belonged to and the
-  policy select trailed the end of the list. The Tools tab now has one card with the
-  sample-row default, the query-row maximum and the long-text policy, side by side.
+- **The Context optimisation card collects the three output settings.** The row
+  counts and the long-text setting are not per-tool decisions, so they no longer hang
+  off the tool rows — where one number box sat far from the name it belonged to and
+  the policy select trailed the end of the list. The Tools tab now has one card with
+  the sample-row default, the query-row maximum and the long-text setting, one setting
+  per line, each with a sentence saying what it does.
 
 - **The global write switch moved out of diagnostics.** It lived in the Runtime tab
   among read-only facts, so the one control on that page read as another line of

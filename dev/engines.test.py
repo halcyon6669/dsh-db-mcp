@@ -247,7 +247,7 @@ class RenderContract(unittest.TestCase):
 
 
 class CellPolicy(unittest.TestCase):
-    """`_cell` summarises long text under `auto`/`headtail`, keeps it under `full`."""
+    """`_cell` summarises long text under `auto`, keeps it under `full`."""
 
     def _set_policy(self, policy: str) -> None:
         engines.TEXT_POLICY = policy
@@ -265,13 +265,10 @@ class CellPolicy(unittest.TestCase):
         self.assertIn("…(共300字)…", rendered)
         self.assertLess(len(rendered), 200)
 
-    def test_headtail_behaves_like_auto(self):
-        self._set_policy("headtail")
-        long = "a" * 250
-        rendered = engines._cell(long)
-        self.assertTrue(rendered.startswith("a" * 50))
-        self.assertTrue(rendered.endswith("a" * 50))
-        self.assertIn("…(共250字)…", rendered)
+    def test_unknown_policy_falls_back_to_auto(self):
+        self.assertEqual(engines.text_policy("headtail"), "auto")
+        self.assertEqual(engines.text_policy("FULL"), "full")
+        self.assertEqual(engines.text_policy(None), "auto")
 
     def test_full_keeps_the_whole_cell(self):
         self._set_policy("full")
