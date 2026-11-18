@@ -23,6 +23,11 @@ report of each version in more detail.
 
 ### Added
 
+- **`execute_sql` takes `full_text`.** The long-text setting decides the default, but
+  a single call can now ask for the whole value: `full_text: true` skips both the
+  fragment summary and the 4000-character cap, for the case where the model is about
+  to write that value somewhere else and half of it is worse than none.
+
 - **Long text in query results is summarised before it reaches the model.** A new
   "Long text in results" setting on the Context optimisation card picks how cell
   values are rendered into the model context: `Fragment (head+tail)` keeps the first
@@ -83,6 +88,35 @@ report of each version in more detail.
   was already empty before the delete survives — that one is a drop target the user
   made on purpose, and the two cases are told apart by whether the group held a
   source at the time of the delete.
+
+### Fixed
+
+- **A batch starting with `SELECT` could carry a `DROP TABLE` past the write guard.**
+  `ensure_readable` looked only at the first keyword, so `select 1; drop table t` was
+  classified as a read, the DDL switch was never consulted, and every statement in
+  the batch reached the engine. The guard now splits the call first and refuses a
+  batch outright: one statement per call, matching what the tool description has
+  always said. Semicolons inside quotes do not split, and a trailing semicolon is
+  still one statement.
+
+- **`SET` and `PRAGMA` no longer count as reads by themselves.** Both were in the
+  read whitelist, so `pragma journal_mode = wal` or `set default_transaction_read_only
+  = off` passed on a read-only source. Each engine now has a short list of settings a
+  read-only source may change — `search_path` and friends on PostgreSQL, `names` and
+  the charset settings on MySQL, the reporting pragmas on SQLite — and anything else
+  is treated as a change and refused.
+
+- **A CTE that changes rows was rolled back as if it were a read.** `with gone as
+  (delete from orders where id = 1 returning id) select * from gone` starts with
+  `with`, so it was treated as a read and the surrounding transaction was rolled
+  back: the agent was told the write succeeded while the rows stayed put. A CTE whose
+  body contains `insert`, `update`, `delete` or `merge` now counts as a write, goes
+  through the global switch, the read-only flag and the DDL check, and is committed
+  on a writable source.
+
+- **`EXPLAIN ANALYZE` of a write was treated as a read.** A bare `EXPLAIN` only
+  plans, but `EXPLAIN ANALYZE` runs the statement it wraps — including a `DELETE`.
+  The inner statement now decides.
 
 ## [0.9.10] - 2026-11-16
 

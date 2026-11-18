@@ -287,7 +287,12 @@ def sample_rows(
 
 
 @mcp.tool()
-def execute_sql(sql: str, datasource: Optional[str] = None, max_rows: Optional[int] = None) -> dict:
+def execute_sql(
+    sql: str,
+    datasource: Optional[str] = None,
+    max_rows: Optional[int] = None,
+    full_text: Optional[bool] = None,
+) -> dict:
     """Execute one SQL statement — a query or, when writes are enabled, a change.
 
     Read-only datasources accept SELECT/WITH/SHOW/EXPLAIN statements only; every
@@ -295,12 +300,16 @@ def execute_sql(sql: str, datasource: Optional[str] = None, max_rows: Optional[i
     `max_rows` (default 200) and `truncated` says whether more rows existed. Writes
     (INSERT/UPDATE/DELETE/DDL) are committed and report `affectedRows` instead of a
     result set. One statement per call: no scripts, no `;`-separated batches.
+
+    Long text cells are summarised so a wide table cannot flood the context; pass
+    `full_text: true` when the whole value matters (for example before writing it
+    somewhere else). The setting in the panel decides the default.
     """
     try:
         limit = _clamp_rows(max_rows)
         profile, (connection, close) = _open(datasource)
         try:
-            result = engines.execute_sql(profile, connection, sql, limit)
+            result = engines.execute_sql(profile, connection, sql, limit, bool(full_text))
         finally:
             close()
         return {"ok": True, "datasource": _source(profile), **result}
@@ -310,7 +319,10 @@ def execute_sql(sql: str, datasource: Optional[str] = None, max_rows: Optional[i
 
 @mcp.tool()
 def explain_query(sql: str, datasource: Optional[str] = None) -> dict:
-    """Show the query plan of one statement, without running it."""
+    """Show the query plan of one statement, without running it.
+
+    One statement per call, the same as execute_sql.
+    """
     try:
         profile, (connection, close) = _open(datasource)
         try:

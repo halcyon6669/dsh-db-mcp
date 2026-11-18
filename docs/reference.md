@@ -88,8 +88,8 @@ Row limits come from the server: `DB_MCP_MAX_ROWS` (default 200) per call, cappe
 | `list_tables` | `datasource?`, `schema?` | `{ datasource, tables: [{ schema, name, type }], schemas: [string] }` |
 | `describe_table` | `table`, `datasource?`, `schema?` | `{ columns: [{ name, type, nullable, default, primaryKey }] }` |
 | `sample_rows` | `table`, `datasource?`, `limit=20`, `schema?` | `{ columns, rows, rowCount, truncated }` |
-| `execute_sql` | `sql`, `datasource?`, `max_rows?` | `{ columns, rows, rowCount, truncated, elapsedMs }`, or `{ affectedRows }` for a write |
-| `explain_query` | `sql`, `datasource?` | `{ plan }` (engine-specific text) |
+| `execute_sql` | `sql`, `datasource?`, `max_rows?`, `full_text?` | `{ columns, rows, rowCount, truncated, elapsedMs }`, or `{ affectedRows }` for a write |
+| `explain_query` | `sql`, `datasource?` | `{ sql, plan }` (engine-specific text) |
 | `get_ddl` | `table`, `datasource?`, `schema?` | `{ ddl, source: 'sqlite_master' \| 'columns' }` |
 | `test_connection` | `datasource?` or `kind`+`config`+`password?`, `read_only?` | `{ ok, latencyMs, message, detail: { stage, server, database, user, schema } }` |
 | `session_scope` | `datasources?`, `all?` | the limit saved for this conversation; `all: true` or an empty list lifts it |
@@ -240,13 +240,24 @@ the field existed does not start accepting `drop table` on the next load. A save
 that omits the field keeps the stored value rather than revoking it, so a caller
 that does not know about the switch cannot silently turn it off.
 
-The guard runs in the Python child (`server/writes.py`), inside
-`ensure_readable`, so the agent, the HTTP endpoint and the panel all hit it:
+The guard runs in the Python child (`server/writes.py` and `engines.ensure_readable`),
+so the agent, the HTTP endpoint and the panel all hit it:
 
-- Every statement in a batch is checked; a leading `--` comment or a `;` does not
-  hide one.
-- Reads (`select`, `with`, `show`, `explain`, …) always pass.
-- `insert`, `update` and `delete` pass on a writable source.
+- One statement per call. `select 1; drop table t` is refused as a batch before
+  anything reaches the engine — the old guard looked only at the first keyword, so
+  it let that through. Semicolons inside quotes do not count, and a trailing
+  semicolon is still one statement.
+- Every statement is classified on its own. A leading `--` or `/* */` comment does
+  not hide what follows.
+- Reads (`select`, `values`, `table`, `show`, `describe`, `explain`, …) always pass.
+  `explain` plans rather than runs, so it passes even over a write; `explain
+  analyze` runs the statement, so the inner statement decides.
+- `insert`, `update` and `delete` pass on a writable source. A CTE counts as a
+  write when its body changes rows: `with gone as (delete … returning *) select …
+  from gone` is committed, not rolled back as a read.
+- `set` and `pragma` are no longer blanket reads. Only a short per-engine list is
+  allowed on a read-only source (`set search_path`, `set names`, the reporting
+  `pragma table_info`/`index_list`/…); anything else is treated as a change.
 - A statement that changes the shape of the database is refused unless the source
   has `allowDdl: true`; `truncate` counts as DDL — it keeps the table but empties
   it.

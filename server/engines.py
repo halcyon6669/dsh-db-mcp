@@ -11,7 +11,6 @@ from __future__ import annotations
 import datetime as _dt
 import decimal
 import os
-import re
 import sqlite3
 import ssl
 import time
@@ -20,7 +19,68 @@ from urllib.parse import quote
 
 import writes
 
-READ_STARTERS = ("select", "with", "show", "describe", "desc", "explain", "pragma", "values", "table", "set")
+# Statements that only read. `set` and `pragma` used to sit here, which let a
+# source marked read-only change session state — and, on SQLite, the database file
+# itself (`pragma journal_mode = wal`). They are allowlisted per engine below
+# instead, and anything not on those lists counts as a change.
+READ_STARTERS = ("select", "values", "table", "show", "describe", "desc", "explain")
+
+# SQLite PRAGMAs that only report. `pragma x = value` and `pragma x(value)` set
+# something, so the `=` form is refused even for a name on this list.
+SQLITE_READ_PRAGMAS = frozenset(
+    {
+        "collation_list",
+        "compile_options",
+        "data_version",
+        "database_list",
+        "encoding",
+        "foreign_key_check",
+        "foreign_key_list",
+        "freelist_count",
+        "function_list",
+        "index_info",
+        "index_list",
+        "index_xinfo",
+        "integrity_check",
+        "journal_mode",
+        "module_list",
+        "page_count",
+        "page_size",
+        "pragma_list",
+        "quick_check",
+        "schema_version",
+        "table_info",
+        "table_list",
+        "table_xinfo",
+        "user_version",
+    }
+)
+
+# `set` statements that only point the session at a different name space. Every
+# other `set` is treated as a change, because it can turn a session into one that
+# may write.
+PG_READ_SETTINGS = (
+    "search_path",
+    "time zone",
+    "timezone",
+    "datestyle",
+    "client_encoding",
+    "client_min_messages",
+    "extra_float_digits",
+    "statement_timeout",
+    "lock_timeout",
+    "idle_in_transaction_session_timeout",
+    "application_name",
+)
+MYSQL_READ_SETTINGS = (
+    "names",
+    "charset",
+    "character_set_client",
+    "character_set_results",
+    "character_set_connection",
+    "sql_mode",
+    "time_zone",
+)
 
 # GaussDB/openGauss speaks the PostgreSQL wire protocol and its catalogs are
 # PostgreSQL shaped, so every introspection path treats the two alike. Only the
@@ -67,50 +127,175 @@ class DbError(Exception):
 # helpers
 
 
-def _first_keyword(sql: str) -> str:
+def _words(sql: str) -> list[str]:
+    """Every bare word outside quotes, lower-cased.
+
+    Quoted strings and quoted identifiers are skipped, so `where note = 'delete'`
+    and `with "update" as (...)` do not look like statements that change data.
+    """
     text = sql or ""
-    # drop leading line/block comments so `-- hi\nselect 1` still reads as SELECT
-    while True:
-        stripped = text.lstrip()
-        if stripped.startswith("--"):
-            newline = stripped.find("\n")
-            text = "" if newline < 0 else stripped[newline + 1 :]
+    words: list[str] = []
+    index = 0
+    quote = ""
+    while index < len(text):
+        char = text[index]
+        if quote:
+            if char == quote:
+                if index + 1 < len(text) and text[index + 1] == quote:
+                    index += 2
+                    continue
+                quote = ""
+            index += 1
             continue
-        if stripped.startswith("/*"):
-            end = stripped.find("*/")
-            text = "" if end < 0 else stripped[end + 2 :]
+        if char in ("'", '"', "`"):
+            quote = char
+            index += 1
             continue
-        text = stripped
-        break
-    match = re.match(r"[A-Za-z]+", text)
-    return match.group(0).lower() if match else ""
+        if char.isalpha() or char == "_":
+            start = index
+            while index < len(text) and (text[index].isalnum() or text[index] == "_"):
+                index += 1
+            words.append(text[start:index].lower())
+            continue
+        index += 1
+    return words
+
+
+# Words that mean a `with` statement changes data rather than reading it. A CTE
+# body may hold one, and the main statement after the CTEs may be one too.
+CTE_WRITE_WORDS = ("insert", "update", "delete", "merge")
+
+
+def _has_write_word(sql: str) -> bool:
+    return any(word in CTE_WRITE_WORDS for word in _words(sql))
+
+
+def _allowed_set(sql: str, kind: str) -> bool:
+    """`set` only points the session somewhere; every other form may enable writes."""
+    allowed = PG_READ_SETTINGS if kind in PG_LIKE else MYSQL_READ_SETTINGS if kind == "mysql" else ()
+    if not allowed:
+        return False
+    # `set [session|local] name [to|=] value` — the name is the third word at most.
+    words = _words(sql)
+    if not words or words[0] != "set":
+        return False
+    rest = words[1:]
+    if rest and rest[0] in ("session", "local", "global"):
+        rest = rest[1:]
+    if not rest:
+        return False
+    name = rest[0]
+    # Multi-word settings we allow ("time zone") need the pair, not just "time".
+    pair = " ".join(rest[:2])
+    return name in allowed or pair in allowed
+
+
+def _allowed_pragma(sql: str, kind: str) -> bool:
+    """A SQLite PRAGMA that only reports. The `= value` form always sets."""
+    if kind != "sqlite":
+        return False
+    text = (sql or "").strip().rstrip(";")
+    words = _words(text)
+    if not words or words[0] != "pragma":
+        return False
+    if "=" in text:
+        return False
+    name = words[1] if len(words) > 1 else ""
+    if name not in SQLITE_READ_PRAGMAS:
+        return False
+    # `pragma table_info(t)` passes an argument in parentheses; that is a read.
+    # `pragma journal_mode(wal)` looks identical but writes, so only the pragmas
+    # whose argument is a table name may take one.
+    if len(words) > 2:
+        return name in ("table_info", "table_xinfo", "index_info", "index_list", "index_xinfo", "foreign_key_list")
+    return True
+
+
+def read_only_statement(sql: str, kind: str) -> bool:
+    """Whether this one statement only reads, for this engine.
+
+    Anything not positively identified as a read counts as a change, so a
+    statement nobody thought about is refused on a read-only source instead of
+    slipping through.
+    """
+    keyword = writes.keyword(sql)
+    if keyword == "set":
+        return _allowed_set(sql, kind)
+    if keyword == "pragma":
+        return _allowed_pragma(sql, kind)
+    if keyword == "explain":
+        # EXPLAIN ANALYZE runs the statement it plans, so the inner statement
+        # decides; a bare EXPLAIN only plans, whatever it wraps.
+        text = sql.strip()
+        rest = text[len("explain") :].lstrip()
+        inner_words = _words(rest)
+        planned_only = not inner_words or inner_words[0] not in ("analyze",)
+        if planned_only:
+            return True
+        return read_only_statement(rest[len("analyze") :].lstrip(), kind)
+    if keyword == "with":
+        # `with x as (delete … returning *) select …` reads like a select but
+        # changes rows. The body decides.
+        return not _has_write_word(sql)
+    return keyword in READ_STARTERS
+
+
+
+def statements_of(sql: str, kind: str | None = None) -> list[str]:
+    """Split a batch, keeping an Oracle anonymous block whole.
+
+    `begin … end;` and `declare … begin … end;` carry semicolons that are part of
+    one statement, so splitting them would refuse a statement Oracle accepts.
+    """
+    text = sql or ""
+    head = writes.keyword(text)
+    if kind == "oracle" and head in ("begin", "declare"):
+        return [text.strip()] if text.strip() else []
+    return writes.statements(text)
 
 
 def ensure_readable(sql: str, profile: dict) -> None:
-    """Refuse changing statements on a read-only source, before touching the DB."""
-    keyword = _first_keyword(sql)
-    if keyword in READ_STARTERS:
+    """Refuse changing statements on a read-only source, before touching the DB.
+
+    Every statement in the text is checked, not only the first: `select 1; drop
+    table t` used to pass because it started with `select`. Batches are refused
+    outright, which also matches what the tool tells the model.
+    """
+    kind = profile.get("kind")
+    parts = statements_of(sql, kind)
+    if not parts:
+        raise DbError("user_error", "the statement is empty", "pass one SQL statement")
+    if len(parts) > 1:
+        raise DbError(
+            "user_error",
+            f"this call carries {len(parts)} statements; only one runs per call",
+            "send the statements one at a time — a batch would apply halfway and cannot be undone here",
+        )
+    statement = parts[0]
+    if read_only_statement(statement, kind):
         return
+    keyword = writes.keyword(statement) or "this"
     if not allow_write():
         raise DbError(
             "user_error",
-            f"writes are disabled for the whole plugin; `{keyword or 'this'} ` statements are refused",
+            f"writes are disabled for the whole plugin; `{keyword}` statements are refused",
             "turn on the global write switch in the Data sources panel first",
         )
     if profile.get("readOnly"):
         raise DbError(
             "user_error",
-            f"datasource {profile.get('id')} is read-only; `{keyword or 'this'} ` statements are refused",
+            f"datasource {profile.get('id')} is read-only; `{keyword}` statements are refused",
             "uncheck read-only for this source in the Data sources panel to allow writes",
         )
     # The source is writable, so only the DDL switch is left to check.
     try:
-        writes.check(sql, profile)
+        writes.check(statement, profile)
     except writes.WriteBlocked as blocked:
         raise DbError("user_error", blocked.message, blocked.hint) from blocked
 
 
-def _cell(value):
+
+def _cell(value, full_text: bool = False):
     if value is None or isinstance(value, (bool, int, float)):
         return value
     if isinstance(value, decimal.Decimal):
@@ -123,14 +308,18 @@ def _cell(value):
     text = str(value)
     if len(text) <= MAX_TEXT:
         # Under `auto` a long-but-not-huge cell still eats a lot of context;
-        # keep a readable fragment instead of the full wall of text.
-        if TEXT_POLICY != "full" and len(text) > TEXT_SUMMARY_AT:
+        # keep a readable fragment instead of the full wall of text. A caller
+        # that asked for `full_text` gets the value as stored.
+        if not full_text and TEXT_POLICY != "full" and len(text) > TEXT_SUMMARY_AT:
             return f"{text[:TEXT_FRAGMENT]}…(共{len(text)}字)…{text[-TEXT_FRAGMENT:]}"
+        return text
+    if full_text:
+        # Still bounded: one cell must not be able to blow up the response.
         return text
     return text[:MAX_TEXT] + f"… (+{len(text) - MAX_TEXT})"
 
 
-def _rows(cursor, max_rows: int) -> tuple[list[str], list[list], bool]:
+def _rows(cursor, max_rows: int, full_text: bool = False) -> tuple[list[str], list[list], bool]:
     columns = [str(description[0]) for description in (cursor.description or [])]
     if not columns:
         # A write returns no result set. psycopg raises "the last operation
@@ -144,8 +333,9 @@ def _rows(cursor, max_rows: int) -> tuple[list[str], list[list], bool]:
         if index >= max_rows:
             truncated = True
             break
-        rows.append([_cell(value) for value in row])
+        rows.append([_cell(value, full_text) for value in row])
     return columns, rows, truncated
+
 
 
 def _quote(kind: str, name: str) -> str:
@@ -818,11 +1008,14 @@ def table_ddl(profile: dict, connection, table: str, schema: str | None = None) 
 # queries
 
 
-def execute_sql(profile: dict, connection, sql: str, max_rows: int) -> dict:
+def execute_sql(profile: dict, connection, sql: str, max_rows: int, full_text: bool = False) -> dict:
     ensure_readable(sql, profile)
     kind = profile.get("kind")
+    statement = statements_of(sql, kind)[0]
     started = time.perf_counter()
-    is_write = _first_keyword(sql) not in READ_STARTERS
+    # The first keyword is not enough: `with x as (delete … returning *) select …`
+    # starts with `with` but changes rows, and used to be rolled back here.
+    is_write = not read_only_statement(statement, kind)
     cursor = connection.cursor()
     affected = None
     try:
@@ -831,8 +1024,9 @@ def execute_sql(profile: dict, connection, sql: str, max_rows: int) -> dict:
                 cursor.execute("SET TRANSACTION READ ONLY")
             except Exception:  # noqa: BLE001 - not every session allows the switch
                 pass
-        cursor.execute(sql)
-        columns, rows, truncated = _rows(cursor, max_rows)
+        cursor.execute(statement)
+        columns, rows, truncated = _rows(cursor, max_rows, full_text)
+
         if is_write:
             affected = _affected_rows(cursor)
         if not is_write or profile.get("readOnly"):
@@ -891,24 +1085,26 @@ def sample_rows(profile: dict, connection, table: str, limit: int, schema: str |
 def explain_query(profile: dict, connection, sql: str) -> dict:
     ensure_readable(sql, profile)
     kind = profile.get("kind")
+    statement = statements_of(sql, kind)[0]
     cursor = connection.cursor()
     try:
         if kind == "sqlite":
-            cursor.execute(f"EXPLAIN QUERY PLAN {sql}")
+            cursor.execute(f"EXPLAIN QUERY PLAN {statement}")
             plan = "\n".join(" | ".join(str(part) for part in row) for row in cursor.fetchall())
         elif kind in PG_LIKE:
-            cursor.execute(f"EXPLAIN {sql}")
+            cursor.execute(f"EXPLAIN {statement}")
             plan = "\n".join(str(row[0]) for row in cursor.fetchall())
         elif kind == "mysql":
-            cursor.execute(f"EXPLAIN {sql}")
+            cursor.execute(f"EXPLAIN {statement}")
             header = [str(description[0]) for description in (cursor.description or [])]
             plan = "\n".join(" | ".join(f"{key}={value}" for key, value in zip(header, row)) for row in cursor.fetchall())
         elif kind == "oracle":
-            cursor.execute(f"EXPLAIN PLAN FOR {sql}")
+            cursor.execute(f"EXPLAIN PLAN FOR {statement}")
             cursor.execute("select plan_table_output from table(dbms_xplan.display(null, null, 'BASIC'))")
             plan = "\n".join(str(row[0]) for row in cursor.fetchall())
         else:
             raise DbError("user_error", f"unsupported datasource kind: {kind}")
     finally:
         cursor.close()
-    return {"sql": sql, "plan": plan}
+    return {"sql": statement, "plan": plan}
+
