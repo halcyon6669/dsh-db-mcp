@@ -441,6 +441,15 @@ check('audit sql: it reads as primary ink, not a hint', /color: var\(--dsw-alias
 check('audit sql: a brand rule marks the left edge', /border-left: 3px solid color-mix\(in srgb, var\(--dsw-alias-brand-primary\)/.test(auditSqlRule))
 check('audit sql: a failed call turns that rule red', /\.is-error \{[^}]*border-left-color: color-mix\(in srgb, var\(--dsw-alias-state-error-primary\)/.test(auditSqlRule))
 
+// A shared endpoint is reached by the agent, the panel and outside clients, so a
+// row has to say which one called. The caller rides beside the tool name and is
+// quieter than it — the tool is what you scan, the caller is what you check after.
+const auditClientRule = source.slice(source.indexOf('      .dbmcp-audit-client {'), source.indexOf('      .dbmcp-audit-ok {'))
+check('audit caller: it renders beside the tool', /dbmcp-audit-client/.test(source) && /entry\.client/.test(source))
+check('audit caller: it is quieter than the tool pill', /color: var\(--dsw-alias-label-secondary\)/.test(auditClientRule), auditClientRule.slice(0, 120))
+check('audit caller: a long client name is cut, not wrapped', /text-overflow: ellipsis/.test(auditClientRule) && /white-space: nowrap/.test(auditClientRule))
+check('audit caller: the meaning is on hover', /audit\.clientHint/.test(source))
+
 // The tools card used to answer with a checkbox while every other on/off in the
 // panel was a track switch. Same control now, so "on" looks the same everywhere;
 // the checkbox class is gone rather than left behind unused.

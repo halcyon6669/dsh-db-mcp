@@ -32,6 +32,15 @@ report of each version in more detail.
   child's calls, the HTTP child records its own, so one call still yields one line
   and the agent's trail is unchanged.
 
+- **The audit line says who made the call.** A shared HTTP endpoint is reached by
+  the agent, the panel and whatever outside client you pointed at it, and the log
+  could not tell them apart. Every entry now carries `client`: the Host stamps
+  `dsh-agent` for the calls it drives on the agent's behalf and `panel` for its own
+  probes, and the HTTP child stamps the name the MCP client announced at connect
+  time (`Cursor 0.44.0`, `unnamed client` when it announced nothing). A line written
+  outside any request has no `client` key. The panel shows the caller next to the
+  tool name, with the meaning on hover.
+
 - **`describe_table` answers the join questions, and `list_relations` answers them
   for a whole schema.** Knowing the columns is not enough to write a correct join:
   the model also needs what each column points at, which columns are indexed, what

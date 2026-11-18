@@ -2507,7 +2507,7 @@ export function createHost(options = {}) {
           const callArgs = payload.arguments && typeof payload.arguments === 'object' ? { ...payload.arguments } : {}
           const source = trimmed(payload.datasource)
           if (source && callArgs.datasource === undefined) callArgs.datasource = source
-          const result = await bridge.call(tool, callArgs)
+          const result = await bridge.call(tool, callArgs, { client: 'panel' })
           return sendJson(response, 200, { ok: true, ...result })
         } catch (error) {
           return sendJson(response, 500, { ok: false, error: String((error && error.message) || error) })

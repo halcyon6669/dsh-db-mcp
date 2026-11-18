@@ -217,7 +217,7 @@ export function createBridge({
     };
   }
 
-  function auditEntry(name, args, startedAt, outcome, error) {
+  function auditEntry(name, args, startedAt, outcome, error, client) {
     if (!audit) return;
     const call = args && typeof args === 'object' ? args : {};
     const entry = {
@@ -226,6 +226,10 @@ export function createBridge({
       datasource: typeof call.datasource === 'string' ? call.datasource : null,
       ok: !error && !(outcome && outcome.isError === true),
       ms: Date.now() - startedAt,
+      // Who ran this: the agent over stdio, or the panel's own `/mcp/call` route.
+      // An outside client never reaches the Host — the Python child logs it and
+      // names the client from the MCP handshake.
+      client: client || 'dsh-agent',
     };
     if (typeof call.sql === 'string') entry.sql = call.sql.slice(0, 2000);
     if (typeof call.table === 'string') entry.table = call.table;
@@ -247,6 +251,7 @@ export function createBridge({
   async function invoke(name, args = {}, options = {}) {
     const startedAt = Date.now();
     const audited = options.audit !== false;
+    const caller = typeof options.client === 'string' && options.client ? options.client : undefined;
     try {
       await ensure();
       const active = client;
@@ -256,10 +261,10 @@ export function createBridge({
       const result = await active.callTool(name, withRowLimit(name, args), {
         timeoutMs: TOOL_TIMEOUT_MS,
       });
-      if (audited) auditEntry(name, args, startedAt, result, null);
+      if (audited) auditEntry(name, args, startedAt, result, null, caller);
       return result;
     } catch (error) {
-      if (audited) auditEntry(name, args, startedAt, null, error);
+      if (audited) auditEntry(name, args, startedAt, null, error, caller);
       throw error;
     }
   }

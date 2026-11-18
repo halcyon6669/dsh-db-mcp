@@ -259,7 +259,8 @@ window.__ModuleLoader__.load({
         'audit.file': 'Log file',
         'audit.ok': 'ok',
         'audit.err': 'failed',
-        'audit.hint': 'One line per MCP tool call: tool, source, duration and outcome. Query results are never logged.',
+        'audit.hint': 'One line per MCP tool call: tool, caller, source, duration and outcome. Query results are never logged.',
+        'audit.clientHint': 'The program that made the call: dsh-agent, panel, or the name the MCP client gave when it connected.',
         'audit.rows': '{n} row(s)',
         'audit.tz': 'Times follow your computer clock ({zone}); the log file keeps UTC.',
         'action.lockSource': 'Click to make this source read-only',
@@ -538,7 +539,8 @@ window.__ModuleLoader__.load({
         'audit.file': '日志文件',
         'audit.ok': '成功',
         'audit.err': '失败',
-        'audit.hint': '每次 MCP 工具调用记一行：工具、数据源、耗时与结果。查询结果不会被记录。',
+        'audit.hint': '每次 MCP 工具调用记一行：工具、调用方、数据源、耗时与结果。查询结果不会被记录。',
+        'audit.clientHint': '发起这次调用的程序：dsh-agent、panel，或者 MCP 客户端连接时报上的名字。',
         'audit.rows': '{n} 行',
         'audit.tz': '时间按本机时区显示（{zone}），日志文件里存的是 UTC。',
         'action.lockSource': '点击改为只读',
@@ -1088,6 +1090,16 @@ window.__ModuleLoader__.load({
         padding: 1px 7px;
         border-radius: 999px;
         border: 1px solid var(--dsw-alias-border-l1);
+      }
+      /* Who ran the call. Narrower than the tool pill: the tool name is the
+         thing you scan for, the caller is the thing you check afterwards. */
+      .dbmcp-audit-client {
+        font-size: 12px;
+        color: var(--dsw-alias-label-secondary);
+        max-width: 220px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
       .dbmcp-audit-ok {
         font-size: 12px;
@@ -6139,6 +6151,7 @@ function groupTables(tables) {
                         localClock(entry.at),
                       ),
                       h('span', { className: 'dbmcp-audit-tool' }, entry.tool || '?'),
+                      h('span', { className: 'dbmcp-audit-client', title: t('audit.clientHint') }, entry.client || '?'),
                       h('span', { className: 'dbmcp-pill' }, entry.datasource || t('sources.default')),
                       h('span', { className: 'dbmcp-hint' }, `${entry.ms ?? 0}ms`),
                       h(

@@ -136,6 +136,34 @@ class AuditTest(unittest.TestCase):
         self.assertNotIn("sql", line)
         self.assertNotIn("table", line)
 
+    # -- who called ---------------------------------------------------------
+
+    def test_a_line_names_the_caller_when_one_is_given(self):
+        line = audit.entry("execute_sql", {"sql": "select 1"}, 0.0, {"ok": True}, None, now=0, client="panel")
+        self.assertEqual(line["client"], "panel")
+
+    def test_a_line_without_a_caller_has_no_client_key(self):
+        line = audit.entry("execute_sql", {}, 0.0, {"ok": True}, None, now=0)
+        self.assertNotIn("client", line)
+
+    def test_a_blank_caller_is_not_written(self):
+        line = audit.entry("execute_sql", {}, 0.0, {"ok": True}, None, now=0, client="   ")
+        self.assertNotIn("client", line)
+
+    def test_the_recorded_line_carries_the_caller_through_record(self):
+        audit.record("execute_sql", {"sql": "select 1"}, 0.0, {"ok": True}, None, client="panel")
+        self.assertEqual(self._lines()[0]["client"], "panel")
+
+    def test_the_host_writes_the_caller_for_the_calls_it_owns(self):
+        # The stdio child does not own the log, so the Host's word is the only one.
+        audit.record("list_tables", {}, 0.0, {"ok": True}, None, client="dsh-agent")
+        self.assertEqual(self._lines()[0]["client"], "dsh-agent")
+
+    def test_outside_a_request_there_is_no_client_name(self):
+        # A direct call has no MCP session to ask, so the field stays absent
+        # instead of inventing a name.
+        self.assertIsNone(audit.client_name())
+
     # -- when it writes at all ---------------------------------------------
 
     def test_the_switch_off_means_no_line(self):

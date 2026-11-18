@@ -217,7 +217,7 @@ data source.
 512 KiB:
 
 ```json
-{"at":"2026-11-08T06:20:28.000Z","tool":"mcp__db__execute_sql","datasource":"pg-demo","ok":true,"ms":41,"rows":3,"sql":"select id, name from customers order by id"}
+{"at":"2026-11-08T06:20:28.000Z","tool":"mcp__db__execute_sql","datasource":"pg-demo","ok":true,"ms":41,"rows":3,"sql":"select id, name from customers order by id","client":"dsh-agent"}
 ```
 
 The writer is the Python process that ran the call, which is what lets a call that
@@ -226,6 +226,14 @@ environment marks it as the one owning the file; the Host sets it for the HTTP c
 only and records the stdio child's calls itself, so a call never produces two lines.
 `auditLog: false` in `settings.json` stops the Python writer too — it re-reads the
 file on every call, so no restart is needed.
+
+`client` says who made the call. The Host stamps `dsh-agent` for the stdio child it
+drives on the agent's behalf, and `panel` for the calls the panel's own probe route
+makes. A call that arrives over HTTP is stamped by the Python child from the
+`clientInfo` the MCP client sent when it connected — `"Cursor 0.44.0"`,
+`"probe-client 9.9.9"` — so a shared endpoint can be told apart from the agent. A
+client that sends no name is recorded as `unnamed client`; a line written outside any
+request (a direct call from a script) simply has no `client` key.
 
 ### Data source fields
 

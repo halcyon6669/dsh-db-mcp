@@ -15,6 +15,11 @@ The shape matches the Host's entries field for field, because the panel parses b
 with the same reader. `auditLog: false` in `settings.json` still silences it: the
 file is re-read on every call, not cached at start-up, so flipping the switch in the
 panel takes effect without restarting anything.
+
+Each line also names the caller (`client`): the Host writes `dsh-agent` for the
+agent's stdio calls and `panel` for its own `/mcp/call` route, while this process
+reads the name the MCP handshake carried (`clientInfo.name` + version) — so a line
+in the file answers "which program ran this statement", not just "some client did".
 """
 
 from __future__ import annotations
@@ -81,7 +86,37 @@ def _rows_of(outcome) -> int | None:
     return None
 
 
-def entry(name: str, args, started: float, outcome, error, now: float | None = None) -> dict:
+def client_name() -> str | None:
+    """Who sent this call, as the MCP handshake named it — `name/version`.
+
+    An MCP client announces itself once, in the `initialize` request
+    (`clientInfo: {name, version}`); the SDK keeps it on the session, so every
+    later `tools/call` on that session can read it back. VS Code, Cursor and the
+    rest all send it, which is what makes "who ran this statement" answerable.
+
+    Returns None when there is no request context (a direct call in a test, or
+    the stdio child, where the Host records the line and knows the answer
+    itself) and `"unnamed client"` when a client skipped the field.
+    """
+    try:
+        from mcp.server.lowlevel.server import request_ctx
+
+        context = request_ctx.get()
+    except Exception:  # noqa: BLE001 - no SDK, or not inside a request
+        return None
+    session = getattr(context, "session", None)
+    params = getattr(session, "client_params", None)
+    info = getattr(params, "clientInfo", None)
+    name = getattr(info, "name", None)
+    if not isinstance(name, str) or not name.strip():
+        return "unnamed client"
+    version = getattr(info, "version", None)
+    if isinstance(version, str) and version.strip():
+        return f"{name.strip()} {version.strip()}"
+    return name.strip()
+
+
+def entry(name: str, args, started: float, outcome, error, now: float | None = None, client: str | None = None) -> dict:
     """Build one log line. Pure: no I/O, so the tests can check the shape."""
     call = args if isinstance(args, dict) else {}
     record = {
@@ -91,6 +126,8 @@ def entry(name: str, args, started: float, outcome, error, now: float | None = N
         "ok": error is None and not (isinstance(outcome, dict) and outcome.get("ok") is False),
         "ms": max(0, int(((time.time() if now is None else now) - started) * 1000)),
     }
+    if isinstance(client, str) and client.strip():
+        record["client"] = client.strip()
     sql = call.get("sql")
     if isinstance(sql, str):
         record["sql"] = sql[:MAX_SQL]
@@ -114,14 +151,16 @@ def entry(name: str, args, started: float, outcome, error, now: float | None = N
     return record
 
 
-def record(name: str, args, started: float, outcome, error) -> None:
+def record(name: str, args, started: float, outcome, error, client: str | None = None) -> None:
     """Append one line to the audit log. Never raises: a log must not break a call."""
     try:
         if not enabled():
             return
+        if client is None:
+            client = client_name()
         target = path()
         target.parent.mkdir(parents=True, exist_ok=True)
-        line = json.dumps(entry(name, args, started, outcome, error), ensure_ascii=False)
+        line = json.dumps(entry(name, args, started, outcome, error, client=client), ensure_ascii=False)
         with target.open("a", encoding="utf-8") as handle:
             handle.write(f"{line}\n")
         try:
