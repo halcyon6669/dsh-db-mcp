@@ -649,31 +649,31 @@ if (stripTree) {
   check('strip: no repeated version pill', versionPill.length === 0, `got ${versionPill.length}`)
 }
 
-/* The global write switch used to be a row inside the diagnostics card, reading
-   as one more fact among facts. It belongs with the sources it governs, so it
-   now sits on this strip — and only when the panel hands it a handler. */
-const stripProps = {
-  t,
-  data: { mcp: { phase: 'ready' }, plugin: { version: '0.7.5' } },
-  sources: [{ id: 'pg', name: 'PostgreSQL demo', kind: 'postgres', lastProbe: { ok: true } }],
-  failedSources: [],
-  groupNames: [],
-  filter: 'all',
-  setFilter: noop,
-  query: '',
-  setQuery: noop,
+/* The global write switch has moved twice: out of the diagnostics card, then
+   off the status strip and into the list card's title row — the row that holds
+   the sources it governs. It renders only when the panel hands it a handler. */
+const { WriteSwitch } = mod.__test
+const writeTree = render('write switch', () => WriteSwitch({ t, allowWrite: true, busy: false, onWrite: noop }))
+if (writeTree) {
+  const spots = collect(writeTree, (node) => node.props.className === 'dbmcp-list-write')
+  check('write switch: it has one home', spots.length === 1, `got ${spots.length}`)
+  check('write switch: the on state reads out', texts(writeTree).includes('write.on'), texts(writeTree).join('|'))
+  const offTree = WriteSwitch({ t, allowWrite: false, busy: false, onWrite: noop })
+  check('write switch: the off state reads out too', texts(offTree).includes('write.off'), texts(offTree).join('|'))
+  check(
+    'write switch: no switch when the panel has no handler',
+    WriteSwitch({ t, allowWrite: true, busy: false }) === null,
+  )
+  const switchNode = collect(writeTree, (node) => node.type === 'button' && node.props.role === 'switch')[0]
+  check(
+    'write switch: it is a switch, not a checkbox',
+    Boolean(switchNode) && switchNode.props['aria-checked'] === 'true',
+    JSON.stringify(switchNode && switchNode.props['aria-checked']),
+  )
+  const busyTree = WriteSwitch({ t, allowWrite: true, busy: true, onWrite: noop })
+  const busyNode = collect(busyTree, (node) => node.type === 'button' && node.props.role === 'switch')[0]
+  check('write switch: a busy panel disables it', Boolean(busyNode) && busyNode.props.disabled === true)
 }
-const writeTree = StatusStrip({ ...stripProps, allowWrite: true, onWrite: noop, busy: false })
-const writeSpots = collect(writeTree, (node) => node.props.className === 'dbmcp-status-write')
-check('strip: the write switch has a home', writeSpots.length === 1, `got ${writeSpots.length}`)
-check('strip: the switch says which way it is set', texts(writeTree).includes('write.on'), texts(writeTree).join('|'))
-const writeOff = StatusStrip({ ...stripProps, allowWrite: false, onWrite: noop })
-check('strip: the off state reads out too', texts(writeOff).includes('write.off'), texts(writeOff).join('|'))
-const noHandler = StatusStrip(stripProps)
-check(
-  'strip: no switch when the panel has no handler',
-  collect(noHandler, (node) => node.props.className === 'dbmcp-status-write').length === 0,
-)
 
 // A card that carries no title draws its own header (the list card does), and
 // the component's own header still took a min-height plus a bottom margin when

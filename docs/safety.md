@@ -14,8 +14,9 @@ log and the per-conversation limit — stop at DSH's edge.
 Three independent gates decide whether a statement may write:
 
 1. **Global switch** — `allowWrite` in `<runtime>/settings.json`, toggled in the
-   status strip at the top of the *Data source list* tab. Off by default; while off
-   every write is refused with `user_error` and a hint pointing at the switch.
+   *Data source list* tab, in the list card's title row right after the group box.
+   Off by default; while off every write is refused with `user_error` and a hint
+   pointing at the switch.
 2. **Per-source flag** — `readOnly` on the source, on by default. A switch on the
    row flips it in one click, and the word beside the switch says which way it is
    set. Apart from that switch and the DDL one below it, everything on the row (a

@@ -116,12 +116,16 @@ the masthead and tabs stay put, and every earlier step is still a tab away.
 
 The list opens with a status strip: whether the MCP bridge is up, the total number of
 sources, how many probed healthy, and which ones failed (with their names), with the
-global write switch and the search box on the right of that first row. Filter chips —
+search box on the right of that first row. Filter chips —
 **All**, one chip per group, **Ungrouped** and **Only failures** — take the second
 row. The box matches the name,
 identifier, host, kind and the last probe message; chips and the box narrow the list
 together, and a failed source keeps its red row and an expandable **Error details**
 block either way.
+
+The global write switch sits in the list card's title row, immediately after the group
+box and its **Add** button: the switch is a decision about the sources listed under it,
+so it stays on the same row as them rather than in the diagnostics page.
 
 Under each source's connection target sits its identifier as a chip labelled **ID**:
 that is the value every MCP tool takes as its `datasource` argument, so it is shown as

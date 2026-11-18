@@ -51,10 +51,13 @@ report of each version in more detail.
   policy select trailed the end of the list. The Tools tab now has one card with the
   sample-row default, the query-row maximum and the long-text policy, side by side.
 
-- **The global write switch moved to the Sources page.** It lived in the Runtime
-  tab among read-only facts, so the one control on that page read as another line of
-  diagnostics. It now sits in the sources status strip, next to the sources whose
-  writes it governs, and the Runtime tab is pure information again.
+- **The global write switch moved out of diagnostics.** It lived in the Runtime tab
+  among read-only facts, so the one control on that page read as another line of
+  diagnostics. It now sits in the data source list's title row, right after the group
+  box — the same row as the sources whose writes it governs — and the Runtime tab is
+  pure information again. Its label reads **Global write** / **Global read-only**
+  instead of "writes allowed" / "writes blocked", so the switch says what it switches
+  rather than describing a state in passing.
 
 - **Emptying a group deletes it.** Deleting the last source in a group removes the
   group too, instead of leaving behind an empty section nobody created. A group that

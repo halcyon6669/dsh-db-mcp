@@ -143,7 +143,7 @@ text the model sees is bounded.
 ## Safety
 
 - **Read-only by default**, with three independent gates: a global write switch in the
-  status strip of the source list, a per-source flag, and a separate DDL switch. All
+  source list's header row, a per-source flag, and a separate DDL switch. All
   must be open before a statement may write.
 - **A writable source may write to every schema its login can see.** The boundary is
   the database itself: a login that can write one schema can write any schema it was

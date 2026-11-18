@@ -221,8 +221,8 @@ window.__ModuleLoader__.load({
         'diag.uptime': 'Host uptime',
         'diag.tip': 'Tip',
         'diag.restartNeeded': 'Restart the DSH desktop app once — the plugin entry is imported at process start, so the tool bridge only activates after a restart.',
-        'write.on': 'writes allowed',
-        'write.off': 'writes blocked',
+        'write.on': 'Global write',
+        'write.off': 'Global read-only',
         'write.hint': 'On: a source must still allow writes itself. Off: every write statement is refused.',
         'render.title': 'Result rendering',
         'render.hint': 'How much of a result reaches the model. The row defaults apply when the agent does not name a count itself.',
@@ -258,7 +258,7 @@ window.__ModuleLoader__.load({
         'action.unlockSource': 'Click to allow writes on this source',
         'notice.nowReadOnly': '{name} is read-only now.',
         'notice.nowWritable': '{name} accepts writes now.',
-        'notice.nowWritableLocked': '{name} accepts writes now, but the global write switch is still off — turn it on at the top of the Sources page.',
+        'notice.nowWritableLocked': '{name} accepts writes now, but the global write switch is still off — turn it on in the data source list header, next to the group box.',
         'sources.ddl': 'DDL',
         'sources.ddlHint': 'This source may run create, alter, drop and truncate.',
         'sources.ddlBlockedHint': 'This source accepts insert, update and delete, but refuses create, alter and drop.',
@@ -492,8 +492,8 @@ window.__ModuleLoader__.load({
         'diag.uptime': 'Host 已运行',
         'diag.tip': '提示',
         'diag.restartNeeded': '需要重启一次 DSH 桌面应用：插件入口只在进程启动时导入，重启后工具桥接才会生效。',
-        'write.on': '允许写',
-        'write.off': '禁止写',
+        'write.on': '全局写',
+        'write.off': '全局只读',
         'write.hint': '开启后单个数据源仍须自己允许写；关闭时所有写语句都会被拒绝。',
         'render.title': '结果呈现',
         'render.hint': '结果有多少进入模型上下文。行数只在 AI 没有自己指定数量时生效。',
@@ -529,7 +529,7 @@ window.__ModuleLoader__.load({
         'action.unlockSource': '点击允许写',
         'notice.nowReadOnly': '{name} 已改为只读。',
         'notice.nowWritable': '{name} 现在允许写。',
-        'notice.nowWritableLocked': '{name} 现在允许写，但全局写开关还关着——到「数据源」页顶部把它打开。',
+        'notice.nowWritableLocked': '{name} 现在允许写，但全局写开关还关着——到数据源列表标题行、分组输入框右边把它打开。',
         'sources.ddl': 'DDL',
         'sources.ddlHint': '此数据源可执行 create、alter、drop、truncate。',
         'sources.ddlBlockedHint': '此数据源接受 insert、update、delete，但拒绝 create、alter、drop。',
@@ -1834,15 +1834,17 @@ window.__ModuleLoader__.load({
       .dbmcp-status-spacer {
         flex: 1 1 auto;
       }
-      /* The write switch lives here rather than in diagnostics: turning writes on
-         is a decision about these sources, made where the sources are listed. */
-      .dbmcp-status-write {
+      /* The global write switch lives in the list card's title row, right after
+         the group form. It is a decision about these sources, so it sits with
+         them rather than in the diagnostics page. */
+      .dbmcp-list-write {
         display: inline-flex;
         align-items: center;
-        gap: 8px;
+        gap: 6px;
         flex: 0 0 auto;
+        margin-left: 4px;
       }
-      .dbmcp-status-switch-label {
+      .dbmcp-list-write-label {
         font-size: 12px;
         color: var(--dsw-alias-label-secondary);
         white-space: nowrap;
@@ -4320,10 +4322,35 @@ function groupTables(tables) {
       return h('nav', { className: 'dbmcp-crumbs', 'aria-label': t('panel.title') }, items)
     }
 
+    /**
+     * The global write switch, drawn where the sources are listed.
+     *
+     * It used to sit in the diagnostics card, reading as one more fact among
+     * facts; it then moved to the status strip and finally here, in the list
+     * card's title row next to the group form — the same row as the sources it
+     * governs. Renders nothing when the panel hands it no handler, so a
+     * read-only host cannot show a switch that would do nothing.
+     */
+    function WriteSwitch(props) {
+      const { t, allowWrite, busy, onWrite } = props
+      if (typeof onWrite !== 'function') return null
+      const on = allowWrite === true
+      return h(
+        'span',
+        { className: 'dbmcp-list-write' },
+        h(Switch, {
+          checked: on,
+          title: t('write.hint'),
+          disabled: busy === true,
+          onChange: (next) => onWrite(next),
+        }),
+        h('span', { className: 'dbmcp-list-write-label' }, on ? t('write.on') : t('write.off')),
+      )
+    }
+
     /** Quiet strip above the list: bridge health, totals, filters and search. */
   function StatusStrip(props) {
     const { t, data, sources, failedSources, groupNames, filter, setFilter, query, setQuery } = props
-    const { allowWrite, onWrite, busy } = props
     if (!data) return null
     const mcpReady = Boolean(data.mcp && data.mcp.phase === 'ready')
     const failed = failedSources.length
@@ -4369,23 +4396,6 @@ function groupTables(tables) {
             : null,
         ),
         h('span', { className: 'dbmcp-status-spacer' }),
-        typeof onWrite === 'function'
-          ? h(
-              'span',
-              { className: 'dbmcp-status-write' },
-              h(Switch, {
-                checked: allowWrite === true,
-                title: t('write.hint'),
-                disabled: busy === true,
-                onChange: (next) => onWrite(next),
-              }),
-              h(
-                'span',
-                { className: 'dbmcp-status-switch-label' },
-                allowWrite === true ? t('write.on') : t('write.off'),
-              ),
-            )
-          : null,
         h('div', { className: 'dbmcp-status-search' }, h(TextInput, {
           value: query,
           onChange: setQuery,
@@ -5446,9 +5456,6 @@ function groupTables(tables) {
           setFilter,
           query,
           setQuery,
-          allowWrite: Boolean(settings && settings.allowWrite),
-          onWrite: toggleWrite,
-          busy,
         })
 
       /** One row per supported outside client: detected, configured, one click away. */
@@ -5821,6 +5828,12 @@ function groupTables(tables) {
                   { className: 'dbmcp-list-head' },
                   h('h2', { className: 'dbmcp-card-title' }, t('tab.list')),
                   renderGroupCreate(),
+                  h(WriteSwitch, {
+                    t,
+                    allowWrite: Boolean(settings && settings.allowWrite),
+                    busy,
+                    onWrite: toggleWrite,
+                  }),
                   h('span', { className: 'dbmcp-list-spacer' }),
                   h('span', { className: 'dbmcp-pill' }, t('sources.count').replace('{n}', String(sources.length))),
                   h('button', { type: 'button', className: 'dbmcp-btn is-small', disabled: busy, onClick: load }, t('action.refresh')),
@@ -6054,6 +6067,7 @@ function groupTables(tables) {
         probeReport,
         reportTarget,
         StatusStrip,
+        WriteSwitch,
         sourceMatches,
         sectionOrder,
         reorderForDrop,
