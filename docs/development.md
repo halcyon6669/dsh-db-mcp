@@ -11,7 +11,9 @@ src/host.js         Host half: registry, DBeaver import, probes, settings, audit
 src/mcp.js          minimal MCP client over stdio (newline-delimited JSON-RPC)
 src/secretbox.js    AES-256-GCM envelopes for secrets.json, plus the secret.key file
 src/tools.js        spawns the Python server, publishes its tools on the host tools service
-client.js           browser half: sidebar entry + panel (React, theme tokens only)
+client.js           browser half, generated from client.parts/ — do not edit directly
+client.parts/       source of client.js: header, DICT, CSS, then the components
+dev/build-client.mjs concatenates the parts back into client.js (and checks freshness)
 locale/{en,zh}.json package metadata (title/description) shown by the plugin card
 server/main.py      FastMCP server: nine tools
 server/engines.py   per-engine connect / introspect / query / DDL
@@ -26,7 +28,10 @@ asset/              screenshots and diagram exports used by the READMEs
 
 The package ships `index.js`, `src/*.js`, `client.js`, `locale/*.json`, `icon.svg`,
 `cordis.patch.yml`, `server/*.py`, `server/requirements.txt`, `docs/*.md`, both
-READMEs and the license. `asset/` and `docs/*.drawio` stay out of the npm tarball on
+READMEs and the license. `client.parts/` and `dev/` stay out of the tarball: the browser
+loads the generated `client.js` alone (DSH cannot resolve sibling relative requires),
+so edit a part, run `node dev/build-client.mjs`, and commit both the part and the
+regenerated file. `asset/` and `docs/*.drawio` stay out of the npm tarball on
 purpose: they are read from the repository (the READMEs link them over `raw.githubusercontent.com`).
 
 ## Architecture diagrams
@@ -64,6 +69,8 @@ reflects edits immediately; one installed from npm needs a release.
 ```sh
 npm test              # everything below except mcp.test.mjs
 npm run test:ci       # the portable subset the publish workflow runs
+node dev/build-client.mjs        # rebuild client.js from client.parts/
+node dev/build-client.mjs --check # fail if the committed client.js is stale
 npm run test:mcp      # real Python server, real SQLite; Oracle when its container is up
 npm run test:engines  # the Python suites: engines.py, writes.py and secretbox.py
 npm run test:docs     # fenced blocks, table widths and relative links in the docs
@@ -72,6 +79,7 @@ npm run test:changelog # the changelog's structure and its per-version sections
 
 | Suite | Covers |
 | ----- | ------ |
+| `dev/build-client.mjs --check` | `client.js` matches the concatenation of `client.parts/*.js` (run first in both `npm test` and `test:ci`) |
 | `dev/engines.test.mjs` + `engines.test.py` | commit/rollback and `affectedRows` contract of `execute_sql`, the openGauss plumbing (host list, IRI escaping, the `ssl.wrap_socket` shim), the pre-12c Oracle catalogue fallback and the `infra_error` paths, no database needed |
 | `dev/writes.test.py` | the write guard: statement splitting, the DDL opt-in switch, reads and row writes always passing |
 | `dev/secretbox.test.py` | the envelope reader: key file, round trips, aad mismatch, plaintext fallback |
@@ -182,8 +190,9 @@ backup: if `.git/objects` itself is missing, restore from a bundle instead
    `_limit_clause`, `list_tables`, `describe_table`, `table_ddl`).
 2. `src/host.js`: add the kind to `KINDS`, give it a default port, a validation
    branch in `normalizeInput`, and a `describeTarget` label.
-3. `client.js`: add the string to `KINDS` and, if the form needs extra fields, to
-   `SourceForm`; extend `parseConnectionText` with the scheme and JDBC prefix.
+3. `client.parts/header.js`: add the string to `KINDS` and, if the form needs extra
+   fields, to `SourceForm` in `client.parts/app.js`; extend `parseConnectionText` with
+   the scheme and JDBC prefix. Then `node dev/build-client.mjs` to regenerate `client.js`.
 4. `server/requirements.txt`: the driver, and `docs/reference.md`: the field table.
 5. Tests: `dev/parse.test.mjs` for the string, `dev/selftest.mjs` for validation and
    the probe, and a demo container in `docs/runtime.md`.

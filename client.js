@@ -1,4 +1,8 @@
 /**
+ * GENERATED FILE — do not edit directly.
+ * Source: client.parts/*.js. Run `node dev/build-client.mjs` after editing.
+ */
+/**
  * dsh-db-mcp — Client half.
  *
  * A plain browser bundle loaded through window.__ModuleLoader__ (same shape as
