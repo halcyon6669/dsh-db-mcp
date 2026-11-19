@@ -21,6 +21,8 @@ report of each version in more detail.
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-11-19
+
 ### Added
 
 - **Outside MCP clients reach the audit log.** A client pointed straight at the
@@ -198,7 +200,7 @@ report of each version in more detail.
   plans, but `EXPLAIN ANALYZE` runs the statement it wraps — including a `DELETE`.
   The inner statement now decides.
 
-## [1.0.0] - 2026-11-16
+## [0.9.10] - 2026-11-16
 
 ### Fixed
 
@@ -591,7 +593,8 @@ it shipped as a single unreleased tree.
 - Publishing through npm trusted publishing, so no token lives in the repository.
 
 [Unreleased]: https://github.com/halcyon6669/dsh-db-mcp/compare/v1.0.0...HEAD
-[1.0.0]: https://github.com/halcyon6669/dsh-db-mcp/compare/v0.9.9...v1.0.0
+[1.0.0]: https://github.com/halcyon6669/dsh-db-mcp/compare/v0.9.10...v1.0.0
+[0.9.10]: https://github.com/halcyon6669/dsh-db-mcp/compare/v0.9.9...v0.9.10
 [0.9.9]: https://github.com/halcyon6669/dsh-db-mcp/compare/v0.9.8...v0.9.9
 [0.9.8]: https://github.com/halcyon6669/dsh-db-mcp/compare/v0.9.7...v0.9.8
 [0.9.7]: https://github.com/halcyon6669/dsh-db-mcp/compare/v0.9.6...v0.9.7
