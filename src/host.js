@@ -83,6 +83,17 @@ function trimmed(value) {
   return text(value).trim()
 }
 
+// A password goes to the driver exactly as it was stored. Spaces at either end
+// are part of it — no driver trims them — so a probe that trimmed could not log
+// in to a source whose real queries worked. An empty or absent one means "no
+// password", which is not the same as a password of spaces.
+function probePassword(secret) {
+  const raw = secret ? secret.password : undefined
+  if (raw === undefined || raw === null) return undefined
+  const password = String(raw)
+  return password === '' ? undefined : password
+}
+
 function cleanRecord(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {}
 }
@@ -398,7 +409,10 @@ async function testProfile(profile, secret, options) {
     return { ...result, target: describeTarget(profile.kind, config), hasPassword: false }
   }
 
-  const password = secret && trimmed(secret.password) ? trimmed(secret.password) : undefined
+  // Passed through byte for byte. A password that starts or ends with a space is
+  // a different password, and trimming it here made the Test button report a
+  // login failure for sources whose real queries worked.
+  const password = probePassword(secret)
   if (secret && secret.broken === true) {
     // The envelope no longer opens, so there is no password to try. Saying so
     // beats a login failure the user cannot explain.
@@ -2557,6 +2571,8 @@ export function createHost(options = {}) {
       hostsOf,
       endpointLabel,
       groupsAfterDelete,
+      probePassword,
+      testProfile,
     },
     dispose: async () => {
       if (typeof stopWatchingSessions === 'function') stopWatchingSessions()

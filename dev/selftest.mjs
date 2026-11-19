@@ -125,6 +125,36 @@ try {
     JSON.stringify(pgUrl),
   )
 
+  // A password reaches the driver byte for byte: a space at either end is part of
+  // it, and no driver trims it. Trimming here once made the Test button report a
+  // login failure for a source whose real queries worked.
+  check(
+    'a probe password keeps its surrounding spaces',
+    host.__test.probePassword({ password: ' pad#pass ' }) === ' pad#pass ',
+    JSON.stringify(host.__test.probePassword({ password: ' pad#pass ' })),
+  )
+  check(
+    'an absent or empty password stays absent',
+    host.__test.probePassword(null) === undefined && host.__test.probePassword({ password: '' }) === undefined,
+  )
+  const probedPasswords = []
+  await host.__test.testProfile(
+    { id: 'space-check', kind: 'postgres', readOnly: true, config: { host: '127.0.0.1', port: 5432, database: 'appdb' } },
+    { password: ' pad#pass ' },
+    {
+      probeTimeoutMs: 1000,
+      remote: async (profile, password) => {
+        probedPasswords.push(password)
+        return { ok: true, message: 'connected', latencyMs: 1 }
+      },
+    },
+  )
+  check(
+    'the probe hands the password to the driver untrimmed',
+    probedPasswords[0] === ' pad#pass ',
+    JSON.stringify(probedPasswords[0]),
+  )
+
   const pgTarget = await call('POST', '/datasources/save', {
     id: 'target-check',
     name: 'Target check',
