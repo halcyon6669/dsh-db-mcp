@@ -18,69 +18,85 @@
  *
  * The Python MCP server and the MCP row wiring arrive in P3.
  */
-import { execFile } from 'node:child_process'
-import { createDecipheriv } from 'node:crypto'
-import { chmod, mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
-import { existsSync } from 'node:fs'
-import { homedir } from 'node:os'
-import { join, dirname } from 'node:path'
-import { fileURLToPath } from 'node:url'
-import { connect as netConnect } from 'node:net'
+import { execFile } from "node:child_process";
+import { createDecipheriv } from "node:crypto";
+import {
+  chmod,
+  mkdir,
+  readFile,
+  rename,
+  stat,
+  writeFile,
+} from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { homedir } from "node:os";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import { connect as netConnect } from "node:net";
 
 // Cache-busting: index.js appends ?v=<generation> to this module's URL, and the
 // nested imports must carry the same marker or Node would serve the previous
 // copy after a reload.
-const GENERATION = new URL(import.meta.url).searchParams.get('v') || '0'
-const { createBridge } = await import(new URL(`./tools.js?v=${GENERATION}`, import.meta.url).href)
-const secretbox = await import(new URL(`./secretbox.js?v=${GENERATION}`, import.meta.url).href)
+const GENERATION = new URL(import.meta.url).searchParams.get("v") || "0";
+const { createBridge } = await import(
+  new URL(`./tools.js?v=${GENERATION}`, import.meta.url).href
+);
+const secretbox = await import(
+  new URL(`./secretbox.js?v=${GENERATION}`, import.meta.url).href
+);
 
-const API_PREFIX = '/plugins/db-mcp/api'
-const PLUGIN_NAME = 'dsh-db-mcp'
-const PLUGIN_VERSION = '0.9.10'
-const SCHEMA_VERSION = 1
-const REGISTRY_FILE = 'datasources.json'
-const SECRETS_FILE = 'secrets.json'
-const SECRET_KEY_FILE = 'secret.key'
+const API_PREFIX = "/plugins/db-mcp/api";
+const PLUGIN_NAME = "dsh-db-mcp";
+const PLUGIN_VERSION = "1.0.0";
+const SCHEMA_VERSION = 1;
+const REGISTRY_FILE = "datasources.json";
+const SECRETS_FILE = "secrets.json";
+const SECRET_KEY_FILE = "secret.key";
 // Fields inside one secrets.json entry that hold a password. `#password` is the
 // key DBeaver's own import uses; both are sealed the same way.
-const SECRET_FIELDS = ['password', '#password']
-const SETTINGS_FILE = 'settings.json'
+const SECRET_FIELDS = ["password", "#password"];
+const SETTINGS_FILE = "settings.json";
 // Per-conversation data-source allowlists. Missing file or an empty id list
 // means "no limit": every source stays reachable.
-const SCOPES_FILE = 'sessions.json'
-const AUDIT_FILE = 'logs/audit.jsonl'
-const AUDIT_LIMIT_BYTES = 512 * 1024
-const PYTHON_CACHE_MS = 30_000
-const MAX_BODY_BYTES = 1024 * 1024
-const MAX_SOURCES = 32
+const SCOPES_FILE = "sessions.json";
+const AUDIT_FILE = "logs/audit.jsonl";
+const AUDIT_LIMIT_BYTES = 512 * 1024;
+const PYTHON_CACHE_MS = 30_000;
+const MAX_BODY_BYTES = 1024 * 1024;
+const MAX_SOURCES = 32;
 // Archived conversations keep their limits so unarchiving can hand them back.
 // The set is bounded: an archive nobody ever opens again must not grow forever.
-const MAX_ARCHIVED = 64
+const MAX_ARCHIVED = 64;
 // Titles come from the session log, which is a disk read; one panel refresh asks
 // for every listed conversation, so a short cache keeps that cheap.
-const TITLE_CACHE_MS = 60_000
+const TITLE_CACHE_MS = 60_000;
 // Entry name other MCP clients see in their own configuration.
-const CLIENT_ENTRY = 'dsh-db-mcp'
-const HTTP_PORT_DEFAULT = 8765
-const HTTP_PORT_MIN = 1024
-const HTTP_PORT_MAX = 65535
+const CLIENT_ENTRY = "dsh-db-mcp";
+const HTTP_PORT_DEFAULT = 8765;
+const HTTP_PORT_MIN = 1024;
+const HTTP_PORT_MAX = 65535;
 
-const KINDS = ['sqlite', 'postgres', 'gauss', 'mysql', 'oracle']
-const DEFAULT_PORTS = { postgres: 5432, gauss: 5432, mysql: 3306, oracle: 1521 }
-const ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,31}$/
+const KINDS = ["sqlite", "postgres", "gauss", "mysql", "oracle"];
+const DEFAULT_PORTS = {
+  postgres: 5432,
+  gauss: 5432,
+  mysql: 3306,
+  oracle: 1521,
+};
+const ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,31}$/;
 
 /** DBeaver's own secure-storage key (DefaultSecureStorage.java). */
-const DBEAVER_KEY = Buffer.from('babb4a9f774ab853c96c2d653dfe544a', 'hex')
-const DBEAVER_IV = Buffer.alloc(16, 0)
+const DBEAVER_KEY = Buffer.from("babb4a9f774ab853c96c2d653dfe544a", "hex");
+const DBEAVER_IV = Buffer.alloc(16, 0);
 
 /* ------------------------------------------------------------ small utils */
 
-function text(value, fallback = '') {
-  return typeof value === 'string' ? value : fallback
+function text(value, fallback = "") {
+  return typeof value === "string" ? value : fallback;
 }
 
 function trimmed(value) {
-  return text(value).trim()
+  return text(value).trim();
 }
 
 // A password goes to the driver exactly as it was stored. Spaces at either end
@@ -88,43 +104,57 @@ function trimmed(value) {
 // in to a source whose real queries worked. An empty or absent one means "no
 // password", which is not the same as a password of spaces.
 function probePassword(secret) {
-  const raw = secret ? secret.password : undefined
-  if (raw === undefined || raw === null) return undefined
-  const password = String(raw)
-  return password === '' ? undefined : password
+  const raw = secret ? secret.password : undefined;
+  if (raw === undefined || raw === null) return undefined;
+  const password = String(raw);
+  return password === "" ? undefined : password;
 }
 
 function cleanRecord(value) {
-  return value && typeof value === 'object' && !Array.isArray(value) ? value : {}
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value
+    : {};
 }
 
 function isoNow() {
-  return new Date().toISOString()
+  return new Date().toISOString();
 }
 
 async function readJson(file) {
-  let raw
+  let raw;
   try {
-    raw = await readFile(file, 'utf8')
+    raw = await readFile(file, "utf8");
   } catch (error) {
-    if (error && error.code === 'ENOENT') return { missing: true, value: null, error: null }
-    return { missing: false, value: null, error: String((error && error.message) || error) }
+    if (error && error.code === "ENOENT")
+      return { missing: true, value: null, error: null };
+    return {
+      missing: false,
+      value: null,
+      error: String((error && error.message) || error),
+    };
   }
   try {
-    return { missing: false, value: JSON.parse(raw), error: null }
+    return { missing: false, value: JSON.parse(raw), error: null };
   } catch (error) {
-    return { missing: false, value: null, error: `invalid JSON in ${file}: ${(error && error.message) || error}` }
+    return {
+      missing: false,
+      value: null,
+      error: `invalid JSON in ${file}: ${(error && error.message) || error}`,
+    };
   }
 }
 
 async function writeJsonAtomic(file, value, mode) {
-  await mkdir(join(file, '..'), { recursive: true })
-  const temp = `${file}.tmp-${process.pid}-${Date.now()}`
-  await writeFile(temp, `${JSON.stringify(value, null, 2)}\n`, { encoding: 'utf8', mode: mode || 0o600 })
-  await rename(temp, file)
+  await mkdir(join(file, ".."), { recursive: true });
+  const temp = `${file}.tmp-${process.pid}-${Date.now()}`;
+  await writeFile(temp, `${JSON.stringify(value, null, 2)}\n`, {
+    encoding: "utf8",
+    mode: mode || 0o600,
+  });
+  await rename(temp, file);
   if (mode) {
     try {
-      await chmod(file, mode)
+      await chmod(file, mode);
     } catch {
       /* best effort where POSIX modes are unavailable */
     }
@@ -139,45 +169,51 @@ async function writeJsonAtomic(file, value, mode) {
  * `hosts` array both have to survive.
  */
 function hostsOf(config) {
-  const cfg = cleanRecord(config)
-  const entries = []
+  const cfg = cleanRecord(config);
+  const entries = [];
   if (Array.isArray(cfg.hosts)) {
     for (const item of cfg.hosts) {
-      if (item && typeof item === 'object' && item.host) {
-        entries.push({ host: String(item.host), port: Number(item.port) || null })
-      } else if (typeof item === 'string' && item.trim()) {
-        entries.push({ host: item.trim(), port: null })
+      if (item && typeof item === "object" && item.host) {
+        entries.push({
+          host: String(item.host),
+          port: Number(item.port) || null,
+        });
+      } else if (typeof item === "string" && item.trim()) {
+        entries.push({ host: item.trim(), port: null });
       }
     }
   }
-  if (entries.length) return entries
-  return String(cfg.host || '')
-    .split(',')
+  if (entries.length) return entries;
+  return String(cfg.host || "")
+    .split(",")
     .map((piece) => piece.trim())
     .filter(Boolean)
     .map((piece) => {
-      const match = /^(.*):(\d+)$/.exec(piece)
-      return match ? { host: match[1], port: Number(match[2]) } : { host: piece, port: null }
-    })
+      const match = /^(.*):(\d+)$/.exec(piece);
+      return match
+        ? { host: match[1], port: Number(match[2]) }
+        : { host: piece, port: null };
+    });
 }
 
 function endpointLabel(config) {
-  const hosts = hostsOf(config)
-  if (!hosts.length) return ''
-  const port = cleanRecord(config).port
-  const first = hosts[0].host
-  const head = hosts.length > 1 ? `${first} +${hosts.length - 1}` : first
-  const effectivePort = hosts[0].port || port
-  return effectivePort ? `${head}:${effectivePort}` : head
+  const hosts = hostsOf(config);
+  if (!hosts.length) return "";
+  const port = cleanRecord(config).port;
+  const first = hosts[0].host;
+  const head = hosts.length > 1 ? `${first} +${hosts.length - 1}` : first;
+  const effectivePort = hosts[0].port || port;
+  return effectivePort ? `${head}:${effectivePort}` : head;
 }
 
 function describeTarget(kind, config) {
-  const cfg = cleanRecord(config)
-  if (kind === 'sqlite') return trimmed(cfg.file)
-  const database = trimmed(cfg.database) || trimmed(cfg.serviceName) || trimmed(cfg.sid)
-  const endpoint = endpointLabel(cfg)
-  if (endpoint && database) return `${endpoint}/${database}`
-  return endpoint || database
+  const cfg = cleanRecord(config);
+  if (kind === "sqlite") return trimmed(cfg.file);
+  const database =
+    trimmed(cfg.database) || trimmed(cfg.serviceName) || trimmed(cfg.sid);
+  const endpoint = endpointLabel(cfg);
+  if (endpoint && database) return `${endpoint}/${database}`;
+  return endpoint || database;
 }
 
 /**
@@ -186,25 +222,39 @@ function describeTarget(kind, config) {
  * that was already imported under another name is still a duplicate.
  */
 function sourceIdentity(kind, config, user) {
-  const cfg = cleanRecord(config)
-  if (kind === 'sqlite') {
-    const file = trimmed(cfg.file)
-    return `sqlite|${process.platform === 'win32' ? file.toLowerCase() : file}`
+  const cfg = cleanRecord(config);
+  if (kind === "sqlite") {
+    const file = trimmed(cfg.file);
+    return `sqlite|${process.platform === "win32" ? file.toLowerCase() : file}`;
   }
   const host = hostsOf(cfg)
     .map((entry) => entry.host)
-    .join(',')
-    .toLowerCase()
-  const port = String(cfg.port || DEFAULT_PORTS[kind] || '').trim()
-  const database = (trimmed(cfg.database) || trimmed(cfg.serviceName) || trimmed(cfg.sid)).toLowerCase()
-  const account = (user === undefined ? trimmed(cfg.user) : trimmed(user)).toLowerCase()
-  return `${kind || ''}|${host}|${port}|${database}|${account}`
+    .join(",")
+    .toLowerCase();
+  const port = String(cfg.port || DEFAULT_PORTS[kind] || "").trim();
+  const database = (
+    trimmed(cfg.database) ||
+    trimmed(cfg.serviceName) ||
+    trimmed(cfg.sid)
+  ).toLowerCase();
+  const account = (
+    user === undefined ? trimmed(cfg.user) : trimmed(user)
+  ).toLowerCase();
+  return `${kind || ""}|${host}|${port}|${database}|${account}`;
 }
 
 /** Connection settings minus anything credential-shaped. */
-function configToPublic(kind, config) {  const cfg = cleanRecord(config)
-  if (kind === 'sqlite') return { file: trimmed(cfg.file), busyTimeoutMs: cfg.busyTimeoutMs ?? null }
-  const hosts = hostsOf(cfg).map((entry) => ({ host: entry.host, port: entry.port || null }))
+function configToPublic(kind, config) {
+  const cfg = cleanRecord(config);
+  if (kind === "sqlite")
+    return {
+      file: trimmed(cfg.file),
+      busyTimeoutMs: cfg.busyTimeoutMs ?? null,
+    };
+  const hosts = hostsOf(cfg).map((entry) => ({
+    host: entry.host,
+    port: entry.port || null,
+  }));
   return {
     host: trimmed(cfg.host),
     port: cfg.port ?? null,
@@ -216,106 +266,138 @@ function configToPublic(kind, config) {  const cfg = cleanRecord(config)
     schema: trimmed(cfg.schema),
     sslMode: trimmed(cfg.sslMode),
     charset: trimmed(cfg.charset),
-  }
+  };
 }
 
 function publicProfile(profile, secrets) {
-  if (!profile || typeof profile !== 'object') return null
-  const config = cleanRecord(profile.config)
-  const secret = secrets && profile.id ? secrets[profile.id] : null
+  if (!profile || typeof profile !== "object") return null;
+  const config = cleanRecord(profile.config);
+  const secret = secrets && profile.id ? secrets[profile.id] : null;
   return {
     id: profile.id,
     name: profile.name,
     kind: profile.kind,
     readOnly: profile.readOnly !== false,
     isDefault: profile.isDefault === true,
-    tags: Array.isArray(profile.tags) ? profile.tags.filter((tag) => typeof tag === 'string') : [],
-    group: typeof profile.group === 'string' ? profile.group : '',
+    tags: Array.isArray(profile.tags)
+      ? profile.tags.filter((tag) => typeof tag === "string")
+      : [],
+    group: typeof profile.group === "string" ? profile.group : "",
     config: configToPublic(profile.kind, config),
     // DDL is its own permission: a source can be perfectly happy to take an
     // `insert` and still be one whose tables belong to somebody else.
     allowDdl: profile.allowDdl === true,
     target: describeTarget(profile.kind, config),
-    hasSecret: Boolean(secret && SECRET_FIELDS.some((field) => trimmed(secret[field]))),
+    hasSecret: Boolean(
+      secret && SECRET_FIELDS.some((field) => trimmed(secret[field])),
+    ),
     // A secret that no longer opens (the key was replaced or deleted) must be
     // visible on the row: otherwise the next probe reports a login failure.
     secretBroken: Boolean(secret && secret.broken === true),
     lastProbe: profile.lastProbe ?? null,
     createdAt: profile.createdAt ?? null,
     updatedAt: profile.updatedAt ?? null,
-  }
+  };
 }
 
 /** Validate raw user input, returning { profile, password, error }. */
 function groupName(value) {
-  return typeof value === 'string' ? value.trim().slice(0, 48) : ''
+  return typeof value === "string" ? value.trim().slice(0, 48) : "";
 }
 
 function normalizeInput(input, existing) {
-  const raw = cleanRecord(input)
-  const kind = trimmed(raw.kind) || (existing && existing.kind) || ''
-  if (!KINDS.includes(kind)) return { error: `unsupported kind: ${kind || '(empty)'}` }
+  const raw = cleanRecord(input);
+  const kind = trimmed(raw.kind) || (existing && existing.kind) || "";
+  if (!KINDS.includes(kind))
+    return { error: `unsupported kind: ${kind || "(empty)"}` };
 
-  const id = trimmed(raw.id) || (existing && existing.id) || ''
+  const id = trimmed(raw.id) || (existing && existing.id) || "";
   if (!ID_PATTERN.test(id)) {
-    return { error: 'id must be 1-32 chars of a-z, 0-9 or "-", starting with a letter or digit' }
+    return {
+      error:
+        'id must be 1-32 chars of a-z, 0-9 or "-", starting with a letter or digit',
+    };
   }
   if (existing && trimmed(raw.id) && trimmed(raw.id) !== existing.id) {
-    return { error: 'id cannot be changed after creation' }
+    return { error: "id cannot be changed after creation" };
   }
 
-  const name = trimmed(raw.name) || (existing && existing.name) || id
-  if (name.length > 64) return { error: 'name must be at most 64 characters' }
+  const name = trimmed(raw.name) || (existing && existing.name) || id;
+  if (name.length > 64) return { error: "name must be at most 64 characters" };
 
-  const incoming = cleanRecord(raw.config)
-  const config = { ...(Object.keys(incoming).length > 0 ? incoming : cleanRecord(existing && existing.config)) }
+  const incoming = cleanRecord(raw.config);
+  const config = {
+    ...(Object.keys(incoming).length > 0
+      ? incoming
+      : cleanRecord(existing && existing.config)),
+  };
 
-  if (kind === 'sqlite') {
-    const file = trimmed(config.file)
-    if (!file) return { error: 'sqlite requires config.file' }
-    config.file = file
-    delete config.host
-    delete config.port
-    delete config.user
+  if (kind === "sqlite") {
+    const file = trimmed(config.file);
+    if (!file) return { error: "sqlite requires config.file" };
+    config.file = file;
+    delete config.host;
+    delete config.port;
+    delete config.user;
   } else {
-    const entries = hostsOf(config)
-    if (!entries.length) return { error: `${kind} requires config.host` }
-    const port = Number(config.port) || DEFAULT_PORTS[kind]
-    if (!Number.isInteger(port) || port < 1 || port > 65535) return { error: 'config.port must be 1-65535' }
-    config.port = port
-    config.host = entries.map((entry) => entry.host).join(',')
+    const entries = hostsOf(config);
+    if (!entries.length) return { error: `${kind} requires config.host` };
+    const port = Number(config.port) || DEFAULT_PORTS[kind];
+    if (!Number.isInteger(port) || port < 1 || port > 65535)
+      return { error: "config.port must be 1-65535" };
+    config.port = port;
+    config.host = entries.map((entry) => entry.host).join(",");
     if (entries.length > 1) {
-      config.hosts = entries.map((entry) => ({ host: entry.host, port: entry.port || port }))
+      config.hosts = entries.map((entry) => ({
+        host: entry.host,
+        port: entry.port || port,
+      }));
     } else {
-      delete config.hosts
+      delete config.hosts;
     }
-    config.user = trimmed(config.user)
-    config.database = trimmed(config.database)
-    config.serviceName = trimmed(config.serviceName)
-    config.sid = trimmed(config.sid)
-    if (kind === 'oracle' && !config.serviceName && !config.sid) {
-      return { error: 'oracle requires config.serviceName or config.sid' }
+    config.user = trimmed(config.user);
+    config.database = trimmed(config.database);
+    config.serviceName = trimmed(config.serviceName);
+    config.sid = trimmed(config.sid);
+    if (kind === "oracle" && !config.serviceName && !config.sid) {
+      return { error: "oracle requires config.serviceName or config.sid" };
     }
-    if (kind !== 'oracle' && !config.database) return { error: `${kind} requires config.database` }
-    delete config.file
+    if (kind !== "oracle" && !config.database)
+      return { error: `${kind} requires config.database` };
+    delete config.file;
   }
 
-  const readOnly = raw.readOnly === undefined || raw.readOnly === null
-    ? (existing ? existing.readOnly !== false : true)
-    : raw.readOnly === true
+  const readOnly =
+    raw.readOnly === undefined || raw.readOnly === null
+      ? existing
+        ? existing.readOnly !== false
+        : true
+      : raw.readOnly === true;
   const tags = Array.isArray(raw.tags)
-    ? raw.tags.map((tag) => trimmed(tag)).filter(Boolean).slice(0, 8)
-    : existing && Array.isArray(existing.tags) ? existing.tags : []
-  const group = raw.group === undefined || raw.group === null
-    ? (existing && typeof existing.group === 'string' ? existing.group : '')
-    : trimmed(raw.group)
-  if (group.length > 48) return { error: 'group must be at most 48 characters' }
+    ? raw.tags
+        .map((tag) => trimmed(tag))
+        .filter(Boolean)
+        .slice(0, 8)
+    : existing && Array.isArray(existing.tags)
+      ? existing.tags
+      : [];
+  const group =
+    raw.group === undefined || raw.group === null
+      ? existing && typeof existing.group === "string"
+        ? existing.group
+        : ""
+      : trimmed(raw.group);
+  if (group.length > 48)
+    return { error: "group must be at most 48 characters" };
 
   // DDL is granted, never assumed: an older registry has no field, and a source
   // that has not been asked must not silently start accepting `drop table`.
-  const allowDdl = raw.allowDdl === undefined || raw.allowDdl === null
-    ? (existing ? existing.allowDdl === true : false)
-    : raw.allowDdl === true
+  const allowDdl =
+    raw.allowDdl === undefined || raw.allowDdl === null
+      ? existing
+        ? existing.allowDdl === true
+        : false
+      : raw.allowDdl === true;
 
   const profile = {
     id,
@@ -323,74 +405,107 @@ function normalizeInput(input, existing) {
     kind,
     config,
     readOnly,
-    isDefault: raw.isDefault === true || (existing ? existing.isDefault === true : false),
+    isDefault:
+      raw.isDefault === true ||
+      (existing ? existing.isDefault === true : false),
     tags,
     group,
     allowDdl,
     createdAt: (existing && existing.createdAt) || isoNow(),
     updatedAt: isoNow(),
-    lastProbe: existing ? existing.lastProbe ?? null : null,
-  }
+    lastProbe: existing ? (existing.lastProbe ?? null) : null,
+  };
 
-  const password = raw.password === undefined || raw.password === null ? undefined : String(raw.password)
-  return { profile, password }
+  const password =
+    raw.password === undefined || raw.password === null
+      ? undefined
+      : String(raw.password);
+  return { profile, password };
 }
 
 /* ----------------------------------------------------------------- probes */
 
 function tcpProbe(host, port, timeoutMs) {
   return new Promise((resolve) => {
-    const started = Date.now()
-    const socket = netConnect({ host, port })
-    let settled = false
+    const started = Date.now();
+    const socket = netConnect({ host, port });
+    let settled = false;
     const finish = (ok, message) => {
-      if (settled) return
-      settled = true
-      socket.destroy()
-      resolve({ ok, message, latencyMs: Date.now() - started })
-    }
-    socket.setTimeout(Math.max(500, timeoutMs))
-    socket.once('connect', () => finish(true, `TCP ${host}:${port} reachable`))
-    socket.once('timeout', () => finish(false, `TCP timeout after ${timeoutMs}ms`))
-    socket.once('error', (error) => finish(false, `${(error && error.code) || 'connect failed'}: ${(error && error.message) || error}`))
-  })
+      if (settled) return;
+      settled = true;
+      socket.destroy();
+      resolve({ ok, message, latencyMs: Date.now() - started });
+    };
+    socket.setTimeout(Math.max(500, timeoutMs));
+    socket.once("connect", () => finish(true, `TCP ${host}:${port} reachable`));
+    socket.once("timeout", () =>
+      finish(false, `TCP timeout after ${timeoutMs}ms`),
+    );
+    socket.once("error", (error) =>
+      finish(
+        false,
+        `${(error && error.code) || "connect failed"}: ${(error && error.message) || error}`,
+      ),
+    );
+  });
 }
 
 async function sqliteProbe(file, timeoutMs) {
-  const started = Date.now()
+  const started = Date.now();
   try {
-    await stat(file)
+    await stat(file);
   } catch {
-    return { ok: false, message: `file not found: ${file}`, latencyMs: Date.now() - started, detail: null }
+    return {
+      ok: false,
+      message: `file not found: ${file}`,
+      latencyMs: Date.now() - started,
+      detail: null,
+    };
   }
-  let sqlite
+  let sqlite;
   try {
-    sqlite = await import('node:sqlite')
+    sqlite = await import("node:sqlite");
   } catch (error) {
     return {
       ok: false,
       message: `this Host has no node:sqlite (${(error && error.message) || error}); the Python probe covers it from P3`,
       latencyMs: Date.now() - started,
       detail: null,
-    }
+    };
   }
-  let db
+  let db;
   try {
-    db = new sqlite.DatabaseSync(file, { readOnly: true, timeout: Math.max(1000, timeoutMs) })
-    const tables = db.prepare("select name from sqlite_master where type = 'table' order by name limit 50").all()
-    const probe = db.prepare('select 1 as ok').get()
+    db = new sqlite.DatabaseSync(file, {
+      readOnly: true,
+      timeout: Math.max(1000, timeoutMs),
+    });
+    const tables = db
+      .prepare(
+        "select name from sqlite_master where type = 'table' order by name limit 50",
+      )
+      .all();
+    const probe = db.prepare("select 1 as ok").get();
     return {
       ok: Boolean(probe && probe.ok === 1),
       message: `SQLite opened read-only, ${tables.length} table(s)`,
       latencyMs: Date.now() - started,
-      detail: { kind: 'sqlite', engine: 'node:sqlite', tables: tables.map((row) => row.name) },
-    }
+      detail: {
+        kind: "sqlite",
+        engine: "node:sqlite",
+        tables: tables.map((row) => row.name),
+      },
+    };
   } catch (error) {
-    return { ok: false, message: String((error && error.message) || error), latencyMs: Date.now() - started, detail: null }
+    return {
+      ok: false,
+      message: String((error && error.message) || error),
+      latencyMs: Date.now() - started,
+      detail: null,
+    };
   } finally {
     if (db) {
       try {
-        db.close()
+        db.close();
       } catch {
         /* ignore */
       }
@@ -399,186 +514,226 @@ async function sqliteProbe(file, timeoutMs) {
 }
 
 async function testProfile(profile, secret, options) {
-  const timeoutMs = (options && options.probeTimeoutMs) || 10_000
-  const config = cleanRecord(profile && profile.config)
+  const timeoutMs = (options && options.probeTimeoutMs) || 10_000;
+  const config = cleanRecord(profile && profile.config);
   if (!profile || !KINDS.includes(profile.kind)) {
-    return { ok: false, message: 'unknown datasource kind', detail: null, latencyMs: 0 }
+    return {
+      ok: false,
+      message: "unknown datasource kind",
+      detail: null,
+      latencyMs: 0,
+    };
   }
-  if (profile.kind === 'sqlite') {
-    const result = await sqliteProbe(trimmed(config.file), timeoutMs)
-    return { ...result, target: describeTarget(profile.kind, config), hasPassword: false }
+  if (profile.kind === "sqlite") {
+    const result = await sqliteProbe(trimmed(config.file), timeoutMs);
+    return {
+      ...result,
+      target: describeTarget(profile.kind, config),
+      hasPassword: false,
+    };
   }
 
   // Passed through byte for byte. A password that starts or ends with a space is
   // a different password, and trimming it here made the Test button report a
   // login failure for sources whose real queries worked.
-  const password = probePassword(secret)
+  const password = probePassword(secret);
   if (secret && secret.broken === true) {
     // The envelope no longer opens, so there is no password to try. Saying so
     // beats a login failure the user cannot explain.
     return {
       ok: false,
-      message: 'the stored password cannot be decrypted — re-enter it in Edit',
+      message: "the stored password cannot be decrypted — re-enter it in Edit",
       detail: null,
       latencyMs: 0,
       target: describeTarget(profile.kind, config),
       hasPassword: false,
       broken: true,
-    }
+    };
   }
-  const target = describeTarget(profile.kind, config)
-  const remote = options && options.remote
-  if (typeof remote === 'function') {
+  const target = describeTarget(profile.kind, config);
+  const remote = options && options.remote;
+  if (typeof remote === "function") {
     // A real login through the Python driver: this is what the panel's Test
     // button shows for PostgreSQL, MySQL and Oracle.
-    const attempt = await remote(profile, password).catch(() => null)
-    if (attempt && typeof attempt.ok === 'boolean') {
-      const error = attempt.error || null
+    const attempt = await remote(profile, password).catch(() => null);
+    if (attempt && typeof attempt.ok === "boolean") {
+      const error = attempt.error || null;
       const message =
         attempt.message ||
-        (error && (error.hint ? `${error.message} — ${error.hint}` : error.message)) ||
-        (attempt.ok ? 'connected' : 'connection failed')
+        (error &&
+          (error.hint ? `${error.message} — ${error.hint}` : error.message)) ||
+        (attempt.ok ? "connected" : "connection failed");
       return {
         ok: attempt.ok === true,
         message,
         latencyMs: Number(attempt.latencyMs) || 0,
         target,
         hasPassword: Boolean(password),
-        detail: attempt.detail || { kind: profile.kind, stage: 'login' },
-      }
+        detail: attempt.detail || { kind: profile.kind, stage: "login" },
+      };
     }
   }
 
-  const host = trimmed(config.host)
-  const port = Number(config.port) || DEFAULT_PORTS[profile.kind]
-  const reach = await tcpProbe(host, port, timeoutMs)
+  const host = trimmed(config.host);
+  const port = Number(config.port) || DEFAULT_PORTS[profile.kind];
+  const reach = await tcpProbe(host, port, timeoutMs);
   const note = reach.ok
     ? `${profile.kind} port reachable, but the authenticated login did not run (the Python MCP server is not up)`
-    : reach.message
+    : reach.message;
   return {
     ok: reach.ok,
     message: note,
     latencyMs: reach.latencyMs,
     target,
     hasPassword: Boolean(password),
-    detail: { kind: profile.kind, stage: 'tcp', host, port, user: trimmed(config.user) || null },
-  }
+    detail: {
+      kind: profile.kind,
+      stage: "tcp",
+      host,
+      port,
+      user: trimmed(config.user) || null,
+    },
+  };
 }
 
 /* ----------------------------------------------------------------- python */
 
 function run(file, args, timeout) {
   return new Promise((resolve) => {
-    execFile(file, args, { timeout, windowsHide: true }, (error, stdout, stderr) => {
-      resolve({
-        ok: !error,
-        stdout: String(stdout || '').trim(),
-        stderr: String(stderr || '').trim(),
-        error: error ? String(error.message || error) : null,
-      })
-    })
-  })
+    execFile(
+      file,
+      args,
+      { timeout, windowsHide: true },
+      (error, stdout, stderr) => {
+        resolve({
+          ok: !error,
+          stdout: String(stdout || "").trim(),
+          stderr: String(stderr || "").trim(),
+          error: error ? String(error.message || error) : null,
+        });
+      },
+    );
+  });
 }
 
 async function probeOne(command, timeout) {
-  const result = await run(command, ['--version'], timeout)
-  const banner = result.stdout || result.stderr
-  const match = /Python\s+(\d+\.\d+\.\d+)/i.exec(banner)
-  if (result.ok && match) return { ok: true, command, version: match[1], detail: banner.split('\n')[0] }
-  return { ok: false, command, version: null, detail: (result.error || banner || 'no Python banner').slice(0, 200) }
+  const result = await run(command, ["--version"], timeout);
+  const banner = result.stdout || result.stderr;
+  const match = /Python\s+(\d+\.\d+\.\d+)/i.exec(banner);
+  if (result.ok && match)
+    return {
+      ok: true,
+      command,
+      version: match[1],
+      detail: banner.split("\n")[0],
+    };
+  return {
+    ok: false,
+    command,
+    version: null,
+    detail: (result.error || banner || "no Python banner").slice(0, 200),
+  };
 }
 
 async function detectPython(config, cache) {
-  if (cache.value && Date.now() - cache.at < PYTHON_CACHE_MS) return cache.value
-  const timeout = (config && config.probeTimeoutMs) || 8000
-  const candidates = []
-  if (config && config.pythonPath) candidates.push(config.pythonPath)
-  candidates.push('python', 'python3')
-  const attempts = []
-  let found = null
+  if (cache.value && Date.now() - cache.at < PYTHON_CACHE_MS)
+    return cache.value;
+  const timeout = (config && config.probeTimeoutMs) || 8000;
+  const candidates = [];
+  if (config && config.pythonPath) candidates.push(config.pythonPath);
+  candidates.push("python", "python3");
+  const attempts = [];
+  let found = null;
   for (const command of candidates) {
-    const attempt = await probeOne(command, timeout)
-    attempts.push(attempt)
+    const attempt = await probeOne(command, timeout);
+    attempts.push(attempt);
     if (attempt.ok) {
-      found = attempt
-      break
+      found = attempt;
+      break;
     }
   }
   const value = found
     ? { ok: true, command: found.command, version: found.version, attempts }
-    : { ok: false, command: null, version: null, attempts }
-  cache.value = value
-  cache.at = Date.now()
-  return value
+    : { ok: false, command: null, version: null, attempts };
+  cache.value = value;
+  cache.at = Date.now();
+  return value;
 }
 
 /* ---------------------------------------------------------------- DBeaver */
 
 function dbeaverRoots() {
-  const roots = []
-  if (process.env.APPDATA) roots.push(join(process.env.APPDATA, 'DBeaverData'))
-  roots.push(join(homedir(), 'AppData', 'Roaming', 'DBeaverData'))
-  roots.push(join(homedir(), '.local', 'share', 'DBeaverData'))
-  roots.push(join(homedir(), 'Library', 'DBeaverData'))
-  return [...new Set(roots)]
+  const roots = [];
+  if (process.env.APPDATA) roots.push(join(process.env.APPDATA, "DBeaverData"));
+  roots.push(join(homedir(), "AppData", "Roaming", "DBeaverData"));
+  roots.push(join(homedir(), ".local", "share", "DBeaverData"));
+  roots.push(join(homedir(), "Library", "DBeaverData"));
+  return [...new Set(roots)];
 }
 
 async function listDir(dir) {
   try {
-    const { readdir } = await import('node:fs/promises')
-    return await readdir(dir, { withFileTypes: true })
+    const { readdir } = await import("node:fs/promises");
+    return await readdir(dir, { withFileTypes: true });
   } catch {
-    return []
+    return [];
   }
 }
 
 /** Decrypt DBeaver's credentials-config.json (AES-128-CBC, zero IV, 16-byte prefix). */
 function decryptDBeaverCredentials(buffer) {
   try {
-    const decipher = createDecipheriv('aes-128-cbc', DBEAVER_KEY, DBEAVER_IV)
-    const plain = Buffer.concat([decipher.update(buffer), decipher.final()])
+    const decipher = createDecipheriv("aes-128-cbc", DBEAVER_KEY, DBEAVER_IV);
+    const plain = Buffer.concat([decipher.update(buffer), decipher.final()]);
     for (const candidate of [plain.subarray(16), plain]) {
-      const body = candidate.toString('utf8').replace(/\u0000+$/g, '').trim()
-      if (!body.startsWith('{')) continue
+      const body = candidate
+        .toString("utf8")
+        .replace(/\u0000+$/g, "")
+        .trim();
+      if (!body.startsWith("{")) continue;
       try {
-        const parsed = JSON.parse(body)
-        if (parsed && typeof parsed === 'object') return parsed
+        const parsed = JSON.parse(body);
+        if (parsed && typeof parsed === "object") return parsed;
       } catch {
         /* try the next shape */
       }
     }
-    return null
+    return null;
   } catch {
-    return null
+    return null;
   }
 }
 
 function pickCredential(entry) {
-  const queue = [entry]
-  const seen = new Set()
+  const queue = [entry];
+  const seen = new Set();
   while (queue.length > 0) {
-    const node = queue.shift()
-    if (!node || typeof node !== 'object' || seen.has(node)) continue
-    seen.add(node)
-    const password = node.password ?? node['#password']
-    if (typeof password === 'string') {
-      return { password, user: typeof node.user === 'string' ? node.user : null }
+    const node = queue.shift();
+    if (!node || typeof node !== "object" || seen.has(node)) continue;
+    seen.add(node);
+    const password = node.password ?? node["#password"];
+    if (typeof password === "string") {
+      return {
+        password,
+        user: typeof node.user === "string" ? node.user : null,
+      };
     }
     for (const value of Object.values(node)) {
-      if (value && typeof value === 'object') queue.push(value)
+      if (value && typeof value === "object") queue.push(value);
     }
   }
-  return null
+  return null;
 }
 
 function mapDBeaverProvider(provider, driver) {
-  const p = `${provider || ''} ${driver || ''}`.toLowerCase()
-  if (p.includes('sqlite')) return 'sqlite'
-  if (p.includes('opengauss') || p.includes('gaussdb') || p.includes('gauss')) return 'gauss'
-  if (p.includes('postgres')) return 'postgres'
-  if (p.includes('mysql') || p.includes('mariadb')) return 'mysql'
-  if (p.includes('oracle')) return 'oracle'
-  return null
+  const p = `${provider || ""} ${driver || ""}`.toLowerCase();
+  if (p.includes("sqlite")) return "sqlite";
+  if (p.includes("opengauss") || p.includes("gaussdb") || p.includes("gauss"))
+    return "gauss";
+  if (p.includes("postgres")) return "postgres";
+  if (p.includes("mysql") || p.includes("mariadb")) return "mysql";
+  if (p.includes("oracle")) return "oracle";
+  return null;
 }
 
 /**
@@ -588,32 +743,35 @@ function mapDBeaverProvider(provider, driver) {
  * of one rigid expression so the multi-line form parses too.
  */
 function parseOracleUrl(url) {
-  const text = String(url || '').replace(/\s+/g, ' ').trim()
-  if (!text) return null
+  const text = String(url || "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!text) return null;
   if (/\((DESCRIPTION|ADDRESS|CONNECT_DATA)/i.test(text)) {
-    const host = /\(HOST\s*=\s*([^)\s]+)\)/i.exec(text)
-    const port = /\(PORT\s*=\s*(\d+)\)/i.exec(text)
-    const service = /\(SERVICE_NAME\s*=\s*([^)\s]+)\)/i.exec(text)
-    const sid = /\(SID\s*=\s*([^)\s]+)\)/i.exec(text)
-    if (!host) return null
+    const host = /\(HOST\s*=\s*([^)\s]+)\)/i.exec(text);
+    const port = /\(PORT\s*=\s*(\d+)\)/i.exec(text);
+    const service = /\(SERVICE_NAME\s*=\s*([^)\s]+)\)/i.exec(text);
+    const sid = /\(SID\s*=\s*([^)\s]+)\)/i.exec(text);
+    if (!host) return null;
     return {
       host: host[1],
       port: port ? Number(port[1]) : 1521,
-      serviceName: service ? service[1] : '',
-      sid: sid ? sid[1] : '',
-    }
+      serviceName: service ? service[1] : "",
+      sid: sid ? sid[1] : "",
+    };
   }
   // `@host:port/service` names a service; `@host:port:SID` names a SID.
-  const match = /jdbc:oracle:thin:@(?:\/\/)?([^:/]+)(?::(\d+))?([:/])([^?]+)/i.exec(text)
-  if (!match) return null
-  const bySid = match[3] === ':'
-  const target = match[4]
+  const match =
+    /jdbc:oracle:thin:@(?:\/\/)?([^:/]+)(?::(\d+))?([:/])([^?]+)/i.exec(text);
+  if (!match) return null;
+  const bySid = match[3] === ":";
+  const target = match[4];
   return {
     host: match[1],
     port: match[2] ? Number(match[2]) : 1521,
-    serviceName: bySid ? '' : target,
-    sid: bySid ? target : '',
-  }
+    serviceName: bySid ? "" : target,
+    sid: bySid ? target : "",
+  };
 }
 
 /**
@@ -626,53 +784,56 @@ function parseOracleUrl(url) {
  * a query string, so the authority is split on commas and the options are parsed.
  */
 function parseJdbcUrl(url) {
-  const text = trimmed(url)
-  if (!text) return null
-  const body = text.replace(/^jdbc:/i, '')
-  const schemeMatch = /^([a-z0-9+]+):\/\//i.exec(body)
-  if (!schemeMatch) return null
-  const scheme = schemeMatch[1].toLowerCase()
-  let rest = body.slice(schemeMatch[0].length)
+  const text = trimmed(url);
+  if (!text) return null;
+  const body = text.replace(/^jdbc:/i, "");
+  const schemeMatch = /^([a-z0-9+]+):\/\//i.exec(body);
+  if (!schemeMatch) return null;
+  const scheme = schemeMatch[1].toLowerCase();
+  let rest = body.slice(schemeMatch[0].length);
 
-  let user = ''
-  let password = ''
-  const at = rest.lastIndexOf('@')
+  let user = "";
+  let password = "";
+  const at = rest.lastIndexOf("@");
   if (at >= 0) {
-    const credentials = rest.slice(0, at)
-    rest = rest.slice(at + 1)
-    const colon = credentials.indexOf(':')
-    user = decodeURIComponent(colon >= 0 ? credentials.slice(0, colon) : credentials)
-    password = colon >= 0 ? decodeURIComponent(credentials.slice(colon + 1)) : ''
+    const credentials = rest.slice(0, at);
+    rest = rest.slice(at + 1);
+    const colon = credentials.indexOf(":");
+    user = decodeURIComponent(
+      colon >= 0 ? credentials.slice(0, colon) : credentials,
+    );
+    password =
+      colon >= 0 ? decodeURIComponent(credentials.slice(colon + 1)) : "";
   }
 
-  let query = ''
-  const mark = rest.indexOf('?')
+  let query = "";
+  const mark = rest.indexOf("?");
   if (mark >= 0) {
-    query = rest.slice(mark + 1)
-    rest = rest.slice(0, mark)
+    query = rest.slice(mark + 1);
+    rest = rest.slice(0, mark);
   }
 
-  const slash = rest.indexOf('/')
-  const authority = slash >= 0 ? rest.slice(0, slash) : rest
-  const path = slash >= 0 ? rest.slice(slash + 1) : ''
+  const slash = rest.indexOf("/");
+  const authority = slash >= 0 ? rest.slice(0, slash) : rest;
+  const path = slash >= 0 ? rest.slice(slash + 1) : "";
 
   const hosts = authority
-    .split(',')
+    .split(",")
     .map((piece) => /^(\[[^\]]+\]|[^:]+)(?::(\d+))?$/.exec(piece.trim()))
     .filter(Boolean)
     .map((match) => ({
-      host: match[1].replace(/^\[|\]$/g, ''),
+      host: match[1].replace(/^\[|\]$/g, ""),
       port: match[2] ? Number(match[2]) : null,
-    }))
-  if (!hosts.length) return null
+    }));
+  if (!hosts.length) return null;
 
-  const params = {}
-  for (const pair of query.split('&')) {
-    if (!pair) continue
-    const equals = pair.indexOf('=')
-    const key = decodeURIComponent(equals >= 0 ? pair.slice(0, equals) : pair)
-    const value = equals >= 0 ? decodeURIComponent(pair.slice(equals + 1)) : ''
-    if (key) params[key] = value
+  const params = {};
+  for (const pair of query.split("&")) {
+    if (!pair) continue;
+    const equals = pair.indexOf("=");
+    const key = decodeURIComponent(equals >= 0 ? pair.slice(0, equals) : pair);
+    const value = equals >= 0 ? decodeURIComponent(pair.slice(equals + 1)) : "";
+    if (key) params[key] = value;
   }
 
   return {
@@ -682,9 +843,9 @@ function parseJdbcUrl(url) {
     host: hosts[0].host,
     port: hosts[0].port,
     hosts,
-    database: decodeURIComponent(path.split(';')[0] || ''),
+    database: decodeURIComponent(path.split(";")[0] || ""),
     params,
-  }
+  };
 }
 
 /**
@@ -697,93 +858,123 @@ function parseJdbcUrl(url) {
  * does not open tunnels, so these entries are reported instead of imported.
  */
 function blockingHandlers(configuration) {
-  const handlers = cleanRecord(configuration && configuration.handlers)
-  const found = []
+  const handlers = cleanRecord(configuration && configuration.handlers);
+  const found = [];
   for (const [id, handler] of Object.entries(handlers)) {
-    if (!handler || typeof handler !== 'object') continue
-    if (handler.enabled === false) continue
-    const type = trimmed(handler.type).toUpperCase()
-    const tunnel = /ssh|tunnel/i.test(id) || type === 'TUNNEL'
-    const proxy = /proxy/i.test(id) || type.includes('PROXY')
-    if (tunnel || proxy) found.push({ id, kind: tunnel ? 'ssh' : 'proxy' })
+    if (!handler || typeof handler !== "object") continue;
+    if (handler.enabled === false) continue;
+    const type = trimmed(handler.type).toUpperCase();
+    const tunnel = /ssh|tunnel/i.test(id) || type === "TUNNEL";
+    const proxy = /proxy/i.test(id) || type.includes("PROXY");
+    if (tunnel || proxy) found.push({ id, kind: tunnel ? "ssh" : "proxy" });
   }
-  return found
+  return found;
 }
 
 function handlerReason(found) {
-  const names = found.map((entry) => `handlers.${entry.id}`).join(', ')
-  const what = found.some((entry) => entry.kind === 'ssh') ? 'an SSH tunnel' : 'a proxy'
-  return `needs ${what} (${names}); this plugin opens neither, so the connection would point at the wrong host`
+  const names = found.map((entry) => `handlers.${entry.id}`).join(", ");
+  const what = found.some((entry) => entry.kind === "ssh")
+    ? "an SSH tunnel"
+    : "a proxy";
+  return `needs ${what} (${names}); this plugin opens neither, so the connection would point at the wrong host`;
 }
 
 function mapDBeaverConnection(connection) {
-  const cfg = cleanRecord(connection && connection.configuration)
-  const fromUrl = parseJdbcUrl(cfg.url)
+  const cfg = cleanRecord(connection && connection.configuration);
+  const fromUrl = parseJdbcUrl(cfg.url);
   // DBeaver labels an openGauss/GaussDB connection `generic` when it was added
   // through a JDBC URL and driver jar, so the URL scheme is the last clue.
   const kind =
-    mapDBeaverProvider(connection && connection.provider, connection && connection.driver) ||
-    mapDBeaverProvider('', fromUrl && fromUrl.scheme) ||
-    null
-  if (!kind) return { ok: false, reason: `unsupported provider: ${(connection && connection.provider) || 'unknown'}` }
+    mapDBeaverProvider(
+      connection && connection.provider,
+      connection && connection.driver,
+    ) ||
+    mapDBeaverProvider("", fromUrl && fromUrl.scheme) ||
+    null;
+  if (!kind)
+    return {
+      ok: false,
+      reason: `unsupported provider: ${(connection && connection.provider) || "unknown"}`,
+    };
   // Checked before the fields are read: with a tunnel the fields describe the
   // tunnel's local end, so every value below would be wrong.
-  const blocked = blockingHandlers(cfg)
-  if (blocked.length > 0) return { ok: false, reason: handlerReason(blocked) }
+  const blocked = blockingHandlers(cfg);
+  if (blocked.length > 0) return { ok: false, reason: handlerReason(blocked) };
   // With configurationType=URL the URL is what DBeaver actually connects with,
   // so its values win over the (possibly stale) form fields.
-  const preferUrl = /^url$/i.test(trimmed(cfg.configurationType))
-  const pick = (fromUrlValue, fieldValue, fallback = '') => {
-    const url = fromUrlValue === undefined || fromUrlValue === null ? '' : fromUrlValue
-    const field = typeof fieldValue === 'string' ? fieldValue.trim() : fieldValue
-    return (preferUrl ? url || field : field || url) ?? fallback
+  const preferUrl = /^url$/i.test(trimmed(cfg.configurationType));
+  const pick = (fromUrlValue, fieldValue, fallback = "") => {
+    const url =
+      fromUrlValue === undefined || fromUrlValue === null ? "" : fromUrlValue;
+    const field =
+      typeof fieldValue === "string" ? fieldValue.trim() : fieldValue;
+    return (preferUrl ? url || field : field || url) ?? fallback;
+  };
+
+  if (kind === "sqlite") {
+    const file =
+      trimmed(cfg.database) || trimmed(cfg.url).replace(/^jdbc:sqlite:/i, "");
+    if (!file)
+      return { ok: false, reason: "no database file in the DBeaver entry" };
+    return { ok: true, kind, config: { file }, user: "" };
   }
 
-  if (kind === 'sqlite') {
-    const file = trimmed(cfg.database) || trimmed(cfg.url).replace(/^jdbc:sqlite:/i, '')
-    if (!file) return { ok: false, reason: 'no database file in the DBeaver entry' }
-    return { ok: true, kind, config: { file }, user: '' }
-  }
-
-  if (kind === 'oracle') {
-    const thin = parseOracleUrl(cfg.url)
-    const host = pick(thin && thin.host, trimmed(cfg.host))
-    const port = Number(pick(thin && thin.port, Number(cfg.port)) || 0) || 1521
-    const serviceName = trimmed(cfg.serviceName) || (thin && thin.serviceName) || ''
-    const sid = trimmed(cfg.sid) || (thin && thin.sid) || ''
+  if (kind === "oracle") {
+    const thin = parseOracleUrl(cfg.url);
+    const host = pick(thin && thin.host, trimmed(cfg.host));
+    const port = Number(pick(thin && thin.port, Number(cfg.port)) || 0) || 1521;
+    const serviceName =
+      trimmed(cfg.serviceName) || (thin && thin.serviceName) || "";
+    const sid = trimmed(cfg.sid) || (thin && thin.sid) || "";
     if (!host || (!serviceName && !sid)) {
       return {
         ok: false,
-        reason: `incomplete Oracle host/service in the DBeaver entry (host=${host || '?'}, service=${
-          serviceName || sid || '?'
-        }, url=${trimmed(cfg.url) || '-'})`,
-      }
+        reason: `incomplete Oracle host/service in the DBeaver entry (host=${host || "?"}, service=${
+          serviceName || sid || "?"
+        }, url=${trimmed(cfg.url) || "-"})`,
+      };
     }
     return {
       ok: true,
       kind,
-      config: { host, port, serviceName, sid, user: trimmed(cfg.user), schema: trimmed(cfg.schema) },
+      config: {
+        host,
+        port,
+        serviceName,
+        sid,
+        user: trimmed(cfg.user),
+        schema: trimmed(cfg.schema),
+      },
       user: trimmed(cfg.user),
-    }
+    };
   }
 
   // A cluster URL carries every node; keep them so the driver can fail over
   // instead of silently connecting to the first host only.
-  const hosts = (fromUrl && Array.isArray(fromUrl.hosts) ? fromUrl.hosts : []).filter((entry) => entry && entry.host)
+  const hosts = (
+    fromUrl && Array.isArray(fromUrl.hosts) ? fromUrl.hosts : []
+  ).filter((entry) => entry && entry.host);
   const host = pick(
-    hosts.length > 1 ? hosts.map((entry) => entry.host).join(',') : fromUrl && fromUrl.host,
+    hosts.length > 1
+      ? hosts.map((entry) => entry.host).join(",")
+      : fromUrl && fromUrl.host,
     trimmed(cfg.host),
-  )
-  const database = pick(fromUrl && fromUrl.database, trimmed(cfg.database))
-  const user = pick(fromUrl && fromUrl.user, trimmed(cfg.user))
-  const port = Number(pick(fromUrl && fromUrl.port, Number(cfg.port)) || 0) || DEFAULT_PORTS[kind]
+  );
+  const database = pick(fromUrl && fromUrl.database, trimmed(cfg.database));
+  const user = pick(fromUrl && fromUrl.user, trimmed(cfg.user));
+  const port =
+    Number(pick(fromUrl && fromUrl.port, Number(cfg.port)) || 0) ||
+    DEFAULT_PORTS[kind];
   if (!host || !database) {
     const seen = [
-      `host=${host || '?'}`,
-      `database=${database || '?'}`,
-      `url=${trimmed(cfg.url) || '-'}`,
-    ].join(', ')
-    return { ok: false, reason: `incomplete host/database in the DBeaver entry (${seen})` }
+      `host=${host || "?"}`,
+      `database=${database || "?"}`,
+      `url=${trimmed(cfg.url) || "-"}`,
+    ].join(", ");
+    return {
+      ok: false,
+      reason: `incomplete host/database in the DBeaver entry (${seen})`,
+    };
   }
   const config = {
     host,
@@ -792,41 +983,52 @@ function mapDBeaverConnection(connection) {
     user,
     schema: trimmed(cfg.schema),
     sslMode: trimmed(cfg.sslMode),
-  }
+  };
   if (hosts.length > 1) {
-    config.hosts = hosts.map((entry) => ({ host: entry.host, port: entry.port || port }))
+    config.hosts = hosts.map((entry) => ({
+      host: entry.host,
+      port: entry.port || port,
+    }));
   }
-  return { ok: true, kind, config, user }
+  return { ok: true, kind, config, user };
 }
 
 async function scanDBeaver(options = {}) {
   // The scanning endpoint must never hand a password to the page, but the
   // import path needs it to seed secrets.json, so it is opt-in here.
-  const withSecrets = options.withSecrets === true
-  const existing = Array.isArray(options.existing) ? options.existing : []
+  const withSecrets = options.withSecrets === true;
+  const existing = Array.isArray(options.existing) ? options.existing : [];
   // Anything already configured — or already seen earlier in this scan — is a duplicate.
-  const taken = new Map()
+  const taken = new Map();
   for (const profile of existing) {
-    taken.set(sourceIdentity(profile.kind, profile.config, profile.config && profile.config.user), {
-      id: profile.id,
-      name: profile.name || profile.id,
-    })
+    taken.set(
+      sourceIdentity(
+        profile.kind,
+        profile.config,
+        profile.config && profile.config.user,
+      ),
+      {
+        id: profile.id,
+        name: profile.name || profile.id,
+      },
+    );
   }
-  const roots = dbeaverRoots()
-  const files = []
+  const roots = dbeaverRoots();
+  const files = [];
   for (const root of roots) {
-    const entries = await listDir(root)
+    const entries = await listDir(root);
     for (const entry of entries) {
-      if (!entry.isDirectory()) continue
-      if (!/^workspace\d*$/i.test(entry.name) && entry.name !== 'General') continue
-      const base = entry.name === 'General' ? root : join(root, entry.name)
+      if (!entry.isDirectory()) continue;
+      if (!/^workspace\d*$/i.test(entry.name) && entry.name !== "General")
+        continue;
+      const base = entry.name === "General" ? root : join(root, entry.name);
       for (const candidate of [
-        join(base, 'General', '.dbeaver', 'data-sources.json'),
-        join(base, '.dbeaver', 'data-sources.json'),
+        join(base, "General", ".dbeaver", "data-sources.json"),
+        join(base, ".dbeaver", "data-sources.json"),
       ]) {
         try {
-          await stat(candidate)
-          if (!files.includes(candidate)) files.push(candidate)
+          await stat(candidate);
+          if (!files.includes(candidate)) files.push(candidate);
         } catch {
           /* not here */
         }
@@ -834,25 +1036,25 @@ async function scanDBeaver(options = {}) {
     }
   }
 
-  const sources = []
-  const problems = []
+  const sources = [];
+  const problems = [];
   for (const file of files) {
-    const read = await readJson(file)
+    const read = await readJson(file);
     if (read.error || !read.value) {
-      problems.push({ file, error: read.error || 'unreadable' })
-      continue
+      problems.push({ file, error: read.error || "unreadable" });
+      continue;
     }
-    const credentialsFile = join(file, '..', 'credentials-config.json')
-    let credentials = null
+    const credentialsFile = join(file, "..", "credentials-config.json");
+    let credentials = null;
     try {
-      credentials = decryptDBeaverCredentials(await readFile(credentialsFile))
+      credentials = decryptDBeaverCredentials(await readFile(credentialsFile));
     } catch {
-      credentials = null
+      credentials = null;
     }
-    const connections = cleanRecord(read.value.connections)
-    const items = []
+    const connections = cleanRecord(read.value.connections);
+    const items = [];
     for (const [id, connection] of Object.entries(connections)) {
-      const mapped = mapDBeaverConnection(connection)
+      const mapped = mapDBeaverConnection(connection);
       if (!mapped.ok) {
         items.push({
           id,
@@ -860,17 +1062,17 @@ async function scanDBeaver(options = {}) {
           provider: (connection && connection.provider) || null,
           importable: false,
           reason: mapped.reason,
-        })
-        continue
+        });
+        continue;
       }
-      const credential = credentials ? pickCredential(credentials[id]) : null
-      const config = { ...mapped.config }
-      const credentialUser = (credential && credential.user) || ''
-      if (!config.user && credentialUser) config.user = credentialUser
-      const identity = sourceIdentity(mapped.kind, config, config.user)
-      const duplicate = taken.get(identity) || null
-      const displayName = (connection && connection.name) || id
-      if (!duplicate) taken.set(identity, { id, name: displayName })
+      const credential = credentials ? pickCredential(credentials[id]) : null;
+      const config = { ...mapped.config };
+      const credentialUser = (credential && credential.user) || "";
+      if (!config.user && credentialUser) config.user = credentialUser;
+      const identity = sourceIdentity(mapped.kind, config, config.user);
+      const duplicate = taken.get(identity) || null;
+      const displayName = (connection && connection.name) || id;
+      if (!duplicate) taken.set(identity, { id, name: displayName });
       items.push({
         id,
         name: displayName,
@@ -878,119 +1080,143 @@ async function scanDBeaver(options = {}) {
         driver: (connection && connection.driver) || null,
         kind: mapped.kind,
         config,
-        user: config.user || '',
+        user: config.user || "",
         target: describeTarget(mapped.kind, config),
         hasPassword: Boolean(credential && credential.password),
         importable: true,
         alreadyImported: Boolean(duplicate),
-        ...(duplicate ? { duplicateId: duplicate.id, duplicateName: duplicate.name } : {}),
-        ...(withSecrets && credential && credential.password ? { password: credential.password } : {}),
-      })
+        ...(duplicate
+          ? { duplicateId: duplicate.id, duplicateName: duplicate.name }
+          : {}),
+        ...(withSecrets && credential && credential.password
+          ? { password: credential.password }
+          : {}),
+      });
     }
-    sources.push({ file, credentialsFile, credentialsFound: Boolean(credentials), connections: items })
+    sources.push({
+      file,
+      credentialsFile,
+      credentialsFound: Boolean(credentials),
+      connections: items,
+    });
   }
 
-  return { roots, sources, problems }
+  return { roots, sources, problems };
 }
 
 /* -------------------------------------------------------------- transport */
 
 function sendJson(res, status, body) {
-  const payload = JSON.stringify(body)
+  const payload = JSON.stringify(body);
   res.writeHead(status, {
-    'content-type': 'application/json; charset=utf-8',
-    'cache-control': 'no-store',
-    'content-length': Buffer.byteLength(payload),
-  })
-  res.end(payload)
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "content-length": Buffer.byteLength(payload),
+  });
+  res.end(payload);
 }
 
 /** Same-origin guard for writes: a browser POST from our own page carries our Host. */
 function sameOrigin(request) {
-  const origin = request.headers.origin
-  if (!origin) return true
+  const origin = request.headers.origin;
+  if (!origin) return true;
   try {
-    return new URL(origin).host === request.headers.host
+    return new URL(origin).host === request.headers.host;
   } catch {
-    return false
+    return false;
   }
 }
 
 function readBody(request) {
   return new Promise((resolve, reject) => {
-    const chunks = []
-    let size = 0
-    request.on('data', (chunk) => {
-      size += chunk.length
+    const chunks = [];
+    let size = 0;
+    request.on("data", (chunk) => {
+      size += chunk.length;
       if (size > MAX_BODY_BYTES) {
-        reject(new Error('request body too large'))
-        request.destroy()
-        return
+        reject(new Error("request body too large"));
+        request.destroy();
+        return;
       }
-      chunks.push(chunk)
-    })
-    request.on('end', () => {
-      const raw = Buffer.concat(chunks).toString('utf8').trim()
-      if (!raw) return resolve({})
+      chunks.push(chunk);
+    });
+    request.on("end", () => {
+      const raw = Buffer.concat(chunks).toString("utf8").trim();
+      if (!raw) return resolve({});
       try {
-        const parsed = JSON.parse(raw)
-        resolve(parsed && typeof parsed === 'object' ? parsed : {})
+        const parsed = JSON.parse(raw);
+        resolve(parsed && typeof parsed === "object" ? parsed : {});
       } catch (error) {
-        reject(new Error(`invalid JSON body: ${(error && error.message) || error}`))
+        reject(
+          new Error(`invalid JSON body: ${(error && error.message) || error}`),
+        );
       }
-    })
-    request.on('error', reject)
-  })
+    });
+    request.on("error", reject);
+  });
 }
 
 /* ------------------------------------------------------------------- host */
 
 export function createHost(options = {}) {
-  const config = cleanRecord(options.config)
-  const dir = options.dir || join(process.env.DSH_HOME || join(homedir(), '.dsh'), 'db-mcp')
-  const startedAt = Date.now()
-  const pythonCache = { at: 0, value: null }
-  const registryFile = join(dir, REGISTRY_FILE)
-  const secretsFile = join(dir, SECRETS_FILE)
+  const config = cleanRecord(options.config);
+  const dir =
+    options.dir ||
+    join(process.env.DSH_HOME || join(homedir(), ".dsh"), "db-mcp");
+  const startedAt = Date.now();
+  const pythonCache = { at: 0, value: null };
+  const registryFile = join(dir, REGISTRY_FILE);
+  const secretsFile = join(dir, SECRETS_FILE);
 
   const bridge = createBridge({
     ctx: options.ctx,
     config,
-    packageDir: options.packageDir || fileURLToPath(new URL('..', import.meta.url)),
+    packageDir:
+      options.packageDir || fileURLToPath(new URL("..", import.meta.url)),
     runtimeDir: dir,
     settings: () => readSettings(),
     scope: () => readScopes(),
     setScope: (sessionId, ids) => setSessionScope(sessionId, ids),
     audit: (entry) => appendAudit(entry),
     log: (message) => {
-      if (config.debug) console.log(`[db-mcp] ${message}`)
+      if (config.debug) console.log(`[db-mcp] ${message}`);
     },
-  })
+  });
 
   async function ensureMcp() {
     try {
-      return await bridge.ensure()
+      return await bridge.ensure();
     } catch (error) {
-      return { ...bridge.status(), phase: 'failed', error: String((error && error.message) || error) }
+      return {
+        ...bridge.status(),
+        phase: "failed",
+        error: String((error && error.message) || error),
+      };
     }
   }
 
   async function readRegistry() {
-    const read = await readJson(registryFile)
-    if (read.missing) return { datasources: [], groups: [], error: null, missing: true }
-    if (read.error) return { datasources: [], groups: [], error: read.error, missing: false }
-    const list = read.value && Array.isArray(read.value.datasources) ? read.value.datasources : []
-    const declared = read.value && Array.isArray(read.value.groups) ? read.value.groups : []
+    const read = await readJson(registryFile);
+    if (read.missing)
+      return { datasources: [], groups: [], error: null, missing: true };
+    if (read.error)
+      return { datasources: [], groups: [], error: read.error, missing: false };
+    const list =
+      read.value && Array.isArray(read.value.datasources)
+        ? read.value.datasources
+        : [];
+    const declared =
+      read.value && Array.isArray(read.value.groups) ? read.value.groups : [];
     const names = [
       ...declared.map((name) => groupName(name)),
       ...list.map((item) => groupName(item && item.group)),
-    ].filter(Boolean)
+    ].filter(Boolean);
     return {
-      datasources: list.filter((item) => item && typeof item === 'object'),
+      datasources: list.filter((item) => item && typeof item === "object"),
       groups: [...new Set(names)],
       error: null,
       missing: false,
-    }
+    };
   }
 
   /**
@@ -998,15 +1224,16 @@ export function createHost(options = {}) {
    * the caller does not pass the list again, so every existing write keeps them.
    */
   async function writeRegistry(datasources, groups) {
-    let kept = groups
+    let kept = groups;
     if (!Array.isArray(kept)) {
-      const read = await readJson(registryFile)
-      kept = read.value && Array.isArray(read.value.groups) ? read.value.groups : []
+      const read = await readJson(registryFile);
+      kept =
+        read.value && Array.isArray(read.value.groups) ? read.value.groups : [];
     }
     const names = [
       ...kept.map((name) => groupName(name)),
       ...datasources.map((item) => groupName(item && item.group)),
-    ].filter(Boolean)
+    ].filter(Boolean);
     await writeJsonAtomic(
       registryFile,
       {
@@ -1016,7 +1243,7 @@ export function createHost(options = {}) {
         datasources,
       },
       0o600,
-    )
+    );
   }
 
   /**
@@ -1029,23 +1256,27 @@ export function createHost(options = {}) {
    * delete, which is what tells the two apart.
    */
   function groupsAfterDelete(before, after, groups) {
-    const occupied = (list) => new Set(list.map((item) => groupName(item && item.group)).filter(Boolean))
-    const wasUsed = occupied(before)
-    const stillUsed = occupied(after)
-    return groups.filter((name) => !wasUsed.has(name) || stillUsed.has(name))
+    const occupied = (list) =>
+      new Set(
+        list.map((item) => groupName(item && item.group)).filter(Boolean),
+      );
+    const wasUsed = occupied(before);
+    const stillUsed = occupied(after);
+    return groups.filter((name) => !wasUsed.has(name) || stillUsed.has(name));
   }
 
   async function readSecrets() {
-    const read = await readJson(secretsFile)
-    const secrets = read.value && cleanRecord(read.value.secrets) ? read.value.secrets : {}
-    return { secrets, error: read.error || null }
+    const read = await readJson(secretsFile);
+    const secrets =
+      read.value && cleanRecord(read.value.secrets) ? read.value.secrets : {};
+    return { secrets, error: read.error || null };
   }
 
   /** The key that seals secrets.json, created on first use. */
-  let cachedKey = null
+  let cachedKey = null;
   async function secretKey() {
-    if (!cachedKey) cachedKey = await secretbox.loadKey(dir)
-    return cachedKey
+    if (!cachedKey) cachedKey = await secretbox.loadKey(dir);
+    return cachedKey;
   }
 
   /**
@@ -1057,25 +1288,30 @@ export function createHost(options = {}) {
    * run on every write.
    */
   async function sealSecrets(secrets) {
-    const source = cleanRecord(secrets) ? secrets : {}
-    const key = await secretKey()
-    let changed = false
-    const next = {}
+    const source = cleanRecord(secrets) ? secrets : {};
+    const key = await secretKey();
+    let changed = false;
+    const next = {};
     for (const [id, entry] of Object.entries(source)) {
       if (!cleanRecord(entry)) {
-        next[id] = entry
-        continue
+        next[id] = entry;
+        continue;
       }
-      const sealed = { ...entry }
+      const sealed = { ...entry };
       for (const field of SECRET_FIELDS) {
-        const value = sealed[field]
-        if (typeof value !== 'string' || value === '' || secretbox.isEnvelope(value)) continue
-        sealed[field] = secretbox.encrypt(key, value, id)
-        changed = true
+        const value = sealed[field];
+        if (
+          typeof value !== "string" ||
+          value === "" ||
+          secretbox.isEnvelope(value)
+        )
+          continue;
+        sealed[field] = secretbox.encrypt(key, value, id);
+        changed = true;
       }
-      next[id] = sealed
+      next[id] = sealed;
     }
-    return { secrets: next, changed }
+    return { secrets: next, changed };
   }
 
   /**
@@ -1084,50 +1320,59 @@ export function createHost(options = {}) {
    * flagged, so callers can say so instead of reporting a bogus login failure.
    */
   async function plainSecrets() {
-    const { secrets, error } = await readSecrets()
-    let key = null
+    const { secrets, error } = await readSecrets();
+    let key = null;
     try {
-      key = await secretKey()
+      key = await secretKey();
     } catch (failure) {
-      key = null
+      key = null;
     }
-    const next = {}
+    const next = {};
     for (const [id, entry] of Object.entries(secrets)) {
-      if (!cleanRecord(entry)) continue
-      const opened = { ...entry }
+      if (!cleanRecord(entry)) continue;
+      const opened = { ...entry };
       for (const field of SECRET_FIELDS) {
-        const value = opened[field]
-        if (typeof value !== 'string' || value === '' || !secretbox.isEnvelope(value)) continue
+        const value = opened[field];
+        if (
+          typeof value !== "string" ||
+          value === "" ||
+          !secretbox.isEnvelope(value)
+        )
+          continue;
         if (!key) {
-          delete opened[field]
-          opened.broken = true
-          continue
+          delete opened[field];
+          opened.broken = true;
+          continue;
         }
         try {
-          opened[field] = secretbox.decrypt(key, value, id)
+          opened[field] = secretbox.decrypt(key, value, id);
         } catch (failure) {
-          delete opened[field]
-          opened.broken = true
+          delete opened[field];
+          opened.broken = true;
         }
       }
-      next[id] = opened
+      next[id] = opened;
     }
-    return { secrets: next, error }
+    return { secrets: next, error };
   }
 
   /** Seal what an older build left in plaintext, once per mount. */
   async function migrateSecrets() {
-    const { secrets } = await readSecrets()
-    const sealed = await sealSecrets(secrets)
-    if (!sealed.changed) return false
-    await writeSecrets(sealed.secrets)
-    return true
+    const { secrets } = await readSecrets();
+    const sealed = await sealSecrets(secrets);
+    if (!sealed.changed) return false;
+    await writeSecrets(sealed.secrets);
+    return true;
   }
 
   async function writeSecrets(secrets) {
     // Seal on the way out so no caller can accidentally persist plaintext.
-    const sealed = await sealSecrets(secrets)
-    await writeJsonAtomic(secretsFile, { schemaVersion: SCHEMA_VERSION, secrets: sealed.secrets }, 0o600)
+    const sealed = await sealSecrets(secrets);
+    await writeJsonAtomic(
+      secretsFile,
+      { schemaVersion: SCHEMA_VERSION, secrets: sealed.secrets },
+      0o600,
+    );
   }
 
   /**
@@ -1136,48 +1381,50 @@ export function createHost(options = {}) {
    * key is simply removed and nothing reads it by accident.
    */
   async function migrateSchemas() {
-    const registry = await readRegistry()
-    if (registry.error || registry.missing) return false
-    let changed = false
+    const registry = await readRegistry();
+    if (registry.error || registry.missing) return false;
+    let changed = false;
     const datasources = registry.datasources.map((item) => {
-      if (!('schemas' in item) && !('writableSchemas' in item)) return item
-      changed = true
-      const { schemas, writableSchemas, ...rest } = item
-      return rest
-    })
-    if (!changed) return false
-    await writeRegistry(datasources, registry.groups)
-    return true
+      if (!("schemas" in item) && !("writableSchemas" in item)) return item;
+      changed = true;
+      const { schemas, writableSchemas, ...rest } = item;
+      return rest;
+    });
+    if (!changed) return false;
+    await writeRegistry(datasources, registry.groups);
+    return true;
   }
 
-  const settingsFile = join(dir, SETTINGS_FILE)
-  const auditFile = join(dir, AUDIT_FILE)
+  const settingsFile = join(dir, SETTINGS_FILE);
+  const auditFile = join(dir, AUDIT_FILE);
 
   /** Row limits the agent falls back to when it does not name one. */
-  const ROW_LIMIT_DEFAULTS = { sampleRows: 20, maxRows: 200 }
-  const ROW_LIMIT_CAPS = { sampleRows: 200, maxRows: 2000 }
+  const ROW_LIMIT_DEFAULTS = { sampleRows: 20, maxRows: 200 };
+  const ROW_LIMIT_CAPS = { sampleRows: 200, maxRows: 2000 };
 
   function rowLimits(value) {
-    const source = cleanRecord(value)
-    const limits = {}
+    const source = cleanRecord(value);
+    const limits = {};
     for (const key of Object.keys(ROW_LIMIT_DEFAULTS)) {
-      const raw = Number(source[key])
+      const raw = Number(source[key]);
       limits[key] =
-        Number.isInteger(raw) && raw >= 1 && raw <= ROW_LIMIT_CAPS[key] ? raw : ROW_LIMIT_DEFAULTS[key]
+        Number.isInteger(raw) && raw >= 1 && raw <= ROW_LIMIT_CAPS[key]
+          ? raw
+          : ROW_LIMIT_DEFAULTS[key];
     }
-    return limits
+    return limits;
   }
 
   /** How long text cells are rendered into the model context. */
-  const TEXT_POLICIES = ['auto', 'full']
+  const TEXT_POLICIES = ["auto", "full"];
   function textPolicy(value) {
-    return TEXT_POLICIES.includes(value) ? value : 'auto'
+    return TEXT_POLICIES.includes(value) ? value : "auto";
   }
 
   async function readSettings() {
-    const read = await readJson(settingsFile)
-    const value = cleanRecord(read.value)
-    const port = Number(value.httpPort)
+    const read = await readJson(settingsFile);
+    const value = cleanRecord(read.value);
+    const port = Number(value.httpPort);
     return {
       file: settingsFile,
       error: read.error || null,
@@ -1188,56 +1435,88 @@ export function createHost(options = {}) {
       httpEnabled: value.httpEnabled !== false,
       disabledTools: Array.isArray(value.disabledTools)
         ? value.disabledTools
-            .filter((name) => typeof name === 'string' && /^[a-z][a-z0-9_]{0,40}$/.test(name.trim()))
+            .filter(
+              (name) =>
+                typeof name === "string" &&
+                /^[a-z][a-z0-9_]{0,40}$/.test(name.trim()),
+            )
             .map((name) => name.trim())
             .slice(0, 32)
         : [],
       limits: rowLimits(value.limits),
       textPolicy: textPolicy(value.textPolicy),
       httpPort:
-        Number.isInteger(port) && port >= HTTP_PORT_MIN && port <= HTTP_PORT_MAX ? port : HTTP_PORT_DEFAULT,
-      updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : null,
-    }
+        Number.isInteger(port) && port >= HTTP_PORT_MIN && port <= HTTP_PORT_MAX
+          ? port
+          : HTTP_PORT_DEFAULT,
+      updatedAt: typeof value.updatedAt === "string" ? value.updatedAt : null,
+    };
   }
 
   async function writeSettings(patch) {
-    const current = await readSettings()
-    const port = Number(patch.httpPort === undefined ? current.httpPort : patch.httpPort)
-    if (!Number.isInteger(port) || port < HTTP_PORT_MIN || port > HTTP_PORT_MAX) {
-      return null
+    const current = await readSettings();
+    const port = Number(
+      patch.httpPort === undefined ? current.httpPort : patch.httpPort,
+    );
+    if (
+      !Number.isInteger(port) ||
+      port < HTTP_PORT_MIN ||
+      port > HTTP_PORT_MAX
+    ) {
+      return null;
     }
     const next = {
-      allowWrite: patch.allowWrite === undefined ? current.allowWrite : patch.allowWrite === true,
-      auditLog: patch.auditLog === undefined ? current.auditLog : patch.auditLog === true,
-      httpEnabled: patch.httpEnabled === undefined ? current.httpEnabled : patch.httpEnabled === true,
+      allowWrite:
+        patch.allowWrite === undefined
+          ? current.allowWrite
+          : patch.allowWrite === true,
+      auditLog:
+        patch.auditLog === undefined
+          ? current.auditLog
+          : patch.auditLog === true,
+      httpEnabled:
+        patch.httpEnabled === undefined
+          ? current.httpEnabled
+          : patch.httpEnabled === true,
       disabledTools:
         patch.disabledTools === undefined
           ? current.disabledTools
           : (Array.isArray(patch.disabledTools) ? patch.disabledTools : [])
-              .filter((name) => typeof name === 'string' && /^[a-z][a-z0-9_]{0,40}$/.test(name.trim()))
+              .filter(
+                (name) =>
+                  typeof name === "string" &&
+                  /^[a-z][a-z0-9_]{0,40}$/.test(name.trim()),
+              )
               .map((name) => name.trim())
               .slice(0, 32),
-      limits: rowLimits(patch.limits === undefined ? current.limits : patch.limits),
-      textPolicy: textPolicy(patch.textPolicy === undefined ? current.textPolicy : patch.textPolicy),
+      limits: rowLimits(
+        patch.limits === undefined ? current.limits : patch.limits,
+      ),
+      textPolicy: textPolicy(
+        patch.textPolicy === undefined ? current.textPolicy : patch.textPolicy,
+      ),
       httpPort: port,
       updatedAt: isoNow(),
-    }
-    await writeJsonAtomic(settingsFile, next, 0o600)
-    return { ...next, file: settingsFile, error: null }
+    };
+    await writeJsonAtomic(settingsFile, next, 0o600);
+    return { ...next, file: settingsFile, error: null };
   }
 
-  const scopesFile = join(dir, SCOPES_FILE)
+  const scopesFile = join(dir, SCOPES_FILE);
 
   /** One stored limit, or null when the entry cannot be trusted. */
   function cleanScope(entry) {
-    if (!entry || typeof entry !== 'object') return null
+    if (!entry || typeof entry !== "object") return null;
     const ids = Array.isArray(entry.ids)
       ? entry.ids
-          .filter((id) => typeof id === 'string' && id.trim())
+          .filter((id) => typeof id === "string" && id.trim())
           .map((id) => id.trim())
           .slice(0, MAX_SOURCES)
-      : []
-    return { ids, updatedAt: typeof entry.updatedAt === 'string' ? entry.updatedAt : null }
+      : [];
+    return {
+      ids,
+      updatedAt: typeof entry.updatedAt === "string" ? entry.updatedAt : null,
+    };
   }
 
   /**
@@ -1245,61 +1524,70 @@ export function createHost(options = {}) {
    * so unarchiving can give them back. Both are plain id → limit maps.
    */
   async function readScopes() {
-    const read = await readJson(scopesFile)
-    const value = read.value || {}
-    const live = value && cleanRecord(value.sessions) === value.sessions ? value.sessions : {}
-    const parked = value && cleanRecord(value.archived) === value.archived ? value.archived : {}
-    const sessions = {}
+    const read = await readJson(scopesFile);
+    const value = read.value || {};
+    const live =
+      value && cleanRecord(value.sessions) === value.sessions
+        ? value.sessions
+        : {};
+    const parked =
+      value && cleanRecord(value.archived) === value.archived
+        ? value.archived
+        : {};
+    const sessions = {};
     for (const [session, entry] of Object.entries(live)) {
-      const clean = session ? cleanScope(entry) : null
-      if (clean) sessions[session] = clean
+      const clean = session ? cleanScope(entry) : null;
+      if (clean) sessions[session] = clean;
     }
-    const archived = {}
+    const archived = {};
     for (const [session, entry] of Object.entries(parked)) {
-      const clean = session ? cleanScope(entry) : null
-      if (clean) archived[session] = clean
+      const clean = session ? cleanScope(entry) : null;
+      if (clean) archived[session] = clean;
     }
-    return { file: scopesFile, error: read.error || null, sessions, archived }
+    return { file: scopesFile, error: read.error || null, sessions, archived };
   }
 
   async function writeScopes(sessions, archived) {
-    const payload = { schemaVersion: SCHEMA_VERSION, sessions }
+    const payload = { schemaVersion: SCHEMA_VERSION, sessions };
     // Only written once something has been parked, so a fresh install keeps the
     // file it always had.
-    if (archived && Object.keys(archived).length > 0) payload.archived = archived
-    await writeJsonAtomic(scopesFile, payload, 0o600)
+    if (archived && Object.keys(archived).length > 0)
+      payload.archived = archived;
+    await writeJsonAtomic(scopesFile, payload, 0o600);
   }
 
   /** Keep the parked set bounded: newest first, oldest dropped past the cap. */
   function trimArchived(archived) {
-    const entries = Object.entries(archived)
-    if (entries.length <= MAX_ARCHIVED) return archived
-    entries.sort((a, b) => String(b[1].updatedAt || '').localeCompare(String(a[1].updatedAt || '')))
-    return Object.fromEntries(entries.slice(0, MAX_ARCHIVED))
+    const entries = Object.entries(archived);
+    if (entries.length <= MAX_ARCHIVED) return archived;
+    entries.sort((a, b) =>
+      String(b[1].updatedAt || "").localeCompare(String(a[1].updatedAt || "")),
+    );
+    return Object.fromEntries(entries.slice(0, MAX_ARCHIVED));
   }
 
   async function setSessionScope(sessionId, ids) {
-    const session = String(sessionId || '').trim()
-    if (!session) return { error: 'a conversation id is required' }
-    const registry = await readRegistry()
-    if (registry.error) return { error: registry.error }
-    const known = new Set((registry.datasources || []).map((item) => item.id))
-    const wanted = []
+    const session = String(sessionId || "").trim();
+    if (!session) return { error: "a conversation id is required" };
+    const registry = await readRegistry();
+    if (registry.error) return { error: registry.error };
+    const known = new Set((registry.datasources || []).map((item) => item.id));
+    const wanted = [];
     for (const id of Array.isArray(ids) ? ids : []) {
-      const clean = String(id || '').trim()
-      if (!clean) continue
-      if (!known.has(clean)) return { error: `unknown datasource: ${clean}` }
-      if (!wanted.includes(clean)) wanted.push(clean)
+      const clean = String(id || "").trim();
+      if (!clean) continue;
+      if (!known.has(clean)) return { error: `unknown datasource: ${clean}` };
+      if (!wanted.includes(clean)) wanted.push(clean);
     }
-    const current = await readScopes()
-    const sessions = { ...current.sessions }
-    const archived = { ...current.archived }
+    const current = await readScopes();
+    const sessions = { ...current.sessions };
+    const archived = { ...current.archived };
     // An explicit choice for this conversation wins over a parked copy either way.
-    delete archived[session]
-    if (wanted.length === 0) delete sessions[session]
-    else sessions[session] = { ids: wanted, updatedAt: isoNow() }
-    await writeScopes(sessions, archived)
-    return { ids: wanted, sessions, archived }
+    delete archived[session];
+    if (wanted.length === 0) delete sessions[session];
+    else sessions[session] = { ids: wanted, updatedAt: isoNow() };
+    await writeScopes(sessions, archived);
+    return { ids: wanted, sessions, archived };
   }
 
   /**
@@ -1309,29 +1597,36 @@ export function createHost(options = {}) {
    */
   async function removeSessionScopes(sessionsToDrop) {
     const wanted = new Set(
-      (Array.isArray(sessionsToDrop) ? sessionsToDrop : []).map((id) => String(id || '').trim()).filter(Boolean),
-    )
+      (Array.isArray(sessionsToDrop) ? sessionsToDrop : [])
+        .map((id) => String(id || "").trim())
+        .filter(Boolean),
+    );
     if (wanted.size === 0) {
-      const listing = await readScopes()
-      return { removed: [], sessions: listing.sessions, archived: listing.archived }
+      const listing = await readScopes();
+      return {
+        removed: [],
+        sessions: listing.sessions,
+        archived: listing.archived,
+      };
     }
-    const current = await readScopes()
-    const sessions = { ...current.sessions }
-    const archived = { ...current.archived }
-    const removed = []
-    let parkedChanged = false
+    const current = await readScopes();
+    const sessions = { ...current.sessions };
+    const archived = { ...current.archived };
+    const removed = [];
+    let parkedChanged = false;
     for (const session of wanted) {
       if (sessions[session]) {
-        delete sessions[session]
-        removed.push(session)
+        delete sessions[session];
+        removed.push(session);
       }
       if (archived[session]) {
-        delete archived[session]
-        parkedChanged = true
+        delete archived[session];
+        parkedChanged = true;
       }
     }
-    if (removed.length > 0 || parkedChanged) await writeScopes(sessions, archived)
-    return { removed, sessions, archived }
+    if (removed.length > 0 || parkedChanged)
+      await writeScopes(sessions, archived);
+    return { removed, sessions, archived };
   }
 
   /**
@@ -1340,39 +1635,39 @@ export function createHost(options = {}) {
    * conversation back. Park it instead of dropping it.
    */
   async function parkSessionScope(sessionId) {
-    const session = String(sessionId || '').trim()
-    if (!session) return null
-    const current = await readScopes()
-    const entry = current.sessions[session]
-    if (!entry) return null
-    const sessions = { ...current.sessions }
-    delete sessions[session]
-    const archived = trimArchived({ ...current.archived, [session]: entry })
-    await writeScopes(sessions, archived)
-    return entry
+    const session = String(sessionId || "").trim();
+    if (!session) return null;
+    const current = await readScopes();
+    const entry = current.sessions[session];
+    if (!entry) return null;
+    const sessions = { ...current.sessions };
+    delete sessions[session];
+    const archived = trimArchived({ ...current.archived, [session]: entry });
+    await writeScopes(sessions, archived);
+    return entry;
   }
 
   /** Hand a parked limit back when its conversation leaves the archive. */
   async function restoreSessionScope(sessionId) {
-    const session = String(sessionId || '').trim()
-    if (!session) return null
-    const current = await readScopes()
-    const entry = current.archived[session]
-    if (!entry) return null
-    const archived = { ...current.archived }
-    delete archived[session]
-    const sessions = { ...current.sessions, [session]: entry }
-    await writeScopes(sessions, archived)
-    return entry
+    const session = String(sessionId || "").trim();
+    if (!session) return null;
+    const current = await readScopes();
+    const entry = current.archived[session];
+    if (!entry) return null;
+    const archived = { ...current.archived };
+    delete archived[session];
+    const sessions = { ...current.sessions, [session]: entry };
+    await writeScopes(sessions, archived);
+    return entry;
   }
 
   /** Forget every conversation limit at once, parked ones included. */
   async function clearSessionScopes() {
-    const current = await readScopes()
-    const removed = Object.keys(current.sessions)
-    const parked = Object.keys(current.archived)
-    if (removed.length > 0 || parked.length > 0) await writeScopes({}, {})
-    return { removed, archived: parked, sessions: {} }
+    const current = await readScopes();
+    const removed = Object.keys(current.sessions);
+    const parked = Object.keys(current.archived);
+    if (removed.length > 0 || parked.length > 0) await writeScopes({}, {});
+    return { removed, archived: parked, sessions: {} };
   }
 
   /**
@@ -1380,50 +1675,65 @@ export function createHost(options = {}) {
    * the session log, so it works for archived conversations too; it is optional
    * because the panel must render without it.
    */
-  const titleCache = new Map()
+  const titleCache = new Map();
   async function sessionTitles(ids) {
-    const wanted = (Array.isArray(ids) ? ids : []).map((id) => String(id || '').trim()).filter(Boolean)
-    if (wanted.length === 0) return {}
-    const ctx = options.ctx
-    const engine = ctx && typeof ctx.get === 'function' ? ctx.get('sessionQuery') : null
-    const now = Date.now()
-    const out = {}
+    const wanted = (Array.isArray(ids) ? ids : [])
+      .map((id) => String(id || "").trim())
+      .filter(Boolean);
+    if (wanted.length === 0) return {};
+    const ctx = options.ctx;
+    const engine =
+      ctx && typeof ctx.get === "function" ? ctx.get("sessionQuery") : null;
+    const now = Date.now();
+    const out = {};
     for (const id of wanted) {
-      const hit = titleCache.get(id)
+      const hit = titleCache.get(id);
       if (hit && now - hit.at < TITLE_CACHE_MS) {
-        if (hit.title) out[id] = hit.title
-        continue
+        if (hit.title) out[id] = hit.title;
+        continue;
       }
-      let title = null
-      if (engine && typeof engine.readTitle === 'function') {
+      let title = null;
+      if (engine && typeof engine.readTitle === "function") {
         try {
-          const snapshot = await engine.readTitle(id)
-          if (snapshot && typeof snapshot.title === 'string' && snapshot.title.trim()) title = snapshot.title.trim()
+          const snapshot = await engine.readTitle(id);
+          if (
+            snapshot &&
+            typeof snapshot.title === "string" &&
+            snapshot.title.trim()
+          )
+            title = snapshot.title.trim();
         } catch {
           // A missing or unreadable log simply leaves the row without a title.
         }
       }
-      titleCache.set(id, { at: now, title })
-      if (title) out[id] = title
+      titleCache.set(id, { at: now, title });
+      if (title) out[id] = title;
     }
-    return out
+    return out;
   }
 
   /** One listing entry per limited conversation, with the title when known. */
   async function describeScopes(listing) {
-    const sessions = listing.sessions || {}
-    const archived = listing.archived || {}
-    const titles = await sessionTitles([...Object.keys(sessions), ...Object.keys(archived)])
+    const sessions = listing.sessions || {};
+    const archived = listing.archived || {};
+    const titles = await sessionTitles([
+      ...Object.keys(sessions),
+      ...Object.keys(archived),
+    ]);
     const describe = (session, entry) => ({
       session,
       ids: entry.ids,
       updatedAt: entry.updatedAt,
       title: titles[session] || null,
-    })
+    });
     return {
-      sessions: Object.entries(sessions).map(([session, entry]) => describe(session, entry)),
-      archived: Object.entries(archived).map(([session, entry]) => describe(session, entry)),
-    }
+      sessions: Object.entries(sessions).map(([session, entry]) =>
+        describe(session, entry),
+      ),
+      archived: Object.entries(archived).map(([session, entry]) =>
+        describe(session, entry),
+      ),
+    };
   }
 
   /**
@@ -1433,55 +1743,61 @@ export function createHost(options = {}) {
    * and unarchiving hands it back.
    */
   function watchSessionLifecycle() {
-    const ctx = options.ctx
-    if (!ctx) return () => {}
-    const on = typeof ctx.on === 'function' ? ctx.on.bind(ctx) : null
+    const ctx = options.ctx;
+    if (!ctx) return () => {};
+    const on = typeof ctx.on === "function" ? ctx.on.bind(ctx) : null;
     const forget = (sessionId) => {
-      const id = String(sessionId || '').trim()
-      if (!id) return
-      void removeSessionScopes([id]).catch(() => {})
-    }
+      const id = String(sessionId || "").trim();
+      if (!id) return;
+      void removeSessionScopes([id]).catch(() => {});
+    };
     const park = (sessionId) => {
-      const id = String(sessionId || '').trim()
-      if (!id) return
-      void parkSessionScope(id).catch(() => {})
-    }
+      const id = String(sessionId || "").trim();
+      if (!id) return;
+      void parkSessionScope(id).catch(() => {});
+    };
     const restore = (sessionId) => {
-      const id = String(sessionId || '').trim()
-      if (!id) return
-      void restoreSessionScope(id).catch(() => {})
-    }
+      const id = String(sessionId || "").trim();
+      if (!id) return;
+      void restoreSessionScope(id).catch(() => {});
+    };
     const offDisposed = on
-      ? on('session/disposed', (session) => {
-          if (session && session.id) forget(session.id)
+      ? on("session/disposed", (session) => {
+          if (session && session.id) forget(session.id);
         })
-      : null
+      : null;
     const offArchived = on
-      ? on('workspace/session-archived', (request) => {
-          if (request && request.sessionId) park(request.sessionId)
+      ? on("workspace/session-archived", (request) => {
+          if (request && request.sessionId) park(request.sessionId);
         })
-      : null
+      : null;
     const offUnarchiving = on
-      ? on('workspace/session-unarchiving', (request) => {
-          if (request && request.sessionId) restore(request.sessionId)
+      ? on("workspace/session-unarchiving", (request) => {
+          if (request && request.sessionId) restore(request.sessionId);
         })
-      : null
+      : null;
     return () => {
-      if (typeof offDisposed === 'function') offDisposed()
-      if (typeof offArchived === 'function') offArchived()
-      if (typeof offUnarchiving === 'function') offUnarchiving()
-    }
+      if (typeof offDisposed === "function") offDisposed();
+      if (typeof offArchived === "function") offArchived();
+      if (typeof offUnarchiving === "function") offUnarchiving();
+    };
   }
 
   async function appendAudit(entry) {
-    const settings = await readSettings()
-    if (!settings.auditLog) return
+    const settings = await readSettings();
+    if (!settings.auditLog) return;
     try {
-      await mkdir(join(dir, 'logs'), { recursive: true })
-      await writeFile(auditFile, `${JSON.stringify(entry)}\n`, { encoding: 'utf8', mode: 0o600, flag: 'a' })
-      const info = await stat(auditFile).catch(() => null)
+      await mkdir(join(dir, "logs"), { recursive: true });
+      await writeFile(auditFile, `${JSON.stringify(entry)}\n`, {
+        encoding: "utf8",
+        mode: 0o600,
+        flag: "a",
+      });
+      const info = await stat(auditFile).catch(() => null);
       if (info && info.size > AUDIT_LIMIT_BYTES) {
-        await rename(auditFile, join(dir, 'logs', 'audit.1.jsonl')).catch(() => {})
+        await rename(auditFile, join(dir, "logs", "audit.1.jsonl")).catch(
+          () => {},
+        );
       }
     } catch {
       // Auditing must never break a tool call.
@@ -1489,23 +1805,26 @@ export function createHost(options = {}) {
   }
 
   async function readAudit(limit = 20) {
-    let raw
+    let raw;
     try {
-      raw = await readFile(auditFile, 'utf8')
+      raw = await readFile(auditFile, "utf8");
     } catch (error) {
-      if (error && error.code === 'ENOENT') return { entries: [], error: null }
-      return { entries: [], error: String((error && error.message) || error) }
+      if (error && error.code === "ENOENT") return { entries: [], error: null };
+      return { entries: [], error: String((error && error.message) || error) };
     }
-    const entries = []
-    for (const line of raw.split('\n')) {
-      if (!line.trim()) continue
+    const entries = [];
+    for (const line of raw.split("\n")) {
+      if (!line.trim()) continue;
       try {
-        entries.push(JSON.parse(line))
+        entries.push(JSON.parse(line));
       } catch {
         // skip a torn line
       }
     }
-    return { entries: entries.slice(-Math.max(1, Math.min(200, limit))).reverse(), error: null }
+    return {
+      entries: entries.slice(-Math.max(1, Math.min(200, limit))).reverse(),
+      error: null,
+    };
   }
 
   /**
@@ -1514,96 +1833,130 @@ export function createHost(options = {}) {
    * panel never offers a target it cannot write.
    */
   function clientTargets() {
-    const home = homedir()
-    const list = []
+    const home = homedir();
+    const list = [];
 
     // VS Code keeps its user config under a per-platform root.
-    let editorRoot = ''
-    if (process.platform === 'win32') editorRoot = process.env.APPDATA || ''
-    else if (process.platform === 'darwin') editorRoot = join(home, 'Library', 'Application Support')
-    else editorRoot = process.env.XDG_CONFIG_HOME || join(home, '.config')
+    let editorRoot = "";
+    if (process.platform === "win32") editorRoot = process.env.APPDATA || "";
+    else if (process.platform === "darwin")
+      editorRoot = join(home, "Library", "Application Support");
+    else editorRoot = process.env.XDG_CONFIG_HOME || join(home, ".config");
 
     if (editorRoot) {
-      list.push({ id: 'vscode', label: 'Visual Studio Code', shape: 'vscode', file: join(editorRoot, 'Code', 'User', 'mcp.json') })
       list.push({
-        id: 'vscode-insiders',
-        label: 'VS Code Insiders',
-        shape: 'vscode',
-        file: join(editorRoot, 'Code - Insiders', 'User', 'mcp.json'),
-      })
+        id: "vscode",
+        label: "Visual Studio Code",
+        shape: "vscode",
+        file: join(editorRoot, "Code", "User", "mcp.json"),
+      });
+      list.push({
+        id: "vscode-insiders",
+        label: "VS Code Insiders",
+        shape: "vscode",
+        file: join(editorRoot, "Code - Insiders", "User", "mcp.json"),
+      });
     }
 
-    list.push({ id: 'cursor', label: 'Cursor', shape: 'mcpServers', file: join(home, '.cursor', 'mcp.json') })
+    list.push({
+      id: "cursor",
+      label: "Cursor",
+      shape: "mcpServers",
+      file: join(home, ".cursor", "mcp.json"),
+    });
     // JetBrains Air keeps every agent's servers in one file under the JetBrains
     // home, and takes the same { type, url } entry as Cursor.
     list.push({
-      id: 'jetbrains-air',
-      label: 'JetBrains Air',
-      shape: 'mcpServers',
-      file: join(home, '.jetbrains', 'mcp', 'mcp.json'),
-    })
-    list.push({ id: 'claude-code', label: 'Claude Code', shape: 'mcpServers', file: join(home, '.claude.json') })
+      id: "jetbrains-air",
+      label: "JetBrains Air",
+      shape: "mcpServers",
+      file: join(home, ".jetbrains", "mcp", "mcp.json"),
+    });
+    list.push({
+      id: "claude-code",
+      label: "Claude Code",
+      shape: "mcpServers",
+      file: join(home, ".claude.json"),
+    });
 
     // Claude Desktop ships on Windows and macOS only.
-    if (process.platform === 'win32' || process.platform === 'darwin') {
+    if (process.platform === "win32" || process.platform === "darwin") {
       const desktopRoot =
-        process.platform === 'win32'
-          ? process.env.APPDATA || ''
-          : join(home, 'Library', 'Application Support')
+        process.platform === "win32"
+          ? process.env.APPDATA || ""
+          : join(home, "Library", "Application Support");
       if (desktopRoot) {
         list.push({
-          id: 'claude-desktop',
-          label: 'Claude Desktop',
-          shape: 'mcpServers',
-          file: join(desktopRoot, 'Claude', 'claude_desktop_config.json'),
-        })
+          id: "claude-desktop",
+          label: "Claude Desktop",
+          shape: "mcpServers",
+          file: join(desktopRoot, "Claude", "claude_desktop_config.json"),
+        });
       }
     }
 
-    list.push({ id: 'codex', label: 'Codex CLI', shape: 'toml', file: join(home, '.codex', 'config.toml') })
-    return list
+    list.push({
+      id: "codex",
+      label: "Codex CLI",
+      shape: "toml",
+      file: join(home, ".codex", "config.toml"),
+    });
+    return list;
   }
 
   async function readLoose(file) {
     try {
-      return JSON.parse(await readFile(file, 'utf8'))
+      return JSON.parse(await readFile(file, "utf8"));
     } catch {
-      return null
+      return null;
     }
   }
 
   function httpUrlOf(settings) {
-    const live = bridge.httpStatus()
-    return live.url || `http://127.0.0.1:${settings.httpPort}/mcp`
+    const live = bridge.httpStatus();
+    return live.url || `http://127.0.0.1:${settings.httpPort}/mcp`;
   }
 
   /** Claude Desktop and Codex are happiest with a plain stdio entry. */
   async function stdioEntry() {
-    const live = bridge.httpStatus()
-    const venvPython = join(dir, '.venv', 'Scripts', 'python.exe')
-    const venvPosix = join(dir, '.venv', 'bin', 'python')
+    const live = bridge.httpStatus();
+    const venvPython = join(dir, ".venv", "Scripts", "python.exe");
+    const venvPosix = join(dir, ".venv", "bin", "python");
     const interpreter =
       live.python ||
-      (existsSync(venvPython) ? venvPython : existsSync(venvPosix) ? venvPosix : (await detectPython(config, pythonCache)))
-    const entry = join(options.packageDir || fileURLToPath(new URL('..', import.meta.url)), 'server', 'main.py')
+      (existsSync(venvPython)
+        ? venvPython
+        : existsSync(venvPosix)
+          ? venvPosix
+          : await detectPython(config, pythonCache));
+    const entry = join(
+      options.packageDir || fileURLToPath(new URL("..", import.meta.url)),
+      "server",
+      "main.py",
+    );
     return {
-      command: interpreter || 'python',
+      command: interpreter || "python",
       args: [entry],
-      env: { PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1', DB_MCP_RUNTIME: dir },
-    }
+      env: { PYTHONIOENCODING: "utf-8", PYTHONUTF8: "1", DB_MCP_RUNTIME: dir },
+    };
   }
 
   /** Drop one `[mcp_servers.<id>]` table (and its sub-tables) from a TOML file. */
   function dropTomlTable(text, name) {
-    const lines = String(text || '').split('\n')
-    const kept = []
-    let skipping = false
+    const lines = String(text || "").split("\n");
+    const kept = [];
+    let skipping = false;
     for (const line of lines) {
-      const header = /^\s*\[([^\]]+)\]\s*$/.exec(line)
-      if (header) skipping = header[1].trim() === name || header[1].trim().startsWith(`${name}.`)
-      if (!skipping) kept.push(line)
+      const header = /^\s*\[([^\]]+)\]\s*$/.exec(line);
+      if (header)
+        skipping =
+          header[1].trim() === name || header[1].trim().startsWith(`${name}.`);
+      if (!skipping) kept.push(line);
     }
-    return kept.join('\n').replace(/\n{3,}/g, '\n\n').replace(/\s+$/, '')
+    return kept
+      .join("\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .replace(/\s+$/, "");
   }
 
   /**
@@ -1612,28 +1965,44 @@ export function createHost(options = {}) {
    * so the same card can explain both cases.
    */
   async function inspectClients() {
-    const settings = await readSettings()
-    const url = httpUrlOf(settings)
-    const clients = []
+    const settings = await readSettings();
+    const url = httpUrlOf(settings);
+    const clients = [];
     for (const target of clientTargets()) {
-      const exists = existsSync(target.file)
-      let configured = false
-      let current = null
-      if (target.shape === 'toml') {
-        const text = exists ? await readFile(target.file, 'utf8').catch(() => '') : ''
-        configured = text.includes(`[mcp_servers.${CLIENT_ENTRY}]`) || text.includes(`[mcp_servers.${CLIENT_ENTRY}.`)
-        const found = /\[mcp_servers\.dsh-db-mcp\][\s\S]*?url\s*=\s*"([^"]+)"/.exec(text)
-        current = found ? found[1] : null
+      const exists = existsSync(target.file);
+      let configured = false;
+      let current = null;
+      if (target.shape === "toml") {
+        const text = exists
+          ? await readFile(target.file, "utf8").catch(() => "")
+          : "";
+        configured =
+          text.includes(`[mcp_servers.${CLIENT_ENTRY}]`) ||
+          text.includes(`[mcp_servers.${CLIENT_ENTRY}.`);
+        const found =
+          /\[mcp_servers\.dsh-db-mcp\][\s\S]*?url\s*=\s*"([^"]+)"/.exec(text);
+        current = found ? found[1] : null;
       } else {
-        const parsed = exists ? await readLoose(target.file) : null
-        const section = target.shape === 'vscode' ? parsed && parsed.servers : parsed && parsed.mcpServers
-        const entry = section && section[CLIENT_ENTRY]
-        configured = Boolean(entry)
-        current = (entry && (entry.url || entry.serverUrl)) || null
+        const parsed = exists ? await readLoose(target.file) : null;
+        const section =
+          target.shape === "vscode"
+            ? parsed && parsed.servers
+            : parsed && parsed.mcpServers;
+        const entry = section && section[CLIENT_ENTRY];
+        configured = Boolean(entry);
+        current = (entry && (entry.url || entry.serverUrl)) || null;
       }
-      clients.push({ id: target.id, label: target.label, file: target.file, shape: target.shape, exists, configured, current })
+      clients.push({
+        id: target.id,
+        label: target.label,
+        file: target.file,
+        shape: target.shape,
+        exists,
+        configured,
+        current,
+      });
     }
-    return { ok: true, url, settings, clients }
+    return { ok: true, url, settings, clients };
   }
 
   /**
@@ -1641,88 +2010,148 @@ export function createHost(options = {}) {
    * Desktop and Codex get a stdio entry so no port has to stay open for them.
    */
   async function configureClient(payload) {
-    const id = trimmed(payload.client)
-    const target = clientTargets().find((item) => item.id === id)
-    if (!target) return { status: 404, body: { ok: false, error: `unknown client: ${id || '(empty)'}` } }
-    const settings = await readSettings()
-    const live = bridge.httpStatus()
-    const url = httpUrlOf(settings)
+    const id = trimmed(payload.client);
+    const target = clientTargets().find((item) => item.id === id);
+    if (!target)
+      return {
+        status: 404,
+        body: { ok: false, error: `unknown client: ${id || "(empty)"}` },
+      };
+    const settings = await readSettings();
+    const live = bridge.httpStatus();
+    const url = httpUrlOf(settings);
 
-    if (target.shape === 'toml') {
-      const stdio = await stdioEntry()
+    if (target.shape === "toml") {
+      const stdio = await stdioEntry();
       const block = [
         `[mcp_servers.${CLIENT_ENTRY}]`,
         `command = ${JSON.stringify(stdio.command)}`,
-        `args = [${stdio.args.map((item) => JSON.stringify(item)).join(', ')}]`,
-        '',
+        `args = [${stdio.args.map((item) => JSON.stringify(item)).join(", ")}]`,
+        "",
         `[mcp_servers.${CLIENT_ENTRY}.env]`,
-        ...Object.entries(stdio.env).map(([key, value]) => `${key} = ${JSON.stringify(value)}`),
-      ].join('\n')
-      const existing = existsSync(target.file) ? await readFile(target.file, 'utf8').catch(() => '') : ''
-      const cleaned = dropTomlTable(existing, `mcp_servers.${CLIENT_ENTRY}`)
-      const next = `${cleaned ? `${cleaned}\n\n` : ''}${block}\n`
-      await mkdir(dirname(target.file), { recursive: true }).catch(() => {})
-      await writeFile(target.file, next, 'utf8')
+        ...Object.entries(stdio.env).map(
+          ([key, value]) => `${key} = ${JSON.stringify(value)}`,
+        ),
+      ].join("\n");
+      const existing = existsSync(target.file)
+        ? await readFile(target.file, "utf8").catch(() => "")
+        : "";
+      const cleaned = dropTomlTable(existing, `mcp_servers.${CLIENT_ENTRY}`);
+      const next = `${cleaned ? `${cleaned}\n\n` : ""}${block}\n`;
+      await mkdir(dirname(target.file), { recursive: true }).catch(() => {});
+      await writeFile(target.file, next, "utf8");
       return {
         status: 200,
-        body: { ok: true, client: target.id, label: target.label, file: target.file, transport: 'stdio', command: stdio.command },
-      }
+        body: {
+          ok: true,
+          client: target.id,
+          label: target.label,
+          file: target.file,
+          transport: "stdio",
+          command: stdio.command,
+        },
+      };
     }
 
-    if (target.id === 'claude-desktop') {
-      const stdio = await stdioEntry()
-      const parsed = (await readLoose(target.file)) || {}
-      const section = parsed.mcpServers && typeof parsed.mcpServers === 'object' ? parsed.mcpServers : {}
-      section[CLIENT_ENTRY] = { command: stdio.command, args: stdio.args, env: stdio.env }
-      parsed.mcpServers = section
-      await mkdir(dirname(target.file), { recursive: true }).catch(() => {})
-      await writeFile(target.file, `${JSON.stringify(parsed, null, 2)}\n`, 'utf8')
+    if (target.id === "claude-desktop") {
+      const stdio = await stdioEntry();
+      const parsed = (await readLoose(target.file)) || {};
+      const section =
+        parsed.mcpServers && typeof parsed.mcpServers === "object"
+          ? parsed.mcpServers
+          : {};
+      section[CLIENT_ENTRY] = {
+        command: stdio.command,
+        args: stdio.args,
+        env: stdio.env,
+      };
+      parsed.mcpServers = section;
+      await mkdir(dirname(target.file), { recursive: true }).catch(() => {});
+      await writeFile(
+        target.file,
+        `${JSON.stringify(parsed, null, 2)}\n`,
+        "utf8",
+      );
       return {
         status: 200,
-        body: { ok: true, client: target.id, label: target.label, file: target.file, transport: 'stdio', command: stdio.command },
-      }
+        body: {
+          ok: true,
+          client: target.id,
+          label: target.label,
+          file: target.file,
+          transport: "stdio",
+          command: stdio.command,
+        },
+      };
     }
 
     if (!live.running) {
       return {
         status: 409,
-        body: { ok: false, error: 'the HTTP endpoint is not running', hint: 'start it from the connection card, then configure the client again' },
-      }
+        body: {
+          ok: false,
+          error: "the HTTP endpoint is not running",
+          hint: "start it from the connection card, then configure the client again",
+        },
+      };
     }
-    const parsed = (await readLoose(target.file)) || {}
-    const sectionName = target.shape === 'vscode' ? 'servers' : 'mcpServers'
-    const section = parsed[sectionName] && typeof parsed[sectionName] === 'object' ? parsed[sectionName] : {}
-    section[CLIENT_ENTRY] = { type: 'http', url }
-    parsed[sectionName] = section
-    await mkdir(dirname(target.file), { recursive: true }).catch(() => {})
-    await writeFile(target.file, `${JSON.stringify(parsed, null, 2)}\n`, 'utf8')
+    const parsed = (await readLoose(target.file)) || {};
+    const sectionName = target.shape === "vscode" ? "servers" : "mcpServers";
+    const section =
+      parsed[sectionName] && typeof parsed[sectionName] === "object"
+        ? parsed[sectionName]
+        : {};
+    section[CLIENT_ENTRY] = { type: "http", url };
+    parsed[sectionName] = section;
+    await mkdir(dirname(target.file), { recursive: true }).catch(() => {});
+    await writeFile(
+      target.file,
+      `${JSON.stringify(parsed, null, 2)}\n`,
+      "utf8",
+    );
     return {
       status: 200,
-      body: { ok: true, client: target.id, label: target.label, file: target.file, transport: 'http', url, entry: section[CLIENT_ENTRY] },
-    }
+      body: {
+        ok: true,
+        client: target.id,
+        label: target.label,
+        file: target.file,
+        transport: "http",
+        url,
+        entry: section[CLIENT_ENTRY],
+      },
+    };
   }
 
   async function pythonEnv() {
-    const python = await detectPython(config, pythonCache)
-    const venvDir = join(dir, '.venv')
-    const venvPython = join(venvDir, 'Scripts', 'python.exe')
-    const venvPosix = join(venvDir, 'bin', 'python')
-    const interpreter = existsSync(venvPython) ? venvPython : existsSync(venvPosix) ? venvPosix : null
-    const requirements = join(options.packageDir || fileURLToPath(new URL('..', import.meta.url)), 'server', 'requirements.txt')
-    let packages = null
+    const python = await detectPython(config, pythonCache);
+    const venvDir = join(dir, ".venv");
+    const venvPython = join(venvDir, "Scripts", "python.exe");
+    const venvPosix = join(venvDir, "bin", "python");
+    const interpreter = existsSync(venvPython)
+      ? venvPython
+      : existsSync(venvPosix)
+        ? venvPosix
+        : null;
+    const requirements = join(
+      options.packageDir || fileURLToPath(new URL("..", import.meta.url)),
+      "server",
+      "requirements.txt",
+    );
+    let packages = null;
     if (interpreter) {
       const script = [
-        'import importlib.metadata as m',
-        'out = []',
+        "import importlib.metadata as m",
+        "out = []",
         "for name in ['mcp', 'psycopg', 'py-opengauss', 'PyMySQL', 'oracledb', 'cryptography']:",
-        '    try:',
+        "    try:",
         "        out.append(name + '=' + m.version(name))",
-        '    except Exception:',
+        "    except Exception:",
         "        out.append(name + '=missing')",
         "print(';'.join(out))",
-      ].join('\n')
-      const probe = await run(interpreter, ['-c', script], 20000)
-      packages = probe.ok ? probe.stdout : null
+      ].join("\n");
+      const probe = await run(interpreter, ["-c", script], 20000);
+      packages = probe.ok ? probe.stdout : null;
     }
     return {
       ok: Boolean(interpreter),
@@ -1732,50 +2161,95 @@ export function createHost(options = {}) {
       requirementsFile: requirements,
       requirementsPresent: existsSync(requirements),
       packages,
-      error: interpreter ? null : 'no virtual environment at ' + venvDir,
-    }
+      error: interpreter ? null : "no virtual environment at " + venvDir,
+    };
   }
 
   async function setupPython() {
-    const python = await detectPython(config, pythonCache)
+    const python = await detectPython(config, pythonCache);
     if (!python.ok || !python.command) {
-      return { status: 400, body: { ok: false, error: 'no usable Python interpreter was found on this machine' } }
+      return {
+        status: 400,
+        body: {
+          ok: false,
+          error: "no usable Python interpreter was found on this machine",
+        },
+      };
     }
-    const venvDir = join(dir, '.venv')
-    const venvPython = process.platform === 'win32' ? join(venvDir, 'Scripts', 'python.exe') : join(venvDir, 'bin', 'python')
-    const steps = []
+    const venvDir = join(dir, ".venv");
+    const venvPython =
+      process.platform === "win32"
+        ? join(venvDir, "Scripts", "python.exe")
+        : join(venvDir, "bin", "python");
+    const steps = [];
     if (!existsSync(venvPython)) {
-      const created = await run(python.command, ['-m', 'venv', venvDir], 180000)
-      steps.push({ step: 'create venv', ok: created.ok, output: (created.stdout || created.stderr || created.error || '').slice(-2000) })
-      if (!created.ok) return { status: 500, body: { ok: false, steps } }
+      const created = await run(
+        python.command,
+        ["-m", "venv", venvDir],
+        180000,
+      );
+      steps.push({
+        step: "create venv",
+        ok: created.ok,
+        output: (created.stdout || created.stderr || created.error || "").slice(
+          -2000,
+        ),
+      });
+      if (!created.ok) return { status: 500, body: { ok: false, steps } };
     }
-    const requirements = join(options.packageDir || fileURLToPath(new URL('..', import.meta.url)), 'server', 'requirements.txt')
-    const install = await run(venvPython, ['-m', 'pip', 'install', '--disable-pip-version-check', '-r', requirements], 600000)
-    steps.push({ step: 'pip install -r server/requirements.txt', ok: install.ok, output: (install.stdout || install.stderr || install.error || '').slice(-4000) })
-    if (install.ok) await bridge.restart().catch(() => {})
-    return { status: install.ok ? 200 : 500, body: { ok: install.ok, steps, python: await pythonEnv() } }
+    const requirements = join(
+      options.packageDir || fileURLToPath(new URL("..", import.meta.url)),
+      "server",
+      "requirements.txt",
+    );
+    const install = await run(
+      venvPython,
+      [
+        "-m",
+        "pip",
+        "install",
+        "--disable-pip-version-check",
+        "-r",
+        requirements,
+      ],
+      600000,
+    );
+    steps.push({
+      step: "pip install -r server/requirements.txt",
+      ok: install.ok,
+      output: (install.stdout || install.stderr || install.error || "").slice(
+        -4000,
+      ),
+    });
+    if (install.ok) await bridge.restart().catch(() => {});
+    return {
+      status: install.ok ? 200 : 500,
+      body: { ok: install.ok, steps, python: await pythonEnv() },
+    };
   }
 
   async function listDatasources() {
-    const registry = await readRegistry()
-    const { secrets } = await readSecrets()
+    const registry = await readRegistry();
+    const { secrets } = await readSecrets();
     return {
       file: registryFile,
       missing: registry.missing,
       error: registry.error,
-      datasources: registry.datasources.map((item) => publicProfile(item, secrets)).filter(Boolean),
-    }
+      datasources: registry.datasources
+        .map((item) => publicProfile(item, secrets))
+        .filter(Boolean),
+    };
   }
 
   async function health() {
-    const listing = await listDatasources()
-    const registry = await readRegistry()
-    const python = await detectPython(config, pythonCache)
-    const mcpState = bridge.status()
-    if (mcpState.phase === 'idle') void ensureMcp()
+    const listing = await listDatasources();
+    const registry = await readRegistry();
+    const python = await detectPython(config, pythonCache);
+    const mcpState = bridge.status();
+    if (mcpState.phase === "idle") void ensureMcp();
     return {
       ok: listing.error === null,
-      plugin: { name: PLUGIN_NAME, version: PLUGIN_VERSION, phase: 'P7' },
+      plugin: { name: PLUGIN_NAME, version: PLUGIN_VERSION, phase: "P7" },
       host: {
         node: process.version,
         platform: `${process.platform}-${process.arch}`,
@@ -1798,8 +2272,8 @@ export function createHost(options = {}) {
       settings: await readSettings(),
       http: bridge.httpStatus(),
       mcp: {
-        serverName: trimmed(config.mcpServerName) || 'db',
-        wired: mcpState.phase === 'ready',
+        serverName: trimmed(config.mcpServerName) || "db",
+        wired: mcpState.phase === "ready",
         phase: mcpState.phase,
         error: mcpState.error,
         tools: mcpState.tools,
@@ -1809,23 +2283,33 @@ export function createHost(options = {}) {
         startedAt: mcpState.startedAt,
         stderr: mcpState.stderr,
       },
-    }
+    };
   }
 
   async function saveDatasource(payload) {
-    const registry = await readRegistry()
-    if (registry.error) return { status: 500, body: { ok: false, error: registry.error } }
-    const list = [...registry.datasources]
-    const requestedId = trimmed(payload.id)
-    const index = requestedId ? list.findIndex((item) => item.id === requestedId) : -1
-    const existing = index >= 0 ? list[index] : null
+    const registry = await readRegistry();
+    if (registry.error)
+      return { status: 500, body: { ok: false, error: registry.error } };
+    const list = [...registry.datasources];
+    const requestedId = trimmed(payload.id);
+    const index = requestedId
+      ? list.findIndex((item) => item.id === requestedId)
+      : -1;
+    const existing = index >= 0 ? list[index] : null;
 
-    const normalized = normalizeInput(payload, existing)
-    if (normalized.error) return { status: 400, body: { ok: false, error: normalized.error } }
+    const normalized = normalizeInput(payload, existing);
+    if (normalized.error)
+      return { status: 400, body: { ok: false, error: normalized.error } };
 
-    const profile = normalized.profile
+    const profile = normalized.profile;
     if (!existing && list.length >= MAX_SOURCES) {
-      return { status: 400, body: { ok: false, error: `at most ${MAX_SOURCES} datasources are supported` } }
+      return {
+        status: 400,
+        body: {
+          ok: false,
+          error: `at most ${MAX_SOURCES} datasources are supported`,
+        },
+      };
     }
 
     /* The same endpoint reached with the same login is one data source, not two:
@@ -1833,10 +2317,15 @@ export function createHost(options = {}) {
        meant. Only creation is gated — rows that already exist (created before
        this rule) must stay editable and deletable. */
     if (!existing) {
-      const identity = sourceIdentity(profile.kind, profile.config, profile.config.user)
+      const identity = sourceIdentity(
+        profile.kind,
+        profile.config,
+        profile.config.user,
+      );
       const twin = list.find(
-        (item) => sourceIdentity(item.kind, item.config, item.config.user) === identity,
-      )
+        (item) =>
+          sourceIdentity(item.kind, item.config, item.config.user) === identity,
+      );
       if (twin) {
         return {
           status: 409,
@@ -1845,38 +2334,45 @@ export function createHost(options = {}) {
             error: `${twin.name || twin.id} already uses this connection and user`,
             existingId: twin.id,
           },
-        }
+        };
       }
     }
 
     if (profile.isDefault || list.length === 0) {
-      for (const item of list) item.isDefault = false
-      profile.isDefault = true
+      for (const item of list) item.isDefault = false;
+      profile.isDefault = true;
     }
-    if (!list.some((item) => item.isDefault)) profile.isDefault = true
+    if (!list.some((item) => item.isDefault)) profile.isDefault = true;
 
-    if (index >= 0) list[index] = profile
-    else list.push(profile)
+    if (index >= 0) list[index] = profile;
+    else list.push(profile);
 
-    await writeRegistry(list)
+    await writeRegistry(list);
 
-    const secretChange = {}
+    const secretChange = {};
     if (normalized.password !== undefined) {
-      const { secrets } = await readSecrets()
-      if (normalized.password === '') {
+      const { secrets } = await readSecrets();
+      if (normalized.password === "") {
         if (secrets[profile.id]) {
-          delete secrets[profile.id]
-          secretChange.cleared = true
+          delete secrets[profile.id];
+          secretChange.cleared = true;
         }
       } else {
-        secrets[profile.id] = { password: normalized.password }
-        secretChange.saved = true
+        secrets[profile.id] = { password: normalized.password };
+        secretChange.saved = true;
       }
-      await writeSecrets(secrets)
+      await writeSecrets(secrets);
     }
 
-    const { secrets } = await readSecrets()
-    return { status: 200, body: { ok: true, datasource: publicProfile(profile, secrets), secret: secretChange } }
+    const { secrets } = await readSecrets();
+    return {
+      status: 200,
+      body: {
+        ok: true,
+        datasource: publicProfile(profile, secrets),
+        secret: secretChange,
+      },
+    };
   }
 
   /**
@@ -1884,64 +2380,97 @@ export function createHost(options = {}) {
    * read-only flag, or probe several sources in one call.
    */
   async function bulkDatasources(payload) {
-    const action = trimmed(payload.action)
-    const ids = Array.isArray(payload.ids) ? [...new Set(payload.ids.map((id) => trimmed(id)).filter(Boolean))] : []
-    if (!['delete', 'group', 'readOnly', 'test'].includes(action)) {
-      return { status: 400, body: { ok: false, error: `unsupported bulk action: ${action || '(empty)'}` } }
+    const action = trimmed(payload.action);
+    const ids = Array.isArray(payload.ids)
+      ? [...new Set(payload.ids.map((id) => trimmed(id)).filter(Boolean))]
+      : [];
+    if (!["delete", "group", "readOnly", "test"].includes(action)) {
+      return {
+        status: 400,
+        body: {
+          ok: false,
+          error: `unsupported bulk action: ${action || "(empty)"}`,
+        },
+      };
     }
-    if (ids.length === 0) return { status: 400, body: { ok: false, error: 'ids must be a non-empty array' } }
+    if (ids.length === 0)
+      return {
+        status: 400,
+        body: { ok: false, error: "ids must be a non-empty array" },
+      };
 
-    const registry = await readRegistry()
-    if (registry.error) return { status: 500, body: { ok: false, error: registry.error } }
-    const known = new Set(registry.datasources.map((item) => item.id))
-    const missing = ids.filter((id) => !known.has(id))
+    const registry = await readRegistry();
+    if (registry.error)
+      return { status: 500, body: { ok: false, error: registry.error } };
+    const known = new Set(registry.datasources.map((item) => item.id));
+    const missing = ids.filter((id) => !known.has(id));
     if (missing.length === ids.length) {
-      return { status: 404, body: { ok: false, error: `unknown datasources: ${ids.join(', ')}` } }
+      return {
+        status: 404,
+        body: { ok: false, error: `unknown datasources: ${ids.join(", ")}` },
+      };
     }
-    const target = ids.filter((id) => known.has(id))
+    const target = ids.filter((id) => known.has(id));
 
-    if (action === 'delete') {
-      const list = registry.datasources.filter((item) => !target.includes(item.id))
-      if (list.length > 0 && !list.some((item) => item.isDefault)) list[0].isDefault = true
-      await writeRegistry(list, groupsAfterDelete(registry.datasources, list, registry.groups))
-      const { secrets } = await readSecrets()
-      let changed = false
+    if (action === "delete") {
+      const list = registry.datasources.filter(
+        (item) => !target.includes(item.id),
+      );
+      if (list.length > 0 && !list.some((item) => item.isDefault))
+        list[0].isDefault = true;
+      await writeRegistry(
+        list,
+        groupsAfterDelete(registry.datasources, list, registry.groups),
+      );
+      const { secrets } = await readSecrets();
+      let changed = false;
       for (const id of target) {
         if (secrets[id]) {
-          delete secrets[id]
-          changed = true
+          delete secrets[id];
+          changed = true;
         }
       }
-      if (changed) await writeSecrets(secrets)
+      if (changed) await writeSecrets(secrets);
       return {
         status: 200,
-        body: { ok: true, action, affected: target.length, datasources: list.map((item) => publicProfile(item, secrets)) },
-      }
+        body: {
+          ok: true,
+          action,
+          affected: target.length,
+          datasources: list.map((item) => publicProfile(item, secrets)),
+        },
+      };
     }
 
-    if (action === 'test') {
-      const results = []
+    if (action === "test") {
+      const results = [];
       // Open the envelopes once for the whole batch instead of per source.
-      const opened = await plainSecrets()
+      const opened = await plainSecrets();
       for (const id of target) {
-        const stored = registry.datasources.find((item) => item.id === id)
+        const stored = registry.datasources.find((item) => item.id === id);
         const result = await testProfile(stored, opened.secrets[id] || null, {
           probeTimeoutMs: Number(config.probeTimeoutMs) || 10_000,
           remote: remoteProbe,
-        })
-        const probe = { ok: result.ok, message: result.message, latencyMs: result.latencyMs, at: isoNow(), detail: result.detail || null }
-        results.push({ id, probe })
+        });
+        const probe = {
+          ok: result.ok,
+          message: result.message,
+          latencyMs: result.latencyMs,
+          at: isoNow(),
+          detail: result.detail || null,
+        };
+        results.push({ id, probe });
       }
       const merged = registry.datasources.map((item) => {
-        const hit = results.find((entry) => entry.id === item.id)
-        return hit ? { ...item, lastProbe: hit.probe } : item
-      })
+        const hit = results.find((entry) => entry.id === item.id);
+        return hit ? { ...item, lastProbe: hit.probe } : item;
+      });
       try {
-        await writeRegistry(merged)
+        await writeRegistry(merged);
       } catch {
         /* the probe result still matters even if the note cannot be stored */
       }
-      const { secrets } = await readSecrets()
+      const { secrets } = await readSecrets();
       return {
         status: 200,
         body: {
@@ -1951,56 +2480,83 @@ export function createHost(options = {}) {
           results,
           datasources: merged.map((item) => publicProfile(item, secrets)),
         },
-      }
+      };
     }
 
     const next = registry.datasources.map((item) => {
-      if (!target.includes(item.id)) return item
-      if (action === 'group') return { ...item, group: trimmed(payload.group).slice(0, 48), updatedAt: isoNow() }
-      return { ...item, readOnly: payload.readOnly !== false, updatedAt: isoNow() }
-    })
-    if (action === 'readOnly') {
+      if (!target.includes(item.id)) return item;
+      if (action === "group")
+        return {
+          ...item,
+          group: trimmed(payload.group).slice(0, 48),
+          updatedAt: isoNow(),
+        };
+      return {
+        ...item,
+        readOnly: payload.readOnly !== false,
+        updatedAt: isoNow(),
+      };
+    });
+    if (action === "readOnly") {
       // Turning a source writable is now a pure flag flip — writes go to every
       // schema the source can see. The DDL switch rides along when the caller
       // says so; absent means "leave it as it is".
-      const ddl = payload.allowDdl === undefined || payload.allowDdl === null ? null : payload.allowDdl === true
+      const ddl =
+        payload.allowDdl === undefined || payload.allowDdl === null
+          ? null
+          : payload.allowDdl === true;
       if (ddl !== null) {
         for (const item of next) {
-          if (!target.includes(item.id)) continue
-          item.allowDdl = ddl
+          if (!target.includes(item.id)) continue;
+          item.allowDdl = ddl;
         }
       }
     }
-    await writeRegistry(next)
-    const { secrets } = await readSecrets()
+    await writeRegistry(next);
+    const { secrets } = await readSecrets();
     return {
       status: 200,
-      body: { ok: true, action, affected: target.length, datasources: next.map((item) => publicProfile(item, secrets)) },
-    }
+      body: {
+        ok: true,
+        action,
+        affected: target.length,
+        datasources: next.map((item) => publicProfile(item, secrets)),
+      },
+    };
   }
 
   /** Reorder the registry so the list keeps the order the user dragged it into. */
   async function reorderDatasources(payload) {
-    const ids = Array.isArray(payload.ids) ? payload.ids.map((id) => trimmed(id)).filter(Boolean) : []
-    if (ids.length === 0) return { status: 400, body: { ok: false, error: 'ids must be a non-empty array' } }
+    const ids = Array.isArray(payload.ids)
+      ? payload.ids.map((id) => trimmed(id)).filter(Boolean)
+      : [];
+    if (ids.length === 0)
+      return {
+        status: 400,
+        body: { ok: false, error: "ids must be a non-empty array" },
+      };
 
-    const registry = await readRegistry()
-    if (registry.error) return { status: 500, body: { ok: false, error: registry.error } }
-    const byId = new Map(registry.datasources.map((item) => [item.id, item]))
-    const ordered = []
+    const registry = await readRegistry();
+    if (registry.error)
+      return { status: 500, body: { ok: false, error: registry.error } };
+    const byId = new Map(registry.datasources.map((item) => [item.id, item]));
+    const ordered = [];
     for (const id of ids) {
-      const item = byId.get(id)
-      if (!item) continue
-      ordered.push(item)
-      byId.delete(id)
+      const item = byId.get(id);
+      if (!item) continue;
+      ordered.push(item);
+      byId.delete(id);
     }
-    for (const item of byId.values()) ordered.push(item)
-    await writeRegistry(ordered, registry.groups)
-    const { secrets } = await readSecrets()
+    for (const item of byId.values()) ordered.push(item);
+    await writeRegistry(ordered, registry.groups);
+    const { secrets } = await readSecrets();
     return {
       status: 200,
-      body: { ok: true, datasources: ordered.map((item) => publicProfile(item, secrets)) },
-    }
+      body: {
+        ok: true,
+        datasources: ordered.map((item) => publicProfile(item, secrets)),
+      },
+    };
   }
 
   /**
@@ -2009,75 +2565,136 @@ export function createHost(options = {}) {
    * deleting empties them.
    */
   async function listGroups() {
-    const registry = await readRegistry()
-    if (registry.error) return { status: 500, body: { ok: false, error: registry.error } }
-    return { status: 200, body: { ok: true, groups: registry.groups } }
+    const registry = await readRegistry();
+    if (registry.error)
+      return { status: 500, body: { ok: false, error: registry.error } };
+    return { status: 200, body: { ok: true, groups: registry.groups } };
   }
 
   async function saveGroup(payload) {
-    const name = groupName(payload.name)
-    const from = groupName(payload.from)
-    if (!name) return { status: 400, body: { ok: false, error: 'group name is required' } }
-    if (name.length > 48) return { status: 400, body: { ok: false, error: 'group name must be at most 48 characters' } }
+    const name = groupName(payload.name);
+    const from = groupName(payload.from);
+    if (!name)
+      return {
+        status: 400,
+        body: { ok: false, error: "group name is required" },
+      };
+    if (name.length > 48)
+      return {
+        status: 400,
+        body: { ok: false, error: "group name must be at most 48 characters" },
+      };
 
-    const registry = await readRegistry()
-    if (registry.error) return { status: 500, body: { ok: false, error: registry.error } }
+    const registry = await readRegistry();
+    if (registry.error)
+      return { status: 500, body: { ok: false, error: registry.error } };
     if (from && from !== name && !registry.groups.includes(from)) {
-      return { status: 404, body: { ok: false, error: `unknown group: ${from}` } }
+      return {
+        status: 404,
+        body: { ok: false, error: `unknown group: ${from}` },
+      };
     }
     if (name !== from && registry.groups.includes(name)) {
-      return { status: 400, body: { ok: false, error: `group already exists: ${name}` } }
+      return {
+        status: 400,
+        body: { ok: false, error: `group already exists: ${name}` },
+      };
     }
 
-    const datasources = from && from !== name
-      ? registry.datasources.map((item) => (groupName(item.group) === from ? { ...item, group: name, updatedAt: isoNow() } : item))
-      : registry.datasources
-    const groups = [...new Set(registry.groups.map((item) => (item === from ? name : item)).concat([name]))]
-    await writeRegistry(datasources, groups)
-    const { secrets } = await readSecrets()
+    const datasources =
+      from && from !== name
+        ? registry.datasources.map((item) =>
+            groupName(item.group) === from
+              ? { ...item, group: name, updatedAt: isoNow() }
+              : item,
+          )
+        : registry.datasources;
+    const groups = [
+      ...new Set(
+        registry.groups
+          .map((item) => (item === from ? name : item))
+          .concat([name]),
+      ),
+    ];
+    await writeRegistry(datasources, groups);
+    const { secrets } = await readSecrets();
     return {
       status: 200,
-      body: { ok: true, groups, datasources: datasources.map((item) => publicProfile(item, secrets)) },
-    }
+      body: {
+        ok: true,
+        groups,
+        datasources: datasources.map((item) => publicProfile(item, secrets)),
+      },
+    };
   }
 
   async function deleteGroup(payload) {
-    const name = groupName(payload.name)
-    if (!name) return { status: 400, body: { ok: false, error: 'group name is required' } }
-    const registry = await readRegistry()
-    if (registry.error) return { status: 500, body: { ok: false, error: registry.error } }
+    const name = groupName(payload.name);
+    if (!name)
+      return {
+        status: 400,
+        body: { ok: false, error: "group name is required" },
+      };
+    const registry = await readRegistry();
+    if (registry.error)
+      return { status: 500, body: { ok: false, error: registry.error } };
     if (!registry.groups.includes(name)) {
-      return { status: 404, body: { ok: false, error: `unknown group: ${name}` } }
+      return {
+        status: 404,
+        body: { ok: false, error: `unknown group: ${name}` },
+      };
     }
     const datasources = registry.datasources.map((item) =>
-      groupName(item.group) === name ? { ...item, group: '', updatedAt: isoNow() } : item,
-    )
-    const groups = registry.groups.filter((item) => item !== name)
-    await writeRegistry(datasources, groups)
-    const { secrets } = await readSecrets()
+      groupName(item.group) === name
+        ? { ...item, group: "", updatedAt: isoNow() }
+        : item,
+    );
+    const groups = registry.groups.filter((item) => item !== name);
+    await writeRegistry(datasources, groups);
+    const { secrets } = await readSecrets();
     return {
       status: 200,
-      body: { ok: true, groups, datasources: datasources.map((item) => publicProfile(item, secrets)) },
-    }
+      body: {
+        ok: true,
+        groups,
+        datasources: datasources.map((item) => publicProfile(item, secrets)),
+      },
+    };
   }
 
   async function deleteDatasource(payload) {
-    const id = trimmed(payload.id)
-    if (!id) return { status: 400, body: { ok: false, error: 'id is required' } }
-    const registry = await readRegistry()
-    if (registry.error) return { status: 500, body: { ok: false, error: registry.error } }
-    const list = registry.datasources.filter((item) => item.id !== id)
+    const id = trimmed(payload.id);
+    if (!id)
+      return { status: 400, body: { ok: false, error: "id is required" } };
+    const registry = await readRegistry();
+    if (registry.error)
+      return { status: 500, body: { ok: false, error: registry.error } };
+    const list = registry.datasources.filter((item) => item.id !== id);
     if (list.length === registry.datasources.length) {
-      return { status: 404, body: { ok: false, error: `unknown datasource: ${id}` } }
+      return {
+        status: 404,
+        body: { ok: false, error: `unknown datasource: ${id}` },
+      };
     }
-    if (list.length > 0 && !list.some((item) => item.isDefault)) list[0].isDefault = true
-    await writeRegistry(list, groupsAfterDelete(registry.datasources, list, registry.groups))
-    const { secrets } = await readSecrets()
+    if (list.length > 0 && !list.some((item) => item.isDefault))
+      list[0].isDefault = true;
+    await writeRegistry(
+      list,
+      groupsAfterDelete(registry.datasources, list, registry.groups),
+    );
+    const { secrets } = await readSecrets();
     if (secrets[id]) {
-      delete secrets[id]
-      await writeSecrets(secrets)
+      delete secrets[id];
+      await writeSecrets(secrets);
     }
-    return { status: 200, body: { ok: true, removed: id, datasources: list.map((item) => publicProfile(item, secrets)) } }
+    return {
+      status: 200,
+      body: {
+        ok: true,
+        removed: id,
+        datasources: list.map((item) => publicProfile(item, secrets)),
+      },
+    };
   }
 
   /**
@@ -2085,31 +2702,41 @@ export function createHost(options = {}) {
    * describe_table, so it can never run SQL.
    */
   async function inspectSchema(search) {
-    const id = trimmed(search.get('datasource'))
-    if (!id) return [400, { ok: false, error: 'datasource is required' }]
-    const registry = await readRegistry()
-    if (registry.error) return [500, { ok: false, error: registry.error }]
-    const profile = registry.datasources.find((item) => item.id === id) || null
-    if (!profile) return [404, { ok: false, error: `unknown datasource: ${id}` }]
-    const table = trimmed(search.get('table'))
-    const schema = trimmed(search.get('schema'))
-    const target = describeTarget(profile.kind, profile.config)
+    const id = trimmed(search.get("datasource"));
+    if (!id) return [400, { ok: false, error: "datasource is required" }];
+    const registry = await readRegistry();
+    if (registry.error) return [500, { ok: false, error: registry.error }];
+    const profile = registry.datasources.find((item) => item.id === id) || null;
+    if (!profile)
+      return [404, { ok: false, error: `unknown datasource: ${id}` }];
+    const table = trimmed(search.get("table"));
+    const schema = trimmed(search.get("schema"));
+    const target = describeTarget(profile.kind, profile.config);
 
     try {
-        if (!table) {
-        const args = schema ? { datasource: id, schema } : { datasource: id }
-        const result = await bridge.call('list_tables', args, { audit: false })
-        const value = result.value || {}
+      if (!table) {
+        const args = schema ? { datasource: id, schema } : { datasource: id };
+        const result = await bridge.call("list_tables", args, { audit: false });
+        const value = result.value || {};
         if (value.ok === false) {
-          return [200, { ok: false, datasource: id, target, error: value.error || { message: 'list_tables failed' } }]
+          return [
+            200,
+            {
+              ok: false,
+              datasource: id,
+              target,
+              error: value.error || { message: "list_tables failed" },
+            },
+          ];
         }
-        const tables = value.tables || []
+        const tables = value.tables || [];
         // Every schema the catalog returned: the unlock dialog draws one
         // checkbox per row, so this is what the user picks from. Older Python
         // builds only send the tables, so fall back to their schema names.
-        const listed = Array.isArray(value.schemas) && value.schemas.length > 0
-          ? value.schemas
-          : tables.map((table) => table && table.schema).filter(Boolean)
+        const listed =
+          Array.isArray(value.schemas) && value.schemas.length > 0
+            ? value.schemas
+            : tables.map((table) => table && table.schema).filter(Boolean);
         return [
           200,
           {
@@ -2119,13 +2746,26 @@ export function createHost(options = {}) {
             tables,
             schemas: Array.from(new Set(listed.map((name) => String(name)))),
           },
-        ]
+        ];
       }
-      const args = schema ? { datasource: id, table, schema } : { datasource: id, table }
-      const result = await bridge.call('describe_table', args, { audit: false })
-      const value = result.value || {}
+      const args = schema
+        ? { datasource: id, table, schema }
+        : { datasource: id, table };
+      const result = await bridge.call("describe_table", args, {
+        audit: false,
+      });
+      const value = result.value || {};
       if (value.ok === false) {
-        return [200, { ok: false, datasource: id, target, table, error: value.error || { message: 'describe_table failed' } }]
+        return [
+          200,
+          {
+            ok: false,
+            datasource: id,
+            target,
+            table,
+            error: value.error || { message: "describe_table failed" },
+          },
+        ];
       }
       return [
         200,
@@ -2138,53 +2778,72 @@ export function createHost(options = {}) {
           columns: value.columns || [],
           primaryKey: value.primaryKey || [],
         },
-      ]
+      ];
     } catch (error) {
       return [
         503,
         {
           ok: false,
           error: String((error && error.message) || error),
-          hint: 'start the MCP server from the panel and try again',
+          hint: "start the MCP server from the panel and try again",
         },
-      ]
+      ];
     }
   }
 
-  async function remoteProbe(profile, password) {    const args = profile.id
+  async function remoteProbe(profile, password) {
+    const args = profile.id
       ? { datasource: profile.id }
-      : { kind: profile.kind, config: profile.config, read_only: Boolean(profile.readOnly) }
-    if (password) args.password = password
-    const result = await bridge.call('test_connection', args, { audit: false })
-    return result.value
+      : {
+          kind: profile.kind,
+          config: profile.config,
+          read_only: Boolean(profile.readOnly),
+        };
+    if (password) args.password = password;
+    const result = await bridge.call("test_connection", args, { audit: false });
+    return result.value;
   }
 
   async function testDatasource(payload) {
     const probeOptions = {
       probeTimeoutMs: Number(config.probeTimeoutMs) || 10_000,
       remote: remoteProbe,
-    }
-    const id = trimmed(payload.id)
-    const registry = await readRegistry()
-    const stored = id ? registry.datasources.find((item) => item.id === id) || null : null
+    };
+    const id = trimmed(payload.id);
+    const registry = await readRegistry();
+    const stored = id
+      ? registry.datasources.find((item) => item.id === id) || null
+      : null;
 
-    let profile
+    let profile;
     if (payload.kind && payload.config) {
-      const normalized = normalizeInput({ ...payload, id: id || 'probe' }, null)
-      if (normalized.error) return { status: 400, body: { ok: false, error: normalized.error } }
-      profile = normalized.profile
-      profile.id = (stored && stored.id) || null
+      const normalized = normalizeInput(
+        { ...payload, id: id || "probe" },
+        null,
+      );
+      if (normalized.error)
+        return { status: 400, body: { ok: false, error: normalized.error } };
+      profile = normalized.profile;
+      profile.id = (stored && stored.id) || null;
     } else if (stored) {
-      profile = stored
+      profile = stored;
     } else {
-      return { status: 404, body: { ok: false, error: `unknown datasource: ${id || '(none)'}` } }
+      return {
+        status: 404,
+        body: { ok: false, error: `unknown datasource: ${id || "(none)"}` },
+      };
     }
 
-    const { secrets } = await plainSecrets()
+    const { secrets } = await plainSecrets();
     // An inline probe has no registry entry, so the password typed into the form
     // is the only one available; a saved source keeps using its stored secret.
-    const supplied = typeof payload.password === 'string' ? payload.password : ''
-    const secret = profile.id ? secrets[profile.id] : supplied ? { password: supplied } : null
+    const supplied =
+      typeof payload.password === "string" ? payload.password : "";
+    const secret = profile.id
+      ? secrets[profile.id]
+      : supplied
+        ? { password: supplied }
+        : null;
     if (secret && secret.broken) {
       return {
         status: 200,
@@ -2192,80 +2851,109 @@ export function createHost(options = {}) {
           ok: true,
           probe: {
             ok: false,
-            message: 'the stored password cannot be decrypted — re-enter it in Edit',
+            message:
+              "the stored password cannot be decrypted — re-enter it in Edit",
             latencyMs: 0,
             at: isoNow(),
             detail: null,
           },
           target: describeTarget(profile.kind, profile.config),
         },
-      }
+      };
     }
-    const result = await testProfile(profile, secret, probeOptions)
+    const result = await testProfile(profile, secret, probeOptions);
     const probe = {
       ok: result.ok,
       message: result.message,
       latencyMs: result.latencyMs,
       at: isoNow(),
       detail: result.detail || null,
-    }
+    };
 
     if (stored) {
       const list = registry.datasources.map((item) =>
         item.id === stored.id ? { ...item, lastProbe: probe } : item,
-      )
+      );
       try {
-        await writeRegistry(list)
+        await writeRegistry(list);
       } catch {
         /* a failed note must not fail the probe itself */
       }
     }
-    return { status: 200, body: { ok: true, probe, target: result.target || describeTarget(profile.kind, profile.config) } }
+    return {
+      status: 200,
+      body: {
+        ok: true,
+        probe,
+        target: result.target || describeTarget(profile.kind, profile.config),
+      },
+    };
   }
 
   async function importDatasources(payload) {
-    const ids = Array.isArray(payload.ids) ? payload.ids.map((id) => trimmed(id)).filter(Boolean) : []
-    if (ids.length === 0) return { status: 400, body: { ok: false, error: 'ids is required' } }
-    const registry = await readRegistry()
-    if (registry.error) return { status: 500, body: { ok: false, error: registry.error } }
-    const scan = await scanDBeaver({ withSecrets: true, existing: registry.datasources })
+    const ids = Array.isArray(payload.ids)
+      ? payload.ids.map((id) => trimmed(id)).filter(Boolean)
+      : [];
+    if (ids.length === 0)
+      return { status: 400, body: { ok: false, error: "ids is required" } };
+    const registry = await readRegistry();
+    if (registry.error)
+      return { status: 500, body: { ok: false, error: registry.error } };
+    const scan = await scanDBeaver({
+      withSecrets: true,
+      existing: registry.datasources,
+    });
     const available = scan.sources.flatMap((source) =>
-      source.connections.filter((item) => item.importable).map((item) => ({ ...item })),
-    )
-    const list = [...registry.datasources]
-    const { secrets } = await readSecrets()
-    const imported = []
-    const skipped = []
-    const failed = []
-    const warnings = []
+      source.connections
+        .filter((item) => item.importable)
+        .map((item) => ({ ...item })),
+    );
+    const list = [...registry.datasources];
+    const { secrets } = await readSecrets();
+    const imported = [];
+    const skipped = [];
+    const failed = [];
+    const warnings = [];
 
     // Same endpoint + database + account means the source is already here.
-    const identities = new Map()
+    const identities = new Map();
     for (const profile of list) {
-      identities.set(sourceIdentity(profile.kind, profile.config, profile.config && profile.config.user), profile.id)
+      identities.set(
+        sourceIdentity(
+          profile.kind,
+          profile.config,
+          profile.config && profile.config.user,
+        ),
+        profile.id,
+      );
     }
 
     for (const id of ids) {
-      const found = available.find((item) => item.id === id)
+      const found = available.find((item) => item.id === id);
       if (!found) {
-        failed.push({ id, error: 'not found in DBeaver' })
-        continue
+        failed.push({ id, error: "not found in DBeaver" });
+        continue;
       }
-      const identity = sourceIdentity(found.kind, found.config, found.config && found.config.user)
-      const clash = identities.get(identity)
+      const identity = sourceIdentity(
+        found.kind,
+        found.config,
+        found.config && found.config.user,
+      );
+      const clash = identities.get(identity);
       if (clash) {
-        skipped.push({ id, existingId: clash })
-        continue
+        skipped.push({ id, existingId: clash });
+        continue;
       }
-      const slug = (trimmed(found.name) || id)
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/^-+|-+$/g, '')
-        .slice(0, 32) || 'imported'
-      let candidate = slug
-      let counter = 2
+      const slug =
+        (trimmed(found.name) || id)
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/^-+|-+$/g, "")
+          .slice(0, 32) || "imported";
+      let candidate = slug;
+      let counter = 2;
       while (list.some((item) => item.id === candidate)) {
-        candidate = `${slug.slice(0, 27)}-${counter++}`
+        candidate = `${slug.slice(0, 27)}-${counter++}`;
       }
 
       const profile = {
@@ -2275,32 +2963,37 @@ export function createHost(options = {}) {
         config: found.config,
         readOnly: true,
         isDefault: list.length === 0,
-        tags: ['dbeaver'],
+        tags: ["dbeaver"],
         createdAt: isoNow(),
         updatedAt: isoNow(),
         lastProbe: null,
-      }
-      list.push(profile)
-      identities.set(identity, candidate)
-      if (found.password) secrets[candidate] = { password: found.password }
-      if (profile.kind !== 'sqlite' && !trimmed(profile.config && profile.config.user)) {
+      };
+      list.push(profile);
+      identities.set(identity, candidate);
+      if (found.password) secrets[candidate] = { password: found.password };
+      if (
+        profile.kind !== "sqlite" &&
+        !trimmed(profile.config && profile.config.user)
+      ) {
         warnings.push({
           id: candidate,
-          message: 'DBeaver stored no user for this connection; open Edit and fill it in',
-        })
+          message:
+            "DBeaver stored no user for this connection; open Edit and fill it in",
+        });
       }
-      if (profile.kind !== 'sqlite' && found.hasPassword === false) {
+      if (profile.kind !== "sqlite" && found.hasPassword === false) {
         warnings.push({
           id: candidate,
-          message: 'DBeaver did not save a password for this connection; the source was imported without one',
-        })
+          message:
+            "DBeaver did not save a password for this connection; the source was imported without one",
+        });
       }
-      imported.push({ ...publicProfile(profile, secrets), sourceId: id })
+      imported.push({ ...publicProfile(profile, secrets), sourceId: id });
     }
 
     if (imported.length > 0) {
-      await writeRegistry(list)
-      await writeSecrets(secrets)
+      await writeRegistry(list);
+      await writeSecrets(secrets);
     }
     return {
       status: 200,
@@ -2312,46 +3005,63 @@ export function createHost(options = {}) {
         warnings,
         datasources: list.map((item) => publicProfile(item, secrets)),
       },
-    }
+    };
   }
 
   async function handle(request, response) {
-    let route = '/'
+    let route = "/";
     try {
-      const url = new URL(request.url, 'http://localhost')
-      route = url.pathname.slice(API_PREFIX.length) || '/'
+      const url = new URL(request.url, "http://localhost");
+      route = url.pathname.slice(API_PREFIX.length) || "/";
     } catch {
-      return sendJson(response, 400, { ok: false, error: 'unreadable request url' })
+      return sendJson(response, 400, {
+        ok: false,
+        error: "unreadable request url",
+      });
     }
-    const method = (request.method || 'GET').toUpperCase()
+    const method = (request.method || "GET").toUpperCase();
 
-    if (method !== 'GET' && method !== 'HEAD' && !sameOrigin(request)) {
-      return sendJson(response, 403, { ok: false, error: 'cross-origin write rejected' })
+    if (method !== "GET" && method !== "HEAD" && !sameOrigin(request)) {
+      return sendJson(response, 403, {
+        ok: false,
+        error: "cross-origin write rejected",
+      });
     }
 
     try {
-      if (method === 'GET' || method === 'HEAD') {
-        if (route === '/' || route === '/health') return sendJson(response, 200, await health())
-        if (route === '/datasources') {
-          const listing = await listDatasources()
-          return sendJson(response, 200, { ok: listing.error === null, ...listing })
+      if (method === "GET" || method === "HEAD") {
+        if (route === "/" || route === "/health")
+          return sendJson(response, 200, await health());
+        if (route === "/datasources") {
+          const listing = await listDatasources();
+          return sendJson(response, 200, {
+            ok: listing.error === null,
+            ...listing,
+          });
         }
-        if (route === '/groups') {
-          const result = await listGroups()
-          return sendJson(response, result.status, result.body)
+        if (route === "/groups") {
+          const result = await listGroups();
+          return sendJson(response, result.status, result.body);
         }
-        if (route === '/dbeaver/scan') {
-          const registry = await readRegistry()
-          return sendJson(response, 200, { ok: true, ...(await scanDBeaver({ existing: registry.datasources })) })
+        if (route === "/dbeaver/scan") {
+          const registry = await readRegistry();
+          return sendJson(response, 200, {
+            ok: true,
+            ...(await scanDBeaver({ existing: registry.datasources })),
+          });
         }
-        if (route === '/schema') {
-          const search = new URL(request.url, 'http://localhost').searchParams
-          return sendJson(response, ...(await inspectSchema(search)))
+        if (route === "/schema") {
+          const search = new URL(request.url, "http://localhost").searchParams;
+          return sendJson(response, ...(await inspectSchema(search)));
         }
-        if (route === '/settings') return sendJson(response, 200, { ok: true, settings: await readSettings() })
-        if (route === '/tools') {
-          const settingsNow = await readSettings()
-          const listing = bridge.toolCatalog()
+        if (route === "/settings")
+          return sendJson(response, 200, {
+            ok: true,
+            settings: await readSettings(),
+          });
+        if (route === "/tools") {
+          const settingsNow = await readSettings();
+          const listing = bridge.toolCatalog();
           return sendJson(response, 200, {
             ok: true,
             disabled: settingsNow.disabledTools || [],
@@ -2359,81 +3069,114 @@ export function createHost(options = {}) {
             textPolicy: settingsNow.textPolicy,
             tools: listing.tools,
             scopeTool: listing.scopeTool,
-          })
+          });
         }
-        if (route === '/scopes') {
-          const listing = await readScopes()
-          const described = await describeScopes(listing)
+        if (route === "/scopes") {
+          const listing = await readScopes();
+          const described = await describeScopes(listing);
           return sendJson(response, 200, {
             ok: listing.error === null,
             file: listing.file,
             error: listing.error,
             sessions: described.sessions,
             archived: described.archived,
-          })
+          });
         }
-        if (route === '/audit') {
-          const limit = Math.min(200, Math.max(1, Number(new URL(request.url, 'http://localhost').searchParams.get('limit')) || 20))
-          const listing = await readAudit(limit)
-          return sendJson(response, 200, { ok: listing.error === null, file: auditFile, ...listing })
+        if (route === "/audit") {
+          const limit = Math.min(
+            200,
+            Math.max(
+              1,
+              Number(
+                new URL(request.url, "http://localhost").searchParams.get(
+                  "limit",
+                ),
+              ) || 20,
+            ),
+          );
+          const listing = await readAudit(limit);
+          return sendJson(response, 200, {
+            ok: listing.error === null,
+            file: auditFile,
+            ...listing,
+          });
         }
-        if (route === '/python/env' || route === '/python/status') return sendJson(response, 200, { ok: true, ...(await pythonEnv()) })
-        if (route === '/http/status') {
-          const settings = await readSettings()
-          return sendJson(response, 200, { ok: true, settings, ...bridge.httpStatus() })
+        if (route === "/python/env" || route === "/python/status")
+          return sendJson(response, 200, { ok: true, ...(await pythonEnv()) });
+        if (route === "/http/status") {
+          const settings = await readSettings();
+          return sendJson(response, 200, {
+            ok: true,
+            settings,
+            ...bridge.httpStatus(),
+          });
         }
-        if (route === '/clients') return sendJson(response, 200, await inspectClients())
-        if (route === '/mcp/status') {
-          const state = bridge.status()
-          return sendJson(response, 200, { ok: state.phase !== 'failed', ...state })
+        if (route === "/clients")
+          return sendJson(response, 200, await inspectClients());
+        if (route === "/mcp/status") {
+          const state = bridge.status();
+          return sendJson(response, 200, {
+            ok: state.phase !== "failed",
+            ...state,
+          });
         }
-        return sendJson(response, 404, { ok: false, error: `unknown route: ${method} ${route}` })
+        return sendJson(response, 404, {
+          ok: false,
+          error: `unknown route: ${method} ${route}`,
+        });
       }
 
-      if (method !== 'POST') return sendJson(response, 405, { ok: false, error: `method not allowed: ${method}` })
+      if (method !== "POST")
+        return sendJson(response, 405, {
+          ok: false,
+          error: `method not allowed: ${method}`,
+        });
 
-      let payload
+      let payload;
       try {
-        payload = await readBody(request)
+        payload = await readBody(request);
       } catch (error) {
-        return sendJson(response, 400, { ok: false, error: String((error && error.message) || error) })
+        return sendJson(response, 400, {
+          ok: false,
+          error: String((error && error.message) || error),
+        });
       }
 
-      if (route === '/datasources/save') {
-        const result = await saveDatasource(payload)
-        if (result.status === 200) void bridge.restart().catch(() => {})
-        return sendJson(response, result.status, result.body)
+      if (route === "/datasources/save") {
+        const result = await saveDatasource(payload);
+        if (result.status === 200) void bridge.restart().catch(() => {});
+        return sendJson(response, result.status, result.body);
       }
-      if (route === '/datasources/delete') {
-        const result = await deleteDatasource(payload)
-        if (result.status === 200) void bridge.restart().catch(() => {})
-        return sendJson(response, result.status, result.body)
+      if (route === "/datasources/delete") {
+        const result = await deleteDatasource(payload);
+        if (result.status === 200) void bridge.restart().catch(() => {});
+        return sendJson(response, result.status, result.body);
       }
-      if (route === '/datasources/test') {
-        const result = await testDatasource(payload)
-        return sendJson(response, result.status, result.body)
+      if (route === "/datasources/test") {
+        const result = await testDatasource(payload);
+        return sendJson(response, result.status, result.body);
       }
-      if (route === '/datasources/bulk') {
-        const result = await bulkDatasources(payload)
-        return sendJson(response, result.status, result.body)
+      if (route === "/datasources/bulk") {
+        const result = await bulkDatasources(payload);
+        return sendJson(response, result.status, result.body);
       }
-      if (route === '/groups/save') {
-        const result = await saveGroup(payload)
-        return sendJson(response, result.status, result.body)
+      if (route === "/groups/save") {
+        const result = await saveGroup(payload);
+        return sendJson(response, result.status, result.body);
       }
-      if (route === '/groups/delete') {
-        const result = await deleteGroup(payload)
-        return sendJson(response, result.status, result.body)
+      if (route === "/groups/delete") {
+        const result = await deleteGroup(payload);
+        return sendJson(response, result.status, result.body);
       }
-      if (route === '/datasources/reorder') {
-        const result = await reorderDatasources(payload)
-        return sendJson(response, result.status, result.body)
+      if (route === "/datasources/reorder") {
+        const result = await reorderDatasources(payload);
+        return sendJson(response, result.status, result.body);
       }
-      if (route === '/dbeaver/import') {
-        const result = await importDatasources(payload)
-        return sendJson(response, result.status, result.body)
+      if (route === "/dbeaver/import") {
+        const result = await importDatasources(payload);
+        return sendJson(response, result.status, result.body);
       }
-      if (route === '/settings') {
+      if (route === "/settings") {
         const settings = await writeSettings({
           allowWrite: payload.allowWrite,
           auditLog: payload.auditLog,
@@ -2442,109 +3185,167 @@ export function createHost(options = {}) {
           textPolicy: payload.textPolicy,
           httpEnabled: payload.httpEnabled,
           httpPort: payload.httpPort,
-        })
-        if (!settings) return sendJson(response, 400, { ok: false, error: 'httpPort must be an integer between 1024 and 65535' })
+        });
+        if (!settings)
+          return sendJson(response, 400, {
+            ok: false,
+            error: "httpPort must be an integer between 1024 and 65535",
+          });
         if (
           payload.allowWrite !== undefined ||
           payload.disabledTools !== undefined ||
           payload.limits !== undefined ||
           payload.textPolicy !== undefined
         ) {
-          void bridge.restart().catch(() => {})
+          void bridge.restart().catch(() => {});
         }
         /* `allowWrite` is read by the Python child when it starts, so the HTTP
            process has to be replaced too — restarting only the stdio one leaves
            every outside client on the old answer. The stdio restart above and
            this one are independent; neither waits for the other. */
-        if (payload.allowWrite !== undefined || payload.textPolicy !== undefined) {
-          void bridge.restartHttp().catch(() => {})
+        if (
+          payload.allowWrite !== undefined ||
+          payload.textPolicy !== undefined
+        ) {
+          void bridge.restartHttp().catch(() => {});
         }
-        return sendJson(response, 200, { ok: true, settings })
+        return sendJson(response, 200, { ok: true, settings });
       }
-      if (route === '/scopes') {
-        const result = await setSessionScope(payload.session, payload.datasources)
-        if (result.error) return sendJson(response, 400, { ok: false, error: result.error })
-        const described = await describeScopes(result)
+      if (route === "/scopes") {
+        const result = await setSessionScope(
+          payload.session,
+          payload.datasources,
+        );
+        if (result.error)
+          return sendJson(response, 400, { ok: false, error: result.error });
+        const described = await describeScopes(result);
         return sendJson(response, 200, {
           ok: true,
-          session: String(payload.session || ''),
+          session: String(payload.session || ""),
           datasources: result.ids,
           sessions: described.sessions,
           archived: described.archived,
-        })
+        });
       }
-      if (route === '/scopes/delete') {
-        const result = await removeSessionScopes([payload.session])
-        const described = await describeScopes(result)
+      if (route === "/scopes/delete") {
+        const result = await removeSessionScopes([payload.session]);
+        const described = await describeScopes(result);
         return sendJson(response, 200, {
           ok: true,
           removed: result.removed,
           sessions: described.sessions,
           archived: described.archived,
-        })
+        });
       }
-      if (route === '/scopes/clear') {
-        const result = await clearSessionScopes()
-        return sendJson(response, 200, { ok: true, removed: result.removed, sessions: [], archived: [] })
+      if (route === "/scopes/clear") {
+        const result = await clearSessionScopes();
+        return sendJson(response, 200, {
+          ok: true,
+          removed: result.removed,
+          sessions: [],
+          archived: [],
+        });
       }
-      if (route === '/python/setup') {
-        const result = await setupPython()
-        return sendJson(response, result.status, result.body)
+      if (route === "/python/setup") {
+        const result = await setupPython();
+        return sendJson(response, result.status, result.body);
       }
-      if (route === '/http/start') {
-        const current = await readSettings()
-        const port = Number(payload.port) || current.httpPort
-        const saved = await writeSettings({ httpPort: port })
-        if (!saved) return sendJson(response, 400, { ok: false, error: `port must be between ${HTTP_PORT_MIN} and ${HTTP_PORT_MAX}` })
-        const http = await bridge.startHttp({ port: saved.httpPort })
-        const ok = http.running === true
-        return sendJson(response, ok ? 200 : 500, { ok, http, settings: saved })
+      if (route === "/http/start") {
+        const current = await readSettings();
+        const port = Number(payload.port) || current.httpPort;
+        const saved = await writeSettings({ httpPort: port });
+        if (!saved)
+          return sendJson(response, 400, {
+            ok: false,
+            error: `port must be between ${HTTP_PORT_MIN} and ${HTTP_PORT_MAX}`,
+          });
+        const http = await bridge.startHttp({ port: saved.httpPort });
+        const ok = http.running === true;
+        return sendJson(response, ok ? 200 : 500, {
+          ok,
+          http,
+          settings: saved,
+        });
       }
-      if (route === '/http/stop') {
-        const http = bridge.stopHttp()
-        return sendJson(response, 200, { ok: true, http })
+      if (route === "/http/stop") {
+        const http = bridge.stopHttp();
+        return sendJson(response, 200, { ok: true, http });
       }
-      if (route === '/clients/configure') {
-        const result = await configureClient(payload)
-        return sendJson(response, result.status, result.body)
+      if (route === "/clients/configure") {
+        const result = await configureClient(payload);
+        return sendJson(response, result.status, result.body);
       }
-      if (route === '/mcp/start' || route === '/mcp/restart') {
-        const state = route === '/mcp/start' ? await ensureMcp() : await bridge.restart().catch((error) => ({ ...bridge.status(), phase: 'failed', error: String((error && error.message) || error) }))
-        return sendJson(response, state.phase === 'ready' ? 200 : 500, { ok: state.phase === 'ready', ...state })
+      if (route === "/mcp/start" || route === "/mcp/restart") {
+        const state =
+          route === "/mcp/start"
+            ? await ensureMcp()
+            : await bridge
+                .restart()
+                .catch((error) => ({
+                  ...bridge.status(),
+                  phase: "failed",
+                  error: String((error && error.message) || error),
+                }));
+        return sendJson(response, state.phase === "ready" ? 200 : 500, {
+          ok: state.phase === "ready",
+          ...state,
+        });
       }
-      if (route === '/mcp/call') {
-        const tool = trimmed(payload.tool)
-        if (!tool) return sendJson(response, 400, { ok: false, error: 'tool is required' })
+      if (route === "/mcp/call") {
+        const tool = trimmed(payload.tool);
+        if (!tool)
+          return sendJson(response, 400, {
+            ok: false,
+            error: "tool is required",
+          });
         try {
-          const state = await ensureMcp()
-          if (state.phase !== 'ready') return sendJson(response, 500, { ok: false, error: state.error || 'server not running', ...state })
-          const callArgs = payload.arguments && typeof payload.arguments === 'object' ? { ...payload.arguments } : {}
-          const source = trimmed(payload.datasource)
-          if (source && callArgs.datasource === undefined) callArgs.datasource = source
-          const result = await bridge.call(tool, callArgs, { client: 'panel' })
-          return sendJson(response, 200, { ok: true, ...result })
+          const state = await ensureMcp();
+          if (state.phase !== "ready")
+            return sendJson(response, 500, {
+              ok: false,
+              error: state.error || "server not running",
+              ...state,
+            });
+          const callArgs =
+            payload.arguments && typeof payload.arguments === "object"
+              ? { ...payload.arguments }
+              : {};
+          const source = trimmed(payload.datasource);
+          if (source && callArgs.datasource === undefined)
+            callArgs.datasource = source;
+          const result = await bridge.call(tool, callArgs, { client: "panel" });
+          return sendJson(response, 200, { ok: true, ...result });
         } catch (error) {
-          return sendJson(response, 500, { ok: false, error: String((error && error.message) || error) })
+          return sendJson(response, 500, {
+            ok: false,
+            error: String((error && error.message) || error),
+          });
         }
       }
-      return sendJson(response, 404, { ok: false, error: `unknown route: ${method} ${route}` })
+      return sendJson(response, 404, {
+        ok: false,
+        error: `unknown route: ${method} ${route}`,
+      });
     } catch (error) {
-      return sendJson(response, 500, { ok: false, error: String((error && error.message) || error) })
+      return sendJson(response, 500, {
+        ok: false,
+        error: String((error && error.message) || error),
+      });
     }
   }
 
   // Publish the MCP tools as soon as the host half mounts, so the agent can use
   // them even if nobody opens the Data sources panel.
-  void ensureMcp()
+  void ensureMcp();
 
   // A runtime directory written by an older build keeps plaintext passwords in
   // secrets.json; seal them on first mount so the file stops carrying them.
-  void migrateSecrets().catch(() => null)
+  void migrateSecrets().catch(() => null);
 
   // A registry from the allow/deny build leaves a `schemas` key, and one from
   // the writable-schemas build leaves `writableSchemas`. Both are dropped here
   // so the panel never reads a field that no longer means anything.
-  void migrateSchemas().catch(() => null)
+  void migrateSchemas().catch(() => null);
 
   // Outside clients (VS Code, Cursor, Codex) need a URL rather than stdio, so the
   // HTTP half starts too unless the user switched it off in settings. It only
@@ -2552,13 +3353,17 @@ export function createHost(options = {}) {
   // leave a Python child behind that keeps the process alive.
   if (options.ctx) {
     void readSettings()
-      .then((settings) => (settings.httpEnabled ? bridge.startHttp({ port: settings.httpPort }) : null))
-      .catch(() => null)
+      .then((settings) =>
+        settings.httpEnabled
+          ? bridge.startHttp({ port: settings.httpPort })
+          : null,
+      )
+      .catch(() => null);
   }
 
   // A disposed or archived conversation must not leave a limit behind that the
   // panel can never show again.
-  const stopWatchingSessions = watchSessionLifecycle()
+  const stopWatchingSessions = watchSessionLifecycle();
 
   return {
     version: PLUGIN_VERSION,
@@ -2575,8 +3380,8 @@ export function createHost(options = {}) {
       testProfile,
     },
     dispose: async () => {
-      if (typeof stopWatchingSessions === 'function') stopWatchingSessions()
-      await bridge.dispose()
+      if (typeof stopWatchingSessions === "function") stopWatchingSessions();
+      await bridge.dispose();
     },
-  }
+  };
 }

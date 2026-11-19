@@ -86,8 +86,8 @@ report of each version in more detail.
 
 - **Conversation limits are visible and removable on the data source list.** The
   limits an agent sets through `session_scope` are written by the agent and were
-  otherwise permanent — the panel had no way to show or lift one. A *Conversation
-  limits* card now sits under the source list, next to the global write switch: both
+  otherwise permanent — the panel had no way to show or lift one. A _Conversation
+  limits_ card now sits under the source list, next to the global write switch: both
   answer who may touch which data. It gives every conversation a remove button and
   the whole set a "Clear all", and a conversation that is disposed or archived loses
   its limit automatically, so the list cannot grow forever. With no limit in place the
@@ -118,7 +118,7 @@ report of each version in more detail.
 
 - **The conversation-limit card left the Tools tab.** It had been folded in under the
   tool list, where a setting that only the agent writes is the last thing anyone looks
-  for. It now lives on the *Data source list* tab with the global write switch, since
+  for. It now lives on the _Data source list_ tab with the global write switch, since
   both answer the same question — who may touch which data — and the Tools tab is back
   to being about tools.
 
@@ -164,7 +164,7 @@ report of each version in more detail.
 
 - **A DBeaver connection behind an SSH tunnel was imported as if it were local.**
   DBeaver keeps the tunnel in `configuration.handlers` and writes the tunnel's
-  *local* end into the connection fields, so the import produced a source pointing
+  _local_ end into the connection fields, so the import produced a source pointing
   at `localhost` — it failed, or worse, reached an unrelated local server while the
   panel said the import succeeded. The importer now reads `handlers` first and
   reports the entry as not importable, naming the handler it found. Proxy handlers
@@ -181,13 +181,13 @@ report of each version in more detail.
 
 - **`SET` and `PRAGMA` no longer count as reads by themselves.** Both were in the
   read whitelist, so `pragma journal_mode = wal` or `set default_transaction_read_only
-  = off` passed on a read-only source. Each engine now has a short list of settings a
+= off` passed on a read-only source. Each engine now has a short list of settings a
   read-only source may change — `search_path` and friends on PostgreSQL, `names` and
   the charset settings on MySQL, the reporting pragmas on SQLite — and anything else
   is treated as a change and refused.
 
 - **A CTE that changes rows was rolled back as if it were a read.** `with gone as
-  (delete from orders where id = 1 returning id) select * from gone` starts with
+(delete from orders where id = 1 returning id) select * from gone` starts with
   `with`, so it was treated as a read and the surrounding transaction was rolled
   back: the agent was told the write succeeded while the rows stayed put. A CTE whose
   body contains `insert`, `update`, `delete` or `merge` now counts as a write, goes
@@ -198,7 +198,7 @@ report of each version in more detail.
   plans, but `EXPLAIN ANALYZE` runs the statement it wraps — including a `DELETE`.
   The inner statement now decides.
 
-## [0.9.10] - 2026-11-16
+## [1.0.0] - 2026-11-16
 
 ### Fixed
 
@@ -243,7 +243,7 @@ report of each version in more detail.
 
 ### Changed
 
-- **The panel is called *Data sources***, in the sidebar entry, the heading, the
+- **The panel is called _Data sources_**, in the sidebar entry, the heading, the
   plugin card and the hints the Python server returns. The old name described the
   thing being connected rather than the thing being managed.
 - **The row switch is a switch.** Read-only / writable used to be a pill that shared
@@ -256,7 +256,7 @@ report of each version in more detail.
   rings are visible on the field, notices read as a bar rather than a box, and the
   tabs wrap instead of clipping the last one.
 - **Tool rows are tighter**, and each tool has the same switch as a data source. The
-  *Tools* tab now says that its list is DSH-only: a client connected to the HTTP
+  _Tools_ tab now says that its list is DSH-only: a client connected to the HTTP
   endpoint still sees every tool, because the filter lives in the plugin.
 - **Audit statements are readable**: each SQL statement sits in its own recessed block
   with a blue left rule (red when the call failed) and scrolls past about a dozen
@@ -404,8 +404,8 @@ Documentation release.
 
 ### Changed
 
-- The guide spells out the two commands behind the panel's *Install / repair
-  dependencies* button, so a failed environment can be fixed by hand.
+- The guide spells out the two commands behind the panel's _Install / repair
+  dependencies_ button, so a failed environment can be fixed by hand.
 - The download badge was removed; the install command is the count that matters.
 
 ## [0.9.2] - 2026-11-10
@@ -457,7 +457,7 @@ The panel became a connection manager, and a source can only exist once.
 
 ### Changed
 
-- **Restart MCP** moved to the *Runtime* tab, where the process actually lives; probe
+- **Restart MCP** moved to the _Runtime_ tab, where the process actually lives; probe
   failures stay in the row they belong to instead of repeating in a banner.
 - Runtime rows use the same card treatment as audit entries, and audit times carry the
   date on your own clock (the file keeps UTC).
@@ -485,7 +485,7 @@ The panel became a connection manager, and a source can only exist once.
   shows `h1 +2:30100`.
 - The structure view sends the table schema, so tables sharing a name across schemas stop
   colliding, and its tree groups by schema with folding and a filter.
-- The DBeaver import pins its action bar, keeps *Import selected* in it, and filters
+- The DBeaver import pins its action bar, keeps _Import selected_ in it, and filters
   connections by name, host or user.
 
 ### Fixed
@@ -524,7 +524,7 @@ No behaviour change: `server/`, `src/` and `client.js` are untouched.
   `DELETE` / `DDL` and returns `affectedRows` — the old name implied SELECT only.
   Prompts that name the old tool need the new name.
 - Install commands lost the `@latest` suffix: `dsh plugin --profile desktop add
-  dsh-db-mcp` already resolves the newest version pnpm's cooldown allows.
+dsh-db-mcp` already resolves the newest version pnpm's cooldown allows.
 - New `docs/guide.md`, `docs/reference.md` and `docs/development.md`; the old
   requirements document became `docs/design-notes.md` (a design log, not user
   documentation). Both READMEs lead with the zero-configuration story and link out.
@@ -590,8 +590,8 @@ it shipped as a single unreleased tree.
 - Read-only by default; a source becomes writable only when you say so.
 - Publishing through npm trusted publishing, so no token lives in the repository.
 
-[Unreleased]: https://github.com/halcyon6669/dsh-db-mcp/compare/v0.9.10...HEAD
-[0.9.10]: https://github.com/halcyon6669/dsh-db-mcp/compare/v0.9.9...v0.9.10
+[Unreleased]: https://github.com/halcyon6669/dsh-db-mcp/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/halcyon6669/dsh-db-mcp/compare/v0.9.9...v1.0.0
 [0.9.9]: https://github.com/halcyon6669/dsh-db-mcp/compare/v0.9.8...v0.9.9
 [0.9.8]: https://github.com/halcyon6669/dsh-db-mcp/compare/v0.9.7...v0.9.8
 [0.9.7]: https://github.com/halcyon6669/dsh-db-mcp/compare/v0.9.6...v0.9.7
