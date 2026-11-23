@@ -21,6 +21,15 @@ report of each version in more detail.
 
 ## [Unreleased]
 
+### Added
+
+- **The audit log loads more as you scroll.** The panel used to show only the
+  newest 12 calls with no way to reach the older ones. A **Load more** button now
+  sits at the bottom of the audit card while entries remain, fetching the next
+  page without losing the ones on screen; it disappears once every stored line is
+  shown. `GET /audit` now returns a `total` alongside the page so the panel knows
+  when to stop.
+
 ## [1.0.0] - 2026-11-19
 
 ### Added

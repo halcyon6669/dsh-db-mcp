@@ -60,6 +60,7 @@ try {
 
   const empty = await get('/audit?limit=5')
   check('empty audit log is not an error', Array.isArray(empty.body.entries) && empty.body.entries.length === 0)
+  check('empty audit log reports a zero total', empty.body.total === 0)
   check('audit file path reported', empty.body.file === join(dir, 'logs', 'audit.jsonl'))
 
   await writeFile(
@@ -73,9 +74,11 @@ try {
   )
   const listing = await get('/audit?limit=5')
   check('audit entries parse newest first', listing.body.entries.length === 2 && listing.body.entries[0].tool === 'mcp__db__execute_sql')
+  check('audit total counts every line, not just the page', listing.body.total === 2)
   check('failed entry keeps its error', listing.body.entries[0].error === 'boom')
   const limited = await get('/audit?limit=1')
   check('limit is honoured', limited.body.entries.length === 1)
+  check('total stays accurate when the page is smaller', limited.body.total === 2)
 
   const env = await get('/python/env')
   check(

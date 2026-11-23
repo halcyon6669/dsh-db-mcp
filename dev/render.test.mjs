@@ -450,6 +450,13 @@ check('audit caller: it is quieter than the tool pill', /color: var\(--dsw-alias
 check('audit caller: a long client name is cut, not wrapped', /text-overflow: ellipsis/.test(auditClientRule) && /white-space: nowrap/.test(auditClientRule))
 check('audit caller: the meaning is on hover', /audit\.clientHint/.test(source))
 
+// The log can hold up to 200 lines but the panel only shows a page at a time,
+// so a "load more" button sits at the bottom until every entry is on screen.
+check('audit paging: a load-more button is wired to a handler', /className: 'dbmcp-btn is-small dbmcp-audit-more'/.test(source) && /onClick: loadMoreAudit/.test(source))
+check('audit paging: the button hides once every entry is shown', /audit\.entries\.length < audit\.total/.test(source))
+check('audit paging: a page is fetched with a bounded limit', /const AUDIT_PAGE = 12/.test(source) && /Math\.min\(200, audit\.entries\.length \+ AUDIT_PAGE\)/.test(source))
+check('audit paging: the button reports a busy state', /auditBusy \? t\('audit\.loadingMore'\) : t\('audit\.loadMore'\)/.test(source))
+
 // The tools card used to answer with a checkbox while every other on/off in the
 // panel was a track switch. Same control now, so "on" looks the same everywhere;
 // the checkbox class is gone rather than left behind unused.

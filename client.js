@@ -266,6 +266,8 @@ window.__ModuleLoader__.load({
         'audit.hint': 'One line per MCP tool call: tool, caller, source, duration and outcome. Query results are never logged.',
         'audit.clientHint': 'The program that made the call: dsh-agent, panel, or the name the MCP client gave when it connected.',
         'audit.rows': '{n} row(s)',
+        'audit.loadMore': 'Load more',
+        'audit.loadingMore': 'Loading…',
         'audit.tz': 'Times follow your computer clock ({zone}); the log file keeps UTC.',
         'action.lockSource': 'Click to make this source read-only',
         'action.unlockSource': 'Click to allow writes on this source',
@@ -546,6 +548,8 @@ window.__ModuleLoader__.load({
         'audit.hint': '每次 MCP 工具调用记一行：工具、调用方、数据源、耗时与结果。查询结果不会被记录。',
         'audit.clientHint': '发起这次调用的程序：dsh-agent、panel，或者 MCP 客户端连接时报上的名字。',
         'audit.rows': '{n} 行',
+        'audit.loadMore': '加载更多',
+        'audit.loadingMore': '加载中…',
         'audit.tz': '时间按本机时区显示（{zone}），日志文件里存的是 UTC。',
         'action.lockSource': '点击改为只读',
         'action.unlockSource': '点击允许写',
@@ -1145,6 +1149,10 @@ window.__ModuleLoader__.load({
         border-left-color: color-mix(in srgb, var(--dsw-alias-state-error-primary) 65%, transparent);
         background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 7%, var(--dsw-alias-bg-base));
         color: var(--dsw-alias-state-error-primary);
+      }
+      .dbmcp-audit-more {
+        align-self: center;
+        margin: 2px 0 4px;
       }
       .dbmcp-schema-wrap {
         display: flex;
@@ -4598,8 +4606,10 @@ function groupTables(tables) {
           /* older shells may not expose selectPanel; staying on the panel is fine */
         }
       }
+      const AUDIT_PAGE = 12
       const [settings, setSettings] = React.useState(null)
-      const [audit, setAudit] = React.useState({ entries: [], file: null })
+      const [audit, setAudit] = React.useState({ entries: [], total: 0, file: null })
+      const [auditBusy, setAuditBusy] = React.useState(false)
       const [env, setEnv] = React.useState(null)
       const [installing, setInstalling] = React.useState(false)
       const [scopes, setScopes] = React.useState(null)
@@ -4616,8 +4626,14 @@ function groupTables(tables) {
           const data = await apiGet('/health')
           setState({ status: 'ready', data, error: null })
           if (data.settings) setSettings(data.settings)
-          void apiGet('/audit?limit=12')
-            .then((payload) => setAudit({ entries: payload.entries || [], file: payload.file || null }))
+          void apiGet(`/audit?limit=${AUDIT_PAGE}`)
+            .then((payload) =>
+              setAudit({
+                entries: payload.entries || [],
+                total: payload.total || 0,
+                file: payload.file || null,
+              }),
+            )
             .catch(() => {})
           void apiGet('/python/env')
             .then((payload) => setEnv(payload))
@@ -4644,6 +4660,27 @@ function groupTables(tables) {
       React.useEffect(() => {
         load()
       }, [load])
+
+      /* The audit log can hold up to 200 lines. readAudit always returns the
+         newest `limit`, so asking for a bigger limit and taking the tail keeps
+         the same newest-first order while revealing older entries. */
+      const loadMoreAudit = React.useCallback(async () => {
+        if (auditBusy) return
+        setAuditBusy(true)
+        try {
+          const next = Math.min(200, audit.entries.length + AUDIT_PAGE)
+          const payload = await apiGet(`/audit?limit=${next}`)
+          setAudit({
+            entries: payload.entries || [],
+            total: payload.total || 0,
+            file: payload.file || null,
+          })
+        } catch {
+          /* keep the entries already on screen */
+        } finally {
+          setAuditBusy(false)
+        }
+      }, [audit.entries.length, auditBusy])
 
       const data = state.data
       const apiOk = state.status === 'ready' && data && data.ok === true
@@ -6170,6 +6207,18 @@ function groupTables(tables) {
                       entry.error ? h('code', { className: 'dbmcp-audit-sql is-error' }, entry.error) : null,
                     ),
                   ),
+              audit.entries.length < audit.total
+                ? h(
+                    'button',
+                    {
+                      type: 'button',
+                      className: 'dbmcp-btn is-small dbmcp-audit-more',
+                      disabled: auditBusy,
+                      onClick: loadMoreAudit,
+                    },
+                    auditBusy ? t('audit.loadingMore') : t('audit.loadMore'),
+                  )
+                : null,
               h('p', { className: 'dbmcp-hint' }, t('audit.hint')),
               h('p', { className: 'dbmcp-hint' }, t('audit.tz').replace('{zone}', zoneLabel())),
               audit.file ? h('p', { className: 'dbmcp-hint' }, `${t('audit.file')}: ${audit.file}`) : null,

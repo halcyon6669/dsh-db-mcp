@@ -1870,8 +1870,10 @@ function groupTables(tables) {
           /* older shells may not expose selectPanel; staying on the panel is fine */
         }
       }
+      const AUDIT_PAGE = 12
       const [settings, setSettings] = React.useState(null)
-      const [audit, setAudit] = React.useState({ entries: [], file: null })
+      const [audit, setAudit] = React.useState({ entries: [], total: 0, file: null })
+      const [auditBusy, setAuditBusy] = React.useState(false)
       const [env, setEnv] = React.useState(null)
       const [installing, setInstalling] = React.useState(false)
       const [scopes, setScopes] = React.useState(null)
@@ -1888,8 +1890,14 @@ function groupTables(tables) {
           const data = await apiGet('/health')
           setState({ status: 'ready', data, error: null })
           if (data.settings) setSettings(data.settings)
-          void apiGet('/audit?limit=12')
-            .then((payload) => setAudit({ entries: payload.entries || [], file: payload.file || null }))
+          void apiGet(`/audit?limit=${AUDIT_PAGE}`)
+            .then((payload) =>
+              setAudit({
+                entries: payload.entries || [],
+                total: payload.total || 0,
+                file: payload.file || null,
+              }),
+            )
             .catch(() => {})
           void apiGet('/python/env')
             .then((payload) => setEnv(payload))
@@ -1916,6 +1924,27 @@ function groupTables(tables) {
       React.useEffect(() => {
         load()
       }, [load])
+
+      /* The audit log can hold up to 200 lines. readAudit always returns the
+         newest `limit`, so asking for a bigger limit and taking the tail keeps
+         the same newest-first order while revealing older entries. */
+      const loadMoreAudit = React.useCallback(async () => {
+        if (auditBusy) return
+        setAuditBusy(true)
+        try {
+          const next = Math.min(200, audit.entries.length + AUDIT_PAGE)
+          const payload = await apiGet(`/audit?limit=${next}`)
+          setAudit({
+            entries: payload.entries || [],
+            total: payload.total || 0,
+            file: payload.file || null,
+          })
+        } catch {
+          /* keep the entries already on screen */
+        } finally {
+          setAuditBusy(false)
+        }
+      }, [audit.entries.length, auditBusy])
 
       const data = state.data
       const apiOk = state.status === 'ready' && data && data.ok === true
@@ -3442,6 +3471,18 @@ function groupTables(tables) {
                       entry.error ? h('code', { className: 'dbmcp-audit-sql is-error' }, entry.error) : null,
                     ),
                   ),
+              audit.entries.length < audit.total
+                ? h(
+                    'button',
+                    {
+                      type: 'button',
+                      className: 'dbmcp-btn is-small dbmcp-audit-more',
+                      disabled: auditBusy,
+                      onClick: loadMoreAudit,
+                    },
+                    auditBusy ? t('audit.loadingMore') : t('audit.loadMore'),
+                  )
+                : null,
               h('p', { className: 'dbmcp-hint' }, t('audit.hint')),
               h('p', { className: 'dbmcp-hint' }, t('audit.tz').replace('{zone}', zoneLabel())),
               audit.file ? h('p', { className: 'dbmcp-hint' }, `${t('audit.file')}: ${audit.file}`) : null,

@@ -511,6 +511,10 @@
         background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 7%, var(--dsw-alias-bg-base));
         color: var(--dsw-alias-state-error-primary);
       }
+      .dbmcp-audit-more {
+        align-self: center;
+        margin: 2px 0 4px;
+      }
       .dbmcp-schema-wrap {
         display: flex;
         flex-direction: column;

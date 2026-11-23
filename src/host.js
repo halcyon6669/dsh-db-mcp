@@ -1809,8 +1809,8 @@ export function createHost(options = {}) {
     try {
       raw = await readFile(auditFile, "utf8");
     } catch (error) {
-      if (error && error.code === "ENOENT") return { entries: [], error: null };
-      return { entries: [], error: String((error && error.message) || error) };
+      if (error && error.code === "ENOENT") return { entries: [], total: 0, error: null };
+      return { entries: [], total: 0, error: String((error && error.message) || error) };
     }
     const entries = [];
     for (const line of raw.split("\n")) {
@@ -1823,6 +1823,7 @@ export function createHost(options = {}) {
     }
     return {
       entries: entries.slice(-Math.max(1, Math.min(200, limit))).reverse(),
+      total: entries.length,
       error: null,
     };
   }
