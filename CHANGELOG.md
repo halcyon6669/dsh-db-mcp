@@ -30,6 +30,10 @@ report of each version in more detail.
   `trace_by_key` fail its entry probe. The name is now resolved against the
   catalogue when exactly one schema holds it; an ambiguous name keeps the old
   behaviour rather than reading the wrong table.
+- **A self-referencing edge is walked in both directions.** `_incident` used one
+  `if/elif`, so a table appearing on both sides of its own edge (`parent_id ->
+  ticket.id`) only reported the `from` half: every parent/child hierarchy could be
+  climbed or descended, never both. Both halves are reported now.
 
 ## [1.1.0] - 2026-11-25
 

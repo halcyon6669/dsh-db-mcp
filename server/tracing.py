@@ -80,15 +80,22 @@ def _incident(edges, table: str) -> list[tuple]:
     The tuple is (edge, side, here, there): `here` is the endpoint in `table`,
     `there` the endpoint in the other table. `side` says which side of the edge
     `table` sits on, which is what the direction filter needs.
+
+    A self-reference (`ticket.parent_id -> ticket.id`) touches the same table on
+    both sides, so it is reported twice — once per side. Reporting only the
+    `from` side would make every parent/child hierarchy untraceable, because the
+    walker would never see the half that leads to the children.
     """
     wanted = _fold(table)
     found = []
     for edge in edges:
         frm = edge.get("from") or {}
         to = edge.get("to") or {}
-        if _fold(frm.get("table")) == wanted:
+        on_from = _fold(frm.get("table")) == wanted
+        on_to = _fold(to.get("table")) == wanted
+        if on_from:
             found.append((edge, "from", frm, to))
-        elif _fold(to.get("table")) == wanted:
+        if on_to:
             found.append((edge, "to", to, frm))
     return found
 

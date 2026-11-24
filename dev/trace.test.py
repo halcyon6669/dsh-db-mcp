@@ -41,6 +41,7 @@ create table t_order (id integer primary key, code text);
 create table t_trans (id integer primary key, order_id integer references t_order(id), state text);
 create table t_line (id integer primary key, trans_id integer references t_trans(id), sku text);
 create table t_orphan (id integer primary key, note text);
+create table t_node (id integer primary key, parent_id integer references t_node(id), name text);
 create index t_order_code on t_order(code);
 """
 
@@ -49,6 +50,7 @@ insert into t_order (id, code) values (1, 'A001'), (2, 'A002');
 insert into t_trans (id, order_id, state) values (10, 1, 'POSTED'), (11, 1, 'DRAFT'), (12, 2, 'POSTED');
 insert into t_line (id, trans_id, sku) values (100, 10, 'SKU-1'), (101, 10, 'SKU-2'), (102, 11, 'SKU-3');
 insert into t_orphan (id, note) values (1, 'nobody points here');
+insert into t_node (id, parent_id, name) values (1, null, 'root'), (2, 1, 'child'), (3, 2, 'grandchild'), (4, 3, 'great');
 """
 
 
@@ -276,6 +278,33 @@ class TraceOnARealDatabase(unittest.TestCase):
         # The same (table, column) may legitimately come back with a different
         # value; the guard is per value, not per column.
         self.assertGreater(len({(table, column) for table, column, _ in visited}), 1)
+
+    # -- self references ---------------------------------------------------
+
+    def test_a_self_reference_walks_both_ways(self):
+        # `t_node.parent_id -> t_node.id` touches one table on both sides. The
+        # walker must see both halves, or a hierarchy can only be climbed or only
+        # descended, never both.
+        self._edge("t_node", "parent_id", "t_node", "id", status="confirmed")
+        down = self._trace("1", entry_table="t_node", entry_column="id", direction="down", max_depth=4)
+        self.assertEqual(down["summary"]["tablesHit"], 1, down["summary"])
+        self.assertIn("parent_id", [step["condition"]["column"] for step in down["steps"]])
+        self.assertGreaterEqual(down["steps"][-1]["depth"], 1)
+        reached = [str(item) for step in down["steps"] for item in step["condition"]["binds"]]
+        self.assertIn("2", reached, "the child must be reachable from the parent")
+
+        up = self._trace("4", entry_table="t_node", entry_column="id", direction="up", max_depth=4)
+        self.assertIn("id", [step["condition"]["column"] for step in up["steps"]])
+        self.assertEqual(up["steps"][-1]["depth"], 3, "four rows means three hops to the root")
+
+    def test_a_self_reference_does_not_walk_the_same_value_twice(self):
+        self._edge("t_node", "parent_id", "t_node", "id", status="confirmed")
+        result = self._trace("1", entry_table="t_node", entry_column="id", direction="both", max_depth=6)
+        seen = [
+            (step["table"], step["condition"]["column"], tuple(str(item) for item in step["condition"]["binds"]))
+            for step in result["steps"]
+        ]
+        self.assertEqual(len(seen), len(set(seen)), seen)
 
     # -- conditions -------------------------------------------------------
 
