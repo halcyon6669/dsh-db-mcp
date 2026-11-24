@@ -36,6 +36,14 @@ are `GET`; every mutation is `POST` (the same-origin check compares `Origin` wit
 | `POST /groups/save` · `POST /groups/delete` | create, rename (`from`) or delete a group |
 | `POST /dbeaver/import` | copy selected DBeaver connections into the registry |
 | `POST /mcp/start` · `POST /mcp/restart` | start or restart the Python MCP server |
+| `GET /relations?datasource=…[&status=…][&source=…]` | the relation graph of one datasource: every edge with its endpoints, source, status, condition, counters and history, plus `counts` over the whole graph (the filter never shrinks the counters) |
+| `POST /relations/discover` | import the foreign keys the catalog declares (`{ datasource, schema? }`) |
+| `POST /relations/propose` | record a join the catalog does not declare (`{ from_table, from_column, to_table, to_column, datasource?, condition?, note? }`); it starts out `pending` |
+| `POST /relations/feedback` | move one edge (`{ edge_id, verdict, reason?, note?, datasource?, fanout? }`); `verdict` is `ok`, `too_many`, `missing` or `irrelevant` |
+| `POST /relations/condition` | attach or clear the extra predicate a join needs (`{ edge_id, condition, datasource? }`; an empty condition clears it) |
+| `POST /relations/delete` | remove one edge (`{ edge_id, datasource? }`) |
+| `POST /relations/mine` | mine joins out of the audit log (`{ datasource?, schema?, limit? }`) |
+| `POST /trace` | follow one value across tables (`{ value, datasource?, entry_table?, entry_column?, max_depth?, max_rows_per_table?, direction? }`) — a read-only walk, never a SQL entry point |
 | `POST /mcp/call` | dev helper: call one MCP tool through the panel |
 | `POST /reload` | dev helper: re-import `src/host.js` without restarting DSH |
 
@@ -97,8 +105,15 @@ memory before `max_rows` trims it; writes keep the ordinary cursor.
 | ---- | ---------- | ------- |
 | `list_datasources` | — | `[{ id, name, kind, target, readOnly, isDefault }]` |
 | `list_tables` | `datasource?`, `schema?` | `{ datasource, tables: [{ schema, name, type }], schemas: [string] }` |
-| `describe_table` | `table`, `datasource?`, `schema?` | `{ columns: [{ name, type, nullable, default, primaryKey, comment? }], primaryKey, foreignKeys, indexes, comment, rowEstimate }` |
-| `list_relations` | `datasource?`, `schema?` | `{ relations: [{ table, column, refTable, refColumn, name }], truncated, total }` |
+| `describe_table` | `table`, `datasource?`, `schema?` | `{ columns: [{ name, type, nullable, default, primaryKey, comment? }], primaryKey, indexes, comment, rowEstimate }` |
+| `list_edges` | `datasource?`, `status?`, `source?` | `{ edges: [{ id, from, to, source, status, condition, note, stats, createdAt, updatedAt }], counts, total, truncated }` |
+| `propose_relation` | `from_table`, `from_column`, `to_table`, `to_column`, `datasource?`, `condition?`, `note?` | `{ edge, created, reopened }` — the edge starts as `pending` |
+| `discover_relations` | `datasource?`, `schema?` | `{ imported, updated, skipped, edges, counts }` — imports the declared foreign keys into the graph |
+| `mine_relations` | `datasource?`, `schema?`, `limit=20` | `{ mined, ambiguous, imported, updated, skipped, edges, counts }` — mines joins out of the audit log; see below |
+| `feedback_relation` | `edge_id`, `verdict`, `reason?`, `note?`, `datasource?`, `fanout?` | `{ edge, previousStatus, indexed, unique }` — `verdict` is `ok`, `too_many`, `missing` or `irrelevant`; see below |
+| `set_relation_condition` | `edge_id`, `condition?`, `datasource?` | `{ edge, changed }` — an empty `condition` clears it |
+| `delete_edge` | `edge_id`, `datasource?` | `{ deleted, counts }` |
+| `trace_by_key` | `value`, `datasource?`, `entry_table?`, `entry_column?`, `max_depth=3`, `max_rows_per_table=20`, `direction=both` | `{ value, direction, elapsedMs, entry, summary, steps, pending, warnings, stoppedAt }` — walks only `confirmed` and `trusted` edges; see below |
 | `sample_rows` | `table`, `datasource?`, `limit=20`, `schema?` | `{ columns, rows, rowCount, truncated }` |
 | `execute_sql` | `sql`, `datasource?`, `max_rows?`, `full_text?` | `{ columns, rows, rowCount, truncated, elapsedMs }`, or `{ affectedRows }` for a write |
 | `explain_query` | `sql`, `datasource?` | `{ sql, plan }` (engine-specific text) |
@@ -106,7 +121,7 @@ memory before `max_rows` trims it; writes keep the ordinary cursor.
 | `test_connection` | `datasource?` or `kind`+`config`+`password?`, `read_only?` | `{ ok, latencyMs, message, detail: { stage, server, database, user, schema } }` |
 | `session_scope` | `datasources?`, `all?` | the limit saved for this conversation; `all: true` or an empty list lifts it |
 
-`session_scope` is not an MCP tool: the Host registers it next to the nine bridged
+`session_scope` is not an MCP tool: the Host registers it next to the sixteen bridged
 ones so a conversation can narrow itself. While a limit is saved for the calling
 conversation, `list_datasources` only returns the allowed rows, a call that names
 another source fails with `user_error`, and a call that omits `datasource` either
@@ -214,6 +229,145 @@ Windows refuses the requested one, and the panel shows the port actually in use)
 
 A conversation missing from that map, or listed with an empty `ids`, may use every
 data source.
+
+`relations/<sourceId>.json` holds the relation graph of one datasource — the only
+place that answers "what joins what". An inline source gets `inline-<hash>.json`.
+The Python child owns these files; the panel never writes them, it asks a tool.
+
+```json
+{
+  "schemaVersion": 1,
+  "datasource": "pg-demo",
+  "kind": "postgres",
+  "updatedAt": "…",
+  "edges": [
+    {
+      "id": "e_9c1f2a",
+      "from": { "table": "t_trans", "column": "order_id" },
+      "to": { "table": "t_order", "column": "id" },
+      "source": "fk",
+      "status": "confirmed",
+      "condition": null,
+      "note": "t_trans_order_id_fkey",
+      "stats": { "confirmCount": 8, "rejectCount": 0, "lastVerifiedAt": "…", "avgFanout": 1.0, "hitCount": 8 },
+      "history": [{ "at": "…", "action": "created", "by": "agent", "note": null }],
+      "createdAt": "…",
+      "updatedAt": "…"
+    }
+  ]
+}
+```
+
+`from` is the side that holds the key (the child table), `to` is the side it points
+at. `source` is `fk` (imported from the catalog by `discover_relations`), `manual`
+(proposed by a person or a model), `inferred`, or `audit_mined`. `status` is
+`pending`, `confirmed`, `trusted`, `stale`, or `rejected`; only `confirmed` and
+`trusted` are followed. `condition` narrows a join the key alone does not express
+(`when status = 'POSTED'`). `history` keeps the last 50 actions. A missing file is
+an empty graph, not an error; a corrupt one is reported rather than reset, because
+resetting would throw away joins somebody confirmed by hand.
+
+### How `trace_by_key` walks
+
+`trace_by_key` answers "where does this value appear, and how do those rows
+connect". It starts at one column, then follows graph edges one hop at a time:
+
+- **Entry.** With `entry_table` + `entry_column` it uses exactly that column. With
+  only a value it probes candidates in order — columns the graph already points at,
+  then the primary key, then indexed columns whose name looks like a key — stopping
+  at the first column that holds the value. Probing is capped at 8 columns and 3
+  seconds, and `entry.candidates` reports what was tried.
+- **Direction.** `from` holds the key, `to` is the row it names. Leaving `from` goes
+  `up` to the referenced row; leaving `to` goes `down` to the rows that reference it.
+  `both` does each.
+- **Only confirmed edges.** `pending`, `stale`, and `rejected` edges are never
+  walked. A pending edge that would have continued the walk is listed under
+  `pending` with the reason, so a trace that stops early says why.
+- **The value never enters the SQL text.** Every statement binds it (`?` / `%s` /
+  `:1`), and `condition.binds` carries the real value; `sql` is safe to log.
+- **Bounded.** `max_depth` is clamped to 1–6, `max_rows_per_table` to 1–200, and a
+  step reads one row more than the cap to know it truncated. Revisiting the same
+  `(table, column, value)` stops the walk.
+- **Reported, not hidden.** A step with no rows is `status: "empty"` — the chain
+  breaks there. `warnings` carries `no_edges`, `no_entry`, `probe_timeout`,
+  `probe_failed`, `step_failed`, `depth_limit`, and `step_limit`; `stoppedAt` names
+  the table and reason for each dead end.
+
+### How an edge earns trust
+
+Every edge starts `pending`. `feedback_relation` is how a walk changes that, and
+the verdict decides what happens next:
+
+| Verdict | `reason` | Status becomes | Effect |
+| ------- | -------- | -------------- | ------ |
+| `ok` | — | `confirmed`, or `trusted` once earned | the edge is followed from now on |
+| `too_many` | `wrong_column` / `needs_condition` / `not_unique` | `stale` | stops being followed until fixed |
+| `missing` | — | `stale` | a row that should have been reached was not |
+| `irrelevant` | — | `rejected` | blacklisted; only proposing it again lifts it |
+
+`trusted` is recomputed on every `ok`, never latched, and needs all four: three
+confirmations, no rejection left standing, an indexed or unique reference column
+(read from the catalog, not from the caller), and an average fanout of 5 or less.
+An edge whose fanout later grows, or whose reference column turns out not to be
+indexed, falls back to `confirmed` — which still walks, but stays visible as
+something a person vouched for rather than something measured.
+
+A `stale` edge returns to `pending` when it is proposed again or when
+`discover_relations` finds its key in the catalog; the next trace then has to earn
+its confirmation back. `set_relation_condition` never changes a status on its own,
+so adding a filter cannot silently re-enable a join that was rejected for a reason.
+
+A condition that names a column the table does not have costs the narrowing, not
+the walk: that step is retried without the condition, reports the statement that
+actually ran (`condition.extra` is `null`), and adds a `condition_failed` warning.
+A condition is a guess about a schema; losing a whole trace to a typo in one would
+be worse than losing the filter.
+
+### Mining joins out of the audit log
+
+`discover_relations` can only import what the engine declares, and many schemas
+declare nothing. `mine_relations` reads the statements already in `logs/audit.jsonl`
+— every `execute_sql` and `explain_query` line keeps its `sql` — and turns the
+`on`-clause equalities it finds into candidate pairs. No statement is run again and
+no row data is involved: the log is evidence that someone believed the join, which
+is cheaper than asking and weaker than the catalog.
+
+The statement says the two columns are equal; it does not say which side is the
+parent. That comes from the catalog: the side whose column is a primary key or a
+single-column unique index is the parent (`to`), the other is the child (`from`).
+A pair where neither side looks unique, or where both do, is reported under
+`ambiguous` and **not** imported — the walker follows every confirmed edge, so a
+wrong one is worse than a missing one. Call `propose_relation` for those: it records
+the direction you know.
+
+Mined edges arrive `pending` with source `audit_mined`, exactly like a proposal, and
+the walker ignores them until a trace confirms them. A source is never weakened:
+`fk` beats `manual` beats `audit_mined` beats `inferred`, so re-mining cannot
+relabel a declared key, and a hand proposal is not downgraded by a log line.
+
+Only statements attributed to this data source are read, plus the lines that named
+none when this source is the default one — those ran against whatever the registry
+calls the default, and attributing them to another graph would invent joins across
+databases.
+
+### The panel pages
+
+The panel has two pages that talk to the graph, and neither of them accepts SQL:
+
+- **Relations** (data source level) lists the edges of one data source with a
+  status chip, the source (`fk` / `manual` / `inferred` / `audit_mined`) and the
+  counters; filter chips for all / pending / confirmed / stale; the actions each
+  status allows (confirm, reject with a reason, add a condition, re-open, delete);
+  and the confirmation record of an edge that is already confirmed or trusted.
+  Two buttons fill the graph: **Import foreign keys** reads the catalog, and
+  **Mine the log** reads the statements already audited.
+- **Trace** takes a value and an optional entry table/column, walks it, and shows
+  the steps with the row counts, the sample rows, the edge status, and the points
+  where the chain broke or was truncated. Every step carries the four judgements
+  (`ok` / `too_many` with a reason / `missing` / `irrelevant`), and judging a step
+  feeds the edge that carried it — so the page is also the place where a walk
+  teaches the graph. Edges that were not followed because they are still pending
+  are listed separately, with a pointer back to the Relations page.
 
 `logs/audit.jsonl` — one JSON object per tool call; rotates to `audit.1.jsonl` at
 512 KiB:

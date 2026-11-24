@@ -23,6 +23,9 @@ from mcp.server.fastmcp import FastMCP
 
 import audit
 import engines
+import mining
+import relations
+import tracing
 import writes
 import store
 
@@ -112,7 +115,10 @@ mcp = FastMCP(
         "Start with list_datasources, then list_tables, describe_table and finally "
         "execute_sql. execute_sql runs any single statement: SELECT and EXPLAIN when "
         "the source is read-only, INSERT/UPDATE/DELETE/DDL only when writes are "
-        "enabled. Prefer these tools over guessing table names."
+        "enabled. Prefer these tools over guessing table names. To join tables, call "
+        "list_edges for the relation graph instead of guessing the key columns; "
+        "discover_relations imports the declared foreign keys, and propose_relation "
+        "records a join the catalog does not declare."
     ),
     host=ARGS["host"],
     port=ARGS["port"],
@@ -302,12 +308,14 @@ def list_tables(datasource: Optional[str] = None, schema: Optional[str] = None) 
 def describe_table(table: str, datasource: Optional[str] = None, schema: Optional[str] = None) -> dict:
     """Describe one table: columns, types, nullability, defaults and primary key.
 
-    Also reports `foreignKeys` (what this table points at), `indexes` (name,
-    columns, whether unique), `comment` and the per-column `comment`, and
-    `rowEstimate` — the planner's row count, not a `count(*)`. Any of those the
-    engine or the permissions cannot answer comes back as `[]` or `null`; the
-    describe call still succeeds. Call this before writing SQL so the column
-    names are exact and the joins use the right columns.
+    Also reports `indexes` (name, columns, whether unique), `comment` and the
+    per-column `comment`, and `rowEstimate` — the planner's row count, not a
+    `count(*)`. Any of those the engine or the permissions cannot answer comes
+    back as `[]` or `null`; the describe call still succeeds. Call this before
+    writing SQL so the column names are exact.
+
+    What joins this table to another is not here: call list_edges, which reports
+    the relation graph for the whole datasource.
     """
     try:
         profile, (connection, close) = _open(datasource)
@@ -322,17 +330,352 @@ def describe_table(table: str, datasource: Optional[str] = None, schema: Optiona
 
 @mcp.tool()
 @_audited
-def list_relations(datasource: Optional[str] = None, schema: Optional[str] = None) -> dict:
-    """List every foreign key in one schema, so a join path is one call away.
+def list_edges(
+    datasource: Optional[str] = None,
+    status: Optional[str] = None,
+    source: Optional[str] = None,
+) -> dict:
+    """List the relation graph: which column joins which, and how far it is trusted.
 
-    Returns `relations` as flat rows: `{table, column, refTable, refColumn,
-    name}`. Use it when a query needs to join tables you have not described
-    yet — describe_table gives the same edges for a single table.
+    This is the only place that answers "what joins what". An edge is
+    directional like a foreign key: `from` holds the value (the many side), `to`
+    is what it points at (the one side), so `T_TRANS.ORDER_ID -> T_ORDER.ID`.
+
+    `status` narrows to one of pending, confirmed, trusted, stale, rejected;
+    `source` to fk, manual, inferred, audit_mined. `counts` always covers every
+    status, so it stays useful while a filter is on. Only confirmed and trusted
+    edges are walked by trace_by_key; a pending edge is a suggestion, and a
+    rejected one is on the blacklist.
+    """
+    try:
+        profile, _secrets = store.resolve(datasource)
+        result = relations.list_edges(profile, status=status, source=source)
+        return {"ok": True, "datasource": _source(profile), **result}
+    except Exception as error:  # noqa: BLE001
+        return _error(error)
+
+
+@mcp.tool()
+@_audited
+def propose_relation(
+    from_table: str,
+    from_column: str,
+    to_table: str,
+    to_column: str,
+    datasource: Optional[str] = None,
+    condition: Optional[str] = None,
+    note: Optional[str] = None,
+) -> dict:
+    """Record a join the catalog does not know about. It starts out `pending`.
+
+    Use it when a schema has no foreign keys but the data clearly joins — a
+    legacy database, a warehouse table, a code column. `from` is the side holding
+    the value, `to` is the side it points at.
+
+    `condition` is an extra predicate the join needs to be true (a status filter,
+    a soft-delete flag); it is kept with the edge so the walker can apply it.
+    Proposing the same pair twice updates that one edge instead of adding a
+    second, and reopens it if it had been rejected.
+    """
+    try:
+        profile, _secrets = store.resolve(datasource)
+        result = relations.propose(
+            profile,
+            from_table,
+            from_column,
+            to_table,
+            to_column,
+            condition=condition,
+            note=note,
+        )
+        return {"ok": True, "datasource": _source(profile), **result}
+    except Exception as error:  # noqa: BLE001
+        return _error(error)
+
+
+@mcp.tool()
+@_audited
+def discover_relations(datasource: Optional[str] = None, schema: Optional[str] = None) -> dict:
+    """Import the foreign keys the engine declares into the relation graph.
+
+    Reads the catalog and merges what it finds: a key the graph already has keeps
+    its status, so a confirmed edge does not fall back to pending just because it
+    was discovered again. `imported` counts the new edges, `updated` the ones
+    whose status or source changed, `skipped` the ones already present.
+
+    Engines without declared keys (or a schema where they were dropped) come back
+    with nothing imported — that is the case propose_relation exists for.
     """
     try:
         profile, (connection, close) = _open(datasource)
         try:
-            result = engines.list_relations(profile, connection, schema)
+            found = engines.list_relations(profile, connection, schema)
+        finally:
+            close()
+        result = relations.import_edges(profile, found.get("relations") or [])
+        return {"ok": True, "datasource": _source(profile), **result}
+    except Exception as error:  # noqa: BLE001
+        return _error(error)
+
+
+@mcp.tool()
+@_audited
+def mine_relations(
+    datasource: Optional[str] = None,
+    schema: Optional[str] = None,
+    limit: int = 20,
+) -> dict:
+    """Import joins someone already wrote, mined from the audit log.
+
+    `discover_relations` reads what the engine declares; this reads what was
+    actually typed. Every `execute_sql` and `explain_query` line keeps its
+    statement, so a join written last week is evidence that the join exists — the
+    cheapest source there is for a schema with no declared keys.
+
+    Nothing is trusted on sight: mined edges arrive as `pending` with source
+    `audit_mined`, exactly like a proposal, and the walker ignores them until a
+    trace confirms them. A join the catalog declares is not relabelled by this, and
+    a source already stronger (a hand proposal) is not downgraded.
+
+    Which side is the child cannot be read off the statement — `a.id = b.a_id`
+    says the columns are equal, not who owns whom. So each pair is oriented from
+    the catalog: the side whose column is a primary key or a unique index is the
+    parent (`to`), the other side is the child (`from`). A pair where neither side
+    looks unique, or where both do, is reported under `ambiguous` instead of being
+    guessed into the graph.
+
+    `limit` caps how many pairs are considered, highest hit count first. No
+    statement is ever run again, and no row data is involved.
+    """
+    try:
+        profile, _secrets = store.resolve(datasource)
+        keys = [item for item in (profile.get("id"), profile.get("name")) if isinstance(item, str)]
+        rows = audit.lines()
+        mined = mining.candidates(rows, keys, include_anonymous=bool(profile.get("isDefault")), limit=limit)
+        ambiguous: list[dict] = []
+        found: list[dict] = []
+        if mined:
+            _profile, (connection, close) = _open(datasource)
+            try:
+                unique_cache: dict[str, set[str]] = {}
+
+                def unique_columns(table: str) -> set[str]:
+                    key = str(table).casefold()
+                    if key not in unique_cache:
+                        try:
+                            info = engines.describe_table(profile, connection, table, schema)
+                        except Exception:  # noqa: BLE001 - an unreadable table is just unknown
+                            unique_cache[key] = set()
+                        else:
+                            covered = {name for name in (info.get("primaryKey") or []) if name}
+                            for index in info.get("indexes") or []:
+                                columns = [name for name in index.get("columns") or [] if name]
+                                if bool(index.get("unique")) and len(columns) == 1:
+                                    covered.add(columns[0])
+                            unique_cache[key] = {name.casefold() for name in covered}
+                    return unique_cache[key]
+
+                for item in mined:
+                    left = item["left"]
+                    right = item["right"]
+                    left_unique = str(left["column"]).casefold() in unique_columns(left["table"])
+                    right_unique = str(right["column"]).casefold() in unique_columns(right["table"])
+                    if left_unique == right_unique:
+                        ambiguous.append({**item, "reason": "both unique" if left_unique else "neither unique"})
+                        continue
+                    parent, child = (left, right) if left_unique else (right, left)
+                    found.append(
+                        {
+                            "table": child["table"],
+                            "column": child["column"],
+                            "refTable": parent["table"],
+                            "refColumn": parent["column"],
+                            "name": f"mined from {item['hits']} statement(s)",
+                        }
+                    )
+            finally:
+                close()
+        result = relations.import_edges(profile, found, source="audit_mined")
+        return {
+            "ok": True,
+            "datasource": _source(profile),
+            "mined": len(mined),
+            "ambiguous": ambiguous,
+            **result,
+        }
+    except Exception as error:  # noqa: BLE001
+        return _error(error)
+
+
+@mcp.tool()
+@_audited
+def feedback_relation(
+    edge_id: str,
+    verdict: str,
+    reason: Optional[str] = None,
+    note: Optional[str] = None,
+    datasource: Optional[str] = None,
+    fanout: Optional[float] = None,
+) -> dict:
+    """Record what a trace step showed, and move the edge accordingly.
+
+    `verdict` is one of:
+
+    - `ok` — the step returned the rows it should have. This is the only verdict
+      that confirms an edge; three confirmations with no rejection left, an
+      indexed reference column and a fanout of 5 or less make it `trusted`, which
+      the walker follows without asking again.
+    - `too_many` — the step matched rows it should not have. `reason` says why:
+      `wrong_column` (the column is not the key), `needs_condition` (the join is
+      only true under a filter — set it with set_relation_condition),
+      `not_unique` (the reference column repeats, so one value has several
+      parents). The edge becomes `stale` and stops being walked.
+    - `missing` — a row that should have been reached was not. Also `stale`.
+    - `irrelevant` — the edge has nothing to do with this value at all. The edge
+      is `rejected`, which is the blacklist: only proposing it again lifts it.
+
+    `fanout` is the average number of rows the parent side matched; pass what the
+    trace reported so trust can be recomputed from real measurements rather than
+    guessed. Whether the reference column is indexed or unique is read from the
+    catalog, so the caller does not have to say.
+    """
+    try:
+        profile, _secrets = store.resolve(datasource)
+        indexed = None
+        unique = None
+        try:
+            _profile, (connection, close) = _open(datasource)
+            try:
+                doc = relations.load(profile)
+                target = next((edge for edge in doc["edges"] if edge.get("id") == edge_id), None)
+                if target is not None:
+                    table = (target.get("to") or {}).get("table")
+                    column = (target.get("to") or {}).get("column")
+                    if table and column:
+                        described = engines.describe_table(profile, connection, table, None)
+                        indexed = any(
+                            str(index.get("columns", [None])[0]).casefold() == str(column).casefold()
+                            for index in described.get("indexes") or []
+                        ) or any(
+                            str(item.get("name")).casefold() == str(column).casefold()
+                            for item in described.get("columns") or []
+                            if item.get("primaryKey")
+                        )
+                        unique = any(
+                            bool(index.get("unique"))
+                            and [str(part).casefold() for part in index.get("columns") or []]
+                            == [str(column).casefold()]
+                            for index in described.get("indexes") or []
+                        )
+            finally:
+                close()
+        except Exception:  # noqa: BLE001 - the verdict stands without the hints
+            indexed = None
+            unique = None
+        result = relations.feedback(
+            profile,
+            edge_id,
+            verdict,
+            reason=reason,
+            note=note,
+            indexed=indexed,
+            unique=unique,
+            fanout=fanout,
+        )
+        return {"ok": True, "datasource": _source(profile), "indexed": indexed, "unique": unique, **result}
+    except Exception as error:  # noqa: BLE001
+        return _error(error)
+
+
+@mcp.tool()
+@_audited
+def set_relation_condition(
+    edge_id: str,
+    condition: Optional[str] = None,
+    datasource: Optional[str] = None,
+) -> dict:
+    """Attach (or clear) the extra predicate an edge needs to be true.
+
+    Some joins only hold under a filter — `T_TRANS.STATUS = 'POSTED'`, a
+    soft-delete flag, a partition. Keeping the predicate with the edge is what
+    lets the walker build the right `where` without a model in the loop. Pass an
+    empty or missing `condition` to clear it.
+
+    Setting a condition does not change the status: a `stale` edge stays stale
+    until the next trace step confirms it, so adding a filter never silently
+    re-enables a join that was rejected for a reason.
+    """
+    try:
+        profile, _secrets = store.resolve(datasource)
+        result = relations.set_condition(profile, edge_id, condition)
+        return {"ok": True, "datasource": _source(profile), **result}
+    except Exception as error:  # noqa: BLE001
+        return _error(error)
+
+
+@mcp.tool()
+@_audited
+def delete_edge(edge_id: str, datasource: Optional[str] = None) -> dict:
+    """Remove one edge from the relation graph for good.
+
+    Use it when a join is simply wrong and no verdict describes it — a `rejected`
+    edge is kept on purpose so the same wrong join is not proposed again, but a
+    typo is not worth remembering. `discover_relations` brings back anything the
+    catalog still declares.
+    """
+    try:
+        profile, _secrets = store.resolve(datasource)
+        result = relations.delete_edge(profile, edge_id)
+        return {"ok": True, "datasource": _source(profile), **result}
+    except Exception as error:  # noqa: BLE001
+        return _error(error)
+
+
+@mcp.tool()
+@_audited
+def trace_by_key(
+    value: str,
+    datasource: Optional[str] = None,
+    entry_table: Optional[str] = None,
+    entry_column: Optional[str] = None,
+    max_depth: int = 3,
+    max_rows_per_table: int = 20,
+    direction: str = "both",
+) -> dict:
+    """Follow one value across the joins the relation graph trusts.
+
+    Pass a key — an order id, a customer code, a document number — and this walks
+    from wherever it lives along confirmed and trusted edges. It never runs a
+    statement that changes data, and the value travels as a bind parameter, so a
+    quote in it cannot alter the query.
+
+    Without `entry_table` the walker probes the columns a join already points at,
+    then the indexed key-shaped columns of the most connected tables. Naming the
+    table and column skips that search and is faster on a large schema.
+
+    `direction` is `down` (follow foreign keys: child to parent), `up` (parent to
+    children) or `both`. `max_depth` is clamped to 6 and `max_rows_per_table` to
+    200.
+
+    Every step reports the table, the bound condition, the SQL that ran, how many
+    rows came back and a few sample cells; `status: "empty"` is a chain that broke
+    there. Pending edges are listed under `pending` — confirming one lets the
+    trace follow it — and anything truncated or skipped is in `warnings` or
+    `stoppedAt` rather than quietly missing.
+    """
+    try:
+        profile, (connection, close) = _open(datasource)
+        try:
+            result = tracing.trace(
+                profile,
+                connection,
+                value,
+                entry_table=entry_table,
+                entry_column=entry_column,
+                max_depth=max_depth,
+                max_rows_per_table=max_rows_per_table,
+                direction=direction,
+            )
         finally:
             close()
         return {"ok": True, "datasource": _source(profile), **result}

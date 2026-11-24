@@ -20,13 +20,13 @@
 |---|---|
 | 形态 | DSH 插件包：**Host 半边**（Cordis）+ **Client 半边**（Web 页面）+ **Python MCP 服务** |
 | 入口 | 侧栏图标（`sidebar.panellist`，id=`db-mcp`，order=25）+ 主面板（`main`，同 id） |
-| 页面职责 | **只管数据源**：增删改查、连接测试、状态与诊断。不做 SQL 查询台、不做数据浏览 |
+| 页面职责 | **只管数据源与关系图**：增删改查、连接测试、状态与诊断、表间连接管理。不做 SQL 查询台、不做数据浏览 |
 | 查询职责 | 全部交给 AI，经 MCP 工具 `mcp__db__*` 完成 |
 | 数据源 | 单一 MCP 服务进程内管理 N 个数据源，工具用 `datasource` 参数寻址 |
 | 支持类型 | SQLite / PostgreSQL / **openGauss** / MySQL / Oracle（v1 四种，0.7.5 起五种） |
 | 安全基线 | 默认只读；三道闸门：全局写开关 + 单源只读 + DDL 开关；行数/超时硬上限；密码加密后落盘 |
 | 状态目录 | `$DSH_HOME/db-mcp/`（注册表 + 加密口令 + 设置 + 会话白名单 + 审计 + venv） |
-| 明确不做 | 页面内查询、数据编辑、ER 图、同步/备份、图表可视化（DDL 自 0.6.0 起作为工具存在，0.9.7 起单独授权） |
+| 明确不做 | 页面内查询、数据编辑、**图形化** ER 图（节点连线画布）、同步/备份、图表可视化（DDL 自 0.6.0 起作为工具存在，0.9.7 起单独授权；关系图以列表形态管理，见 FR-MCP-7e；追踪页只收一个值，SQL 由服务端拼装，见 FR-MCP-7f） |
 
 > 这张表和下面的第 3、4、5、6、7、11、12 节描述的是**当前状态**，随版本修订；
 > 维护规则见最后一节。
@@ -46,7 +46,7 @@
 
 - 页面内 SQL 编辑器、结果表格、数据预览、数据编辑 —— **全部不做**（用户明确：只有 AI 调用 MCP）。
 - 数据同步 / ETL / 备份恢复 / 迁移。
-- ER 图、可视化建模、图表。
+- 图形化 ER 图（节点连线画布）、可视化建模、图表。表间连接以**列表形态**的关系图管理（FR-MCP-7e），这是为了回答「什么连接什么」，不是为了画图。追踪页（FR-MCP-7f）同样只是查看与判断，它接收一个值、由服务端按关系图拼装并绑定参数的语句，本身不是 SQL 入口。
 - DDL（CREATE/ALTER/DROP）、事务编排、存储过程调试。
 - 数据库账号与权限管理、远程多人共享。
 
@@ -91,8 +91,10 @@
 │  Python MCP 服务（server/，官方 mcp SDK + 五种驱动）                        │
 │    · 懒加载、懒建连接、每次调用重读注册表                                  │
 │    · 工具：test_connection / list_datasources / list_tables /              │
-│            describe_table / list_relations / sample_rows / execute_sql /   │
-│            explain_query / get_ddl                                          │
+│            describe_table / list_edges / propose_relation /                 │
+│            discover_relations / feedback_relation /                        │
+│            set_relation_condition / delete_edge / trace_by_key /           │
+│            sample_rows / execute_sql / explain_query / get_ddl              │
 │    · 三道闸门、行数上限、超时、错误分级                                     │
 └────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -207,6 +209,7 @@
 
 - 无 SQL 输入框、无结果表格、无 CSV 导出、无查询历史。
 - 页面所有按钮都只操作**配置**，不执行用户 SQL。
+- 关系图与追踪页不是查询台的例外：追踪页只接收一个**值**，SQL 由服务端按关系图拼装并参数绑定，面板无法指定表、列或谓词。
 
 ### 4.6 MCP 工具面（FR-MCP）
 
@@ -226,16 +229,21 @@
 | FR-MCP-5 | `execute_sql` | 执行**任意单条**语句（不只查询），带 `max_rows`；写语句返回 `affectedRows` | P0 |
 | FR-MCP-6 | `explain_query` | 执行计划，按方言降级（Oracle 用 `EXPLAIN PLAN`，MySQL/PG 用 `EXPLAIN`） | P2 |
 | FR-MCP-7 | `get_ddl` | 取建表语句（0.6.0 加入） | P1 |
-| FR-MCP-7b | `list_relations` | 一个 schema 的全部外键，一次拿到 join 路径 | P1 |
+| FR-MCP-7b | `list_edges` / `propose_relation` / `discover_relations` | 关系图：唯一的「什么连什么」来源。`discover_relations` 把目录里声明的外键导进图，`propose_relation` 记下目录没声明的 join，`list_edges` 列出全部边与状态 | P1 |
+| FR-MCP-7c | `trace_by_key` | 按值追踪：从一个值出发，沿**已确认**的边跨表走，逐步报告表、条件、SQL、命中行数与边来源；未确认的边只提示不跟随 | P1 |
+| FR-MCP-7d | `feedback_relation` / `set_relation_condition` / `delete_edge` | 边的状态机：`ok` 确认（三次 + 无拒绝 + 有索引或唯一 + 扇出≤5 → `trusted`），`too_many`/`missing` 降为 `stale`，`irrelevant` 进黑名单；条件增删与删除边 | P1 |
+| FR-MCP-7e | 面板「关系图」页 | 数据源级边列表：状态角标、来源、确认次数与扇出；筛选 全部/待确认/已确认/已失效；按状态给出确认、带原因拒绝、加条件、重新打开、删除；已确认/自动信任的边可展开看确认记录。面板只调关系图工具，不接受 SQL | P1 |
+| FR-MCP-7f | 面板「追踪」页 | 只收一个**值**（可选入口表/列与方向），SQL 由服务端按关系图拼装并参数绑定；逐步展示序号、表、条件与绑定值、命中行数、关键列样例、边状态与扇出；断链/截断/警告/中断位置单独列出；每步可做四选一反馈（对 / 多了+原因 / 漏了 / 无关）并回写对应边。未跟随的 pending 边单列并指回关系图页 | P1 |
+| FR-MCP-7g | `mine_relations` | 从审计日志挖掘 join：只读 `execute_sql`/`explain_query` 的语句，解析 `on` 等值对；父子方向由目录定（唯一/主键侧为父），判不出方向的进 `ambiguous` 不入图；导入为 `pending` + `audit_mined`，来源强弱 `fk > manual > audit_mined > inferred` 只升不降 | P1 |
 | FR-MCP-8 | `test_connection` | 用保存的源或内联连接串做一次真实登录探测 | P0 |
 | FR-MCP-9 | `session_scope` | **Host 侧原生工具**（非 MCP），限制本会话可见的数据源（0.9.0） | P1 |
 | FR-MCP-10 | instructions | 服务端说明：先看结构再查数、不要拼接用户输入、结果截断含义 | P1 |
 | FR-MCP-11 | 超时 | MCP 行 `toolCallTimeoutMs=60000`；Python 内 `timeout_ms` 上限 120s | P0 |
 | FR-MCP-12 | 并发 | 进程内串行；不同数据源不共享连接；单源连接池上限 4 | P0 |
 
-> 前九项是 Python 服务发布的工具（`server/main.py` 的 `@mcp.tool()`），`session_scope`
+> 前十六项是 Python 服务发布的工具（`server/main.py` 的 `@mcp.tool()`），`session_scope`
 > 由 `src/tools.js` 注册在 Host 上 —— 它改的是 Host 的 `sessions.json`，Python 看不到，
-> 因此也只对 DSH 智能体生效。工具页可以逐个关掉前九项，`session_scope` 故意不可关。
+> 因此也只对 DSH 智能体生效。工具页可以逐个关掉前十六项，`session_scope` 故意不可关。
 
 **方言要点（实现约束）**
 
@@ -446,7 +454,7 @@ Host `Config` 只剩引导阶段需要的几项：
 | D1 | v1 数据库 | **SQLite + PostgreSQL + openGauss + MySQL + Oracle**（openGauss 自 0.7.5） |
 | D2 | 写权限 | **默认只读**；三道闸门：全局写开关 + 单源只读 + DDL 开关（白名单已移除：可写=写登录可见的全部模式），全程带审计 |
 | D3 | Python 运行时 | **插件内 venv + 官方 `mcp` SDK + 五种驱动** |
-| D4 | 页面查询台 | **不做**；页面只有数据源管理，查询全部走 MCP |
+| D4 | 页面查询台 | **不做**；页面只有数据源管理与关系图，查询全部走 MCP |
 | D5 | 包名 / 侧栏 id / MCP 服务名 | **`dsh-db-mcp` / `db-mcp` / `db`**（已确认） |
 | D6 | 结构概览 | **保留**，作为数据源列表的子视图（原 P2 可选项） |
 | D7 | 凭据存放 | **不用 `ctx.credentials`**；插件自持 AES-256-GCM 加密的 `secrets.json` + `secret.key` |

@@ -466,6 +466,52 @@ try {
 
   const unknown = await post('/clients/configure', { client: 'nope' })
   check('an unknown client is refused', unknown.status === 404 && /unknown client/.test(String(unknown.body?.error || '')))
+
+  /* The graph page has routes of its own. They must exist even when the Python
+     server is down (the panel then shows the failure instead of a 404), and they
+     must not be reachable from another origin — the panel is the only client. */
+  const graphRoutes = [
+    ['GET', '/relations?datasource=alpha'],
+    ['POST', '/relations/discover'],
+    ['POST', '/relations/propose'],
+    ['POST', '/relations/feedback'],
+    ['POST', '/relations/condition'],
+    ['POST', '/relations/delete'],
+    ['POST', '/relations/mine'],
+    ['POST', '/trace'],
+  ]
+  for (const [method, path] of graphRoutes) {
+    const response = method === 'GET' ? await get(path) : await post(path, {})
+    check(
+      `the graph route ${method} ${path.split('?')[0]} exists`,
+      response.status !== 404,
+      `${response.status} ${JSON.stringify(response.body).slice(0, 120)}`,
+    )
+  }
+
+  const crossOrigin = await fetch(base + PREFIX + '/relations/delete', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', origin: 'http://elsewhere.example' },
+    body: JSON.stringify({ edge_id: 'e_000000' }),
+  })
+  check('a graph write from another origin is refused', crossOrigin.status === 403)
+
+  const graphArgs = await post('/relations/feedback', { edge_id: 'e_000000', verdict: 'ok', fanout: 'lots' })
+  check(
+    'a graph route forwards only the arguments it knows',
+    graphArgs.status !== 404 && !/fanout/.test(JSON.stringify(graphArgs.body?.error || '')),
+    JSON.stringify(graphArgs.body).slice(0, 160),
+  )
+
+  /* The trace route is the one place the panel could turn into a SQL console by
+     degrees. It forwards a value and the knobs around it — a statement smuggled
+     into the body must never reach the tool. */
+  const traceArgs = await post('/trace', { value: '1', datasource: 'alpha', sql: 'select 1', statement: 'select 1' })
+  check(
+    'the trace route has no SQL argument at all',
+    traceArgs.status !== 404 && !/sql|statement/.test(JSON.stringify(traceArgs.body?.error || '')),
+    JSON.stringify(traceArgs.body).slice(0, 160),
+  )
 } finally {
   await new Promise((resolve) => server.close(resolve))
   await host.dispose?.().catch(() => {})

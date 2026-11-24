@@ -23,6 +23,8 @@ window.__ModuleLoader__.load({
       { id: 'list' },
       { id: 'create' },
       { id: 'import' },
+      { id: 'graph' },
+      { id: 'trace' },
       { id: 'clients' },
       { id: 'runtime' },
       { id: 'tools' },
@@ -33,6 +35,8 @@ window.__ModuleLoader__.load({
     function tabLabel(t, id) {
       if (id === 'create') return t('tab.create')
       if (id === 'import') return t('tab.import')
+      if (id === 'graph') return t('tab.graph')
+      if (id === 'trace') return t('tab.trace')
       if (id === 'runtime') return t('tab.runtime')
       if (id === 'clients') return t('tab.clients')
       if (id === 'tools') return t('tab.tools')
@@ -44,6 +48,8 @@ window.__ModuleLoader__.load({
     function tabOfMode(mode) {
       if (mode === 'create' || mode === 'edit') return 'create'
       if (mode === 'import') return 'import'
+      if (mode === 'graph') return 'graph'
+      if (mode === 'trace') return 'trace'
       if (mode === 'runtime') return 'runtime'
       if (mode === 'clients') return 'clients'
       if (mode === 'tools') return 'tools'

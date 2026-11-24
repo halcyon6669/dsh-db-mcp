@@ -1883,6 +1883,27 @@ function groupTables(tables) {
       const [tools, setTools] = React.useState(null)
       const [portDraft, setPortDraft] = React.useState('')
       const [clientBusy, setClientBusy] = React.useState('')
+      /* Page A — the relation graph. One datasource at a time, every edge it
+         knows, and the four verdicts that move an edge between states. */
+      const [graph, setGraph] = React.useState(null)
+      const [graphBusy, setGraphBusy] = React.useState(false)
+      const [graphError, setGraphError] = React.useState(null)
+      const [graphSource, setGraphSource] = React.useState('')
+      const [graphFilter, setGraphFilter] = React.useState('all')
+      const [graphOpen, setGraphOpen] = React.useState('')
+      const [graphForm, setGraphForm] = React.useState(null)
+      const [graphReason, setGraphReason] = React.useState('')
+      const [graphCondition, setGraphCondition] = React.useState(null)
+      const [graphConditionDraft, setGraphConditionDraft] = React.useState('')
+      const [traceValue, setTraceValue] = React.useState('')
+      const [traceTable, setTraceTable] = React.useState('')
+      const [traceColumn, setTraceColumn] = React.useState('')
+      const [traceDirection, setTraceDirection] = React.useState('both')
+      const [traceSource, setTraceSource] = React.useState('')
+      const [trace, setTrace] = React.useState(null)
+      const [traceBusy, setTraceBusy] = React.useState(false)
+      const [traceError, setTraceError] = React.useState(null)
+      const [traceOpen, setTraceOpen] = React.useState('')
 
       const load = React.useCallback(async () => {
         setBusy(true)
@@ -2206,6 +2227,188 @@ function groupTables(tables) {
 
       /** Publish or withdraw one tool for the agent. */
       const [limitDraft, setLimitDraft] = React.useState({})
+
+      /* ------------------------------------------------------- relation graph
+         Page A reads one datasource's graph and nothing else. The panel has no
+         SQL box on purpose: every action here is one of the six graph tools, so
+         a page that only ever moves edges cannot become a query console. */
+
+      /** The datasource the graph page is showing: the pick, else the default. */
+      const graphTarget = React.useMemo(() => {
+        if (graphSource && sources.some((item) => item.id === graphSource)) return graphSource
+        const fallback = sources.find((item) => item.isDefault === true) || sources[0]
+        return fallback ? fallback.id : ''
+      }, [graphSource, sources])
+
+      const loadGraph = React.useCallback(async () => {
+        if (!graphTarget) {
+          setGraph({ edges: [], counts: null, total: 0, truncated: false })
+          setGraphError(null)
+          return
+        }
+        setGraphBusy(true)
+        try {
+          const payload = await apiGet(`/relations?datasource=${encodeURIComponent(graphTarget)}`)
+          if (payload.ok === false) {
+            const failure = payload.error || {}
+            setGraphError(failure.hint ? `${failure.message || 'list_edges failed'} — ${failure.hint}` : failure.message || 'list_edges failed')
+            setGraph({ edges: [], counts: null, total: 0, truncated: false })
+            return
+          }
+          setGraphError(null)
+          setGraph({
+            edges: payload.edges || [],
+            counts: payload.counts || null,
+            total: payload.total || 0,
+            truncated: payload.truncated === true,
+          })
+        } catch (error) {
+          const body = (error && error.payload) || {}
+          setGraphError(String(body.message || (error && error.message) || error))
+          setGraph({ edges: [], counts: null, total: 0, truncated: false })
+        } finally {
+          setGraphBusy(false)
+        }
+      }, [graphTarget])
+
+      React.useEffect(() => {
+        if (tab !== 'graph') return
+        void loadGraph()
+      }, [tab, loadGraph])
+
+      /** Run one graph write and fold its outcome back into the notice line. */
+      const graphAction = async (path, body, message) => {
+        setGraphBusy(true)
+        setNotice(null)
+        try {
+          const payload = await apiPost(path, { ...body, datasource: graphTarget })
+          if (payload && payload.ok === false) {
+            const failure = payload.error || {}
+            const hint = failure.hint ? ` — ${failure.hint}` : ''
+            setNotice({ message: `${failure.message || payload.message || 'the tool reported an error'}${hint}`, isError: true })
+            return null
+          }
+          if (message) setNotice({ message, isError: false })
+          await loadGraph()
+          return payload
+        } catch (error) {
+          const body2 = (error && error.payload) || {}
+          const failure = body2.error || {}
+          const message2 = failure.message || body2.message || String((error && error.message) || error)
+          const hint = failure.hint ? ` — ${failure.hint}` : ''
+          setNotice({ message: `${message2}${hint}`, isError: true })
+          return null
+        } finally {
+          setGraphBusy(false)
+        }
+      }
+
+      const discoverEdges = () => graphAction('/relations/discover', {}, t('notice.discovered'))
+
+      const mineEdges = () => graphAction('/relations/mine', {}, t('notice.mined'))
+
+      const sendFeedback = (edge, verdict, reason) =>
+        graphAction(
+          '/relations/feedback',
+          { edge_id: edge.id, verdict, reason: reason || undefined },
+          fmt(t('notice.verdict'), { verdict }),
+        )
+
+      const saveCondition = (edge, condition) =>
+        graphAction(
+          '/relations/condition',
+          { edge_id: edge.id, condition },
+          condition ? t('notice.conditionSet') : t('notice.conditionCleared'),
+        )
+
+      const removeEdge = (edge) => graphAction('/relations/delete', { edge_id: edge.id }, t('notice.edgeDeleted'))
+
+      const proposeEdge = async () => {
+        const draft = graphForm || {}
+        const payload = await graphAction('/relations/propose', {
+          from_table: draft.from_table || '',
+          from_column: draft.from_column || '',
+          to_table: draft.to_table || '',
+          to_column: draft.to_column || '',
+          condition: draft.condition || undefined,
+          note: draft.note || undefined,
+        }, t('notice.edgeProposed'))
+        if (payload) {
+          setGraphForm(null)
+          setGraphOpen('')
+        }
+      }
+
+      /** The datasource the trace page walks: the pick, else the default. */
+      const traceTarget = React.useMemo(() => {
+        if (traceSource && sources.some((item) => item.id === traceSource)) return traceSource
+        const fallback = sources.find((item) => item.isDefault === true) || sources[0]
+        return fallback ? fallback.id : ''
+      }, [traceSource, sources])
+
+      /** Follow one value; the panel never sends a statement, only a value. */
+      const runTrace = async () => {
+        const value = String(traceValue || '').trim()
+        if (!value) {
+          setTraceError(t('trace.needValue'))
+          return
+        }
+        setTraceBusy(true)
+        setTraceError(null)
+        setTraceOpen('')
+        try {
+          const payload = await apiPost('/trace', {
+            value,
+            datasource: traceTarget,
+            entry_table: traceTable.trim() || undefined,
+            entry_column: traceColumn.trim() || undefined,
+            direction: traceDirection,
+          })
+          if (payload && payload.ok === false) {
+            const failure = payload.error || {}
+            const hint = failure.hint ? ` — ${failure.hint}` : ''
+            setTraceError(`${failure.message || payload.message || 'trace_by_key failed'}${hint}`)
+            setTrace(null)
+            return
+          }
+          setTrace(payload || null)
+        } catch (error) {
+          const body = (error && error.payload) || {}
+          const failure = body.error || {}
+          const hint = failure.hint ? ` — ${failure.hint}` : ''
+          setTraceError(`${failure.message || body.message || String((error && error.message) || error)}${hint}`)
+          setTrace(null)
+        } finally {
+          setTraceBusy(false)
+        }
+      }
+
+      /** Judge one step of the walk; the edge it travelled is the thing judged. */
+      const judgeStep = async (edgeId, verdict, reason) => {
+        setNotice(null)
+        try {
+          const payload = await apiPost('/relations/feedback', {
+            datasource: traceTarget,
+            edge_id: edgeId,
+            verdict,
+            reason: reason || undefined,
+          })
+          if (payload && payload.ok === false) {
+            const failure = payload.error || {}
+            const hint = failure.hint ? ` — ${failure.hint}` : ''
+            setNotice({ message: `${failure.message || 'feedback failed'}${hint}`, isError: true })
+            return
+          }
+          setNotice({ message: fmt(t('notice.verdict'), { verdict }), isError: false })
+          setTraceOpen('')
+          await runTrace()
+        } catch (error) {
+          const body = (error && error.payload) || {}
+          const failure = body.error || {}
+          const hint = failure.hint ? ` — ${failure.hint}` : ''
+          setNotice({ message: `${failure.message || String((error && error.message) || error)}${hint}`, isError: true })
+        }
+      }
 
       /** Drafted value of the long-text policy while the select is open. */
       const [textPolicyDraft, setTextPolicyDraft] = React.useState(undefined)
@@ -3277,6 +3480,636 @@ function groupTables(tables) {
         )
       }
 
+      /* Page A — the relation graph.
+         An edge reads as a join path, not as a row of foreign-key metadata: the
+         left side is where the value lives, the right side is what it points
+         at. The status chip is the only thing that decides which buttons the
+         row offers, because a pending edge and a trusted edge are not the same
+         kind of claim. */
+      const edgeStatusClass = (status) => `dbmcp-pill dbmcp-edge-chip is-${status || 'pending'}`
+
+      const edgeStatusLabel = (status) =>
+        status === 'confirmed'
+          ? t('graph.statusConfirmed')
+          : status === 'trusted'
+            ? t('graph.statusTrusted')
+            : status === 'rejected'
+              ? t('graph.statusRejected')
+              : status === 'stale'
+                ? t('graph.statusStale')
+                : t('graph.statusPending')
+
+      const edgeSourceLabel = (source) =>
+        source === 'fk'
+          ? t('graph.sourceFk')
+          : source === 'inferred'
+            ? t('graph.sourceInferred')
+            : source === 'audit_mined'
+              ? t('graph.sourceMined')
+              : t('graph.sourceManual')
+
+      const edgeFanout = (edge) => {
+        const value = edge.stats && edge.stats.avgFanout
+        return typeof value === 'number' ? value.toFixed(1) : '—'
+      }
+
+      const edgeMeta = (edge) => {
+        const parts = [edgeSourceLabel(edge.source)]
+        const confirmed = (edge.stats && edge.stats.confirmCount) || 0
+        if (confirmed) parts.push(fmt(t('graph.confirmedTimes'), { n: confirmed }))
+        const rejected = (edge.stats && edge.stats.rejectCount) || 0
+        if (rejected) parts.push(fmt(t('graph.rejectedTimes'), { n: rejected }))
+        parts.push(fmt(t('graph.fanout'), { value: edgeFanout(edge) }))
+        return parts.join(' · ')
+      }
+
+      /** The line under the join path: why it stopped being trusted, if it did. */
+      const edgeReason = (edge) => {
+        const failure = edge.stats && edge.stats.lastFailure
+        if (!failure) return null
+        const verdict = failure.verdict === 'too_many' ? t('graph.verdictTooMany') : failure.verdict === 'missing' ? t('graph.verdictMissing') : failure.verdict
+        const reason = failure.reason
+          ? failure.reason === 'wrong_column'
+            ? t('graph.reasonWrongColumn')
+            : failure.reason === 'needs_condition'
+              ? t('graph.reasonNeedsCondition')
+              : failure.reason === 'not_unique'
+                ? t('graph.reasonNotUnique')
+                : failure.reason
+          : ''
+        const when = failure.at ? ` ${fmt(t('graph.when'), { at: localClock(failure.at) })}` : ''
+        return h(
+          'p',
+          { className: 'dbmcp-hint dbmcp-edge-why' },
+          reason ? fmt(t('graph.failedBecause'), { verdict, reason }) : verdict,
+          when,
+        )
+      }
+
+      /** The confirmation record: who moved this edge and when. */
+      const edgeHistory = (edge) => {
+        const history = (edge.history || []).slice(-6).reverse()
+        if (history.length === 0) return h('p', { className: 'dbmcp-hint' }, t('graph.noHistory'))
+        return h(
+          'ul',
+          { className: 'dbmcp-edge-history' },
+          history.map((entry, index) =>
+            h(
+              'li',
+              { key: `${entry.at}:${index}` },
+              h('code', null, localClock(entry.at)),
+              ' ',
+              h('span', null, entry.action || '—'),
+              entry.note ? h('span', { className: 'dbmcp-hint' }, ` — ${entry.note}`) : null,
+            ),
+          ),
+        )
+      }
+
+      /** Inline editor for the free-form SQL predicate an edge may carry. */
+      const edgeConditionEditor = (edge) => {
+        const open = graphCondition === edge.id
+        if (!open) return null
+        const value = edge.condition || ''
+        return h(
+          'div',
+          { className: 'dbmcp-edge-form' },
+          h('p', { className: 'dbmcp-hint' }, t('graph.conditionHint')),
+          h('input', {
+            className: 'dbmcp-input dbmcp-mono',
+            defaultValue: value,
+            placeholder: t('graph.conditionPlaceholder'),
+            onChange: (event) => setGraphConditionDraft(event.target.value),
+          }),
+          h(
+            'div',
+            { className: 'dbmcp-inline' },
+            h(
+              'button',
+              {
+                type: 'button',
+                className: 'dbmcp-btn is-small is-primary',
+                disabled: graphBusy,
+                onClick: () => {
+                  void saveCondition(edge, graphConditionDraft)
+                  setGraphCondition('')
+                  setGraphConditionDraft('')
+                },
+              },
+              t('graph.saveCondition'),
+            ),
+            h(
+              'button',
+              {
+                type: 'button',
+                className: 'dbmcp-btn is-small',
+                onClick: () => {
+                  setGraphCondition('')
+                  setGraphConditionDraft('')
+                },
+              },
+              t('graph.cancel'),
+            ),
+          ),
+        )
+      }
+
+      /** The reject buttons, one per reason; picking one is the whole answer. */
+      const edgeRejectMenu = (edge) => {
+        const open = graphReason === edge.id
+        if (!open) return null
+        const pick = (reason) => {
+          setGraphReason('')
+          void sendFeedback(edge, 'too_many', reason)
+        }
+        return h(
+          'div',
+          { className: 'dbmcp-edge-form' },
+          h('p', { className: 'dbmcp-hint' }, t('graph.rejectHint')),
+          h(
+            'div',
+            { className: 'dbmcp-inline' },
+            h('button', { type: 'button', className: 'dbmcp-btn is-small', disabled: graphBusy, onClick: () => pick('wrong_column') }, t('graph.reasonWrongColumn')),
+            h('button', { type: 'button', className: 'dbmcp-btn is-small', disabled: graphBusy, onClick: () => pick('needs_condition') }, t('graph.reasonNeedsCondition')),
+            h('button', { type: 'button', className: 'dbmcp-btn is-small', disabled: graphBusy, onClick: () => pick('not_unique') }, t('graph.reasonNotUnique')),
+            h('button', { type: 'button', className: 'dbmcp-btn is-small is-plain', onClick: () => setGraphReason('') }, t('graph.cancel')),
+          ),
+        )
+      }
+
+      /** The row actions each status offers — the state machine, made visible. */
+      const edgeActions = (edge) => {
+        const status = edge.status || 'pending'
+        const buttons = []
+        if (status === 'pending') {
+          buttons.push(
+            h('button', { key: 'ok', type: 'button', className: 'dbmcp-btn is-small is-primary', disabled: graphBusy, onClick: () => void sendFeedback(edge, 'ok') }, t('graph.confirm')),
+            h('button', { key: 'no', type: 'button', className: 'dbmcp-btn is-small is-danger', disabled: graphBusy, onClick: () => setGraphReason(edge.id) }, t('graph.reject')),
+            h('button', { key: 'when', type: 'button', className: 'dbmcp-btn is-small', disabled: graphBusy, onClick: () => { setGraphCondition(edge.id); setGraphConditionDraft(edge.condition || '') } }, t('graph.addCondition')),
+          )
+        } else if (status === 'stale') {
+          buttons.push(
+            h('button', { key: 'ok', type: 'button', className: 'dbmcp-btn is-small is-primary', disabled: graphBusy, onClick: () => void sendFeedback(edge, 'ok') }, t('graph.confirm')),
+            h('button', { key: 'when', type: 'button', className: 'dbmcp-btn is-small', disabled: graphBusy, onClick: () => { setGraphCondition(edge.id); setGraphConditionDraft(edge.condition || '') } }, t('graph.addCondition')),
+            h('button', { key: 'gone', type: 'button', className: 'dbmcp-btn is-small is-danger', disabled: graphBusy, onClick: () => void removeEdge(edge) }, t('graph.remove')),
+          )
+        } else if (status === 'rejected') {
+          buttons.push(
+            h('button', { key: 'ok', type: 'button', className: 'dbmcp-btn is-small', disabled: graphBusy, onClick: () => void sendFeedback(edge, 'ok') }, t('graph.reopen')),
+            h('button', { key: 'gone', type: 'button', className: 'dbmcp-btn is-small is-danger', disabled: graphBusy, onClick: () => void removeEdge(edge) }, t('graph.remove')),
+          )
+        }
+        /* confirmed and trusted rows carry no buttons: they are the answer, and
+           the only way to change one is to open its record and withdraw it. */
+        if (status === 'confirmed' || status === 'trusted') {
+          const open = graphOpen === edge.id
+          buttons.push(
+            h(
+              'button',
+              {
+                key: 'record',
+                type: 'button',
+                className: 'dbmcp-btn is-small is-plain',
+                onClick: () => setGraphOpen(open ? '' : edge.id),
+              },
+              open ? t('graph.hideRecord') : t('graph.record'),
+            ),
+          )
+        }
+        return buttons.length === 0 ? null : h('div', { className: 'dbmcp-inline dbmcp-edge-actions' }, buttons)
+      }
+
+      const renderEdge = (edge) => {
+        const status = edge.status || 'pending'
+        const open = graphOpen === edge.id
+        return h(
+          'div',
+          { key: edge.id, className: `dbmcp-edge is-${status}` },
+          h(
+            'div',
+            { className: 'dbmcp-edge-head' },
+            h(
+              'code',
+              { className: 'dbmcp-edge-path' },
+              h('span', null, `${edge.from.table}.${edge.from.column}`),
+              h('span', { className: 'dbmcp-edge-arrow' }, ' → '),
+              h('span', null, `${edge.to.table}.${edge.to.column}`),
+            ),
+            h('span', { className: edgeStatusClass(status) }, edgeStatusLabel(status)),
+          ),
+          h('p', { className: 'dbmcp-hint dbmcp-edge-meta' }, edgeMeta(edge)),
+          edge.condition ? h('p', { className: 'dbmcp-hint dbmcp-edge-when' }, `${t('graph.whenClause')} ${edge.condition}`) : null,
+          status === 'stale' || status === 'rejected' ? edgeReason(edge) : null,
+          edgeActions(edge),
+          edgeRejectMenu(edge),
+          edgeConditionEditor(edge),
+          open ? h('div', { className: 'dbmcp-edge-record' }, h('p', { className: 'dbmcp-hint' }, t('graph.recordHint')), edgeHistory(edge)) : null,
+        )
+      }
+
+      /** The form that adds a join the catalog does not declare. */
+      const renderEdgeForm = () => {
+        const draft = graphForm || {}
+        const field = (key, label, placeholder) =>
+          h(
+            'label',
+            { className: 'dbmcp-cell' },
+            h('span', { className: 'dbmcp-label' }, label),
+            h('input', {
+              className: 'dbmcp-input dbmcp-mono',
+              defaultValue: draft[key] || '',
+              placeholder,
+              onChange: (event) => setGraphForm({ ...draft, [key]: event.target.value }),
+            }),
+          )
+        return h(
+          'div',
+          { className: 'dbmcp-edge-form is-new' },
+          h('p', { className: 'dbmcp-hint' }, t('graph.addHint')),
+          h(
+            'div',
+            { className: 'dbmcp-edge-grid' },
+            field('from_table', t('graph.fromTable'), 'T_TRANS'),
+            field('from_column', t('graph.fromColumn'), 'ORDER_ID'),
+            field('to_table', t('graph.toTable'), 'T_ORDER'),
+            field('to_column', t('graph.toColumn'), 'ID'),
+          ),
+          h(
+            'label',
+            { className: 'dbmcp-cell' },
+            h('span', { className: 'dbmcp-label' }, t('graph.condition')),
+            h('input', {
+              className: 'dbmcp-input dbmcp-mono',
+              defaultValue: draft.condition || '',
+              placeholder: t('graph.conditionPlaceholder'),
+              onChange: (event) => setGraphForm({ ...draft, condition: event.target.value }),
+            }),
+          ),
+          h(
+            'div',
+            { className: 'dbmcp-inline' },
+            h('button', { type: 'button', className: 'dbmcp-btn is-small is-primary', disabled: graphBusy, onClick: () => void proposeEdge() }, t('graph.save')),
+            h('button', { type: 'button', className: 'dbmcp-btn is-small', onClick: () => setGraphForm(null) }, t('graph.cancel')),
+          ),
+        )
+      }
+
+      const renderGraph = () => {
+        const list = (graph && graph.edges) || []
+        const counts = (graph && graph.counts) || null
+        const total = (graph && graph.total) || 0
+        const pending = counts ? counts.pending : 0
+        const confirmed = counts ? counts.confirmed + counts.trusted : 0
+        const broken = counts ? counts.stale + counts.rejected : 0
+        const filters = [
+          { id: 'all', label: t('graph.filterAll'), count: total },
+          { id: 'pending', label: t('graph.filterPending'), count: pending },
+          { id: 'confirmed', label: t('graph.filterConfirmed'), count: confirmed },
+          { id: 'broken', label: t('graph.filterBroken'), count: broken },
+        ]
+        const matches = (edge) => {
+          if (graphFilter === 'all') return true
+          if (graphFilter === 'confirmed') return edge.status === 'confirmed' || edge.status === 'trusted'
+          if (graphFilter === 'broken') return edge.status === 'stale' || edge.status === 'rejected'
+          return (edge.status || 'pending') === graphFilter
+        }
+        const visible = list.filter(matches)
+        const sourcePick = sources.length
+          ? h(
+              'select',
+              {
+                className: 'dbmcp-input dbmcp-select',
+                value: graphTarget,
+                onChange: (event) => {
+                  setGraphSource(event.target.value)
+                  setGraphOpen('')
+                  setGraphCondition('')
+                  setGraphReason('')
+                },
+              },
+              sources.map((item) => h('option', { key: item.id, value: item.id }, item.name || item.id)),
+            )
+          : null
+        return h(
+          Card,
+          {
+            title: t('graph.title'),
+            aside: graphBusy ? h('span', { className: 'dbmcp-pill' }, t('graph.busy')) : h('span', { className: 'dbmcp-pill' }, `${total}`),
+            actions: h(
+              'div',
+              { className: 'dbmcp-inline' },
+              h('button', { type: 'button', className: 'dbmcp-btn is-small', disabled: graphBusy || !graphTarget, onClick: () => void discoverEdges() }, t('graph.discover')),
+              h('button', { type: 'button', className: 'dbmcp-btn is-small', disabled: graphBusy || !graphTarget, onClick: () => void mineEdges() }, t('graph.mine')),
+              h('button', { type: 'button', className: 'dbmcp-btn is-small', disabled: graphBusy || !graphTarget, onClick: () => setGraphForm(graphForm ? null : {}) }, graphForm ? t('graph.cancel') : t('graph.add')),
+            ),
+          },
+          h('p', { className: 'dbmcp-hint' }, t('graph.hint')),
+          sources.length === 0
+            ? h('p', { className: 'dbmcp-hint' }, t('graph.noSources'))
+            : h(
+                'div',
+                { className: 'dbmcp-edge-toolbar' },
+                sourcePick,
+                h(
+                  'div',
+                  { className: 'dbmcp-edge-filters' },
+                  filters.map((filter) =>
+                    h(
+                      'button',
+                      {
+                        key: filter.id,
+                        type: 'button',
+                        className: graphFilter === filter.id ? 'dbmcp-filter is-on' : 'dbmcp-filter',
+                        onClick: () => setGraphFilter(filter.id),
+                      },
+                      `${filter.label} ${filter.count}`,
+                    ),
+                  ),
+                ),
+              ),
+          graphForm ? renderEdgeForm() : null,
+          graphError ? h('p', { className: 'dbmcp-hint dbmcp-edge-error' }, graphError) : null,
+          graphBusy && !graph ? h('p', { className: 'dbmcp-hint' }, t('loading')) : null,
+          sources.length === 0 ? null : visible.length === 0
+            ? h('p', { className: 'dbmcp-hint' }, graphFilter === 'all' ? t('graph.empty') : t('graph.emptyFiltered'))
+            : h('div', { className: 'dbmcp-edges' }, visible.map(renderEdge)),
+          graph && graph.truncated ? h('p', { className: 'dbmcp-hint' }, fmt(t('graph.truncated'), { n: total })) : null,
+        )
+      }
+
+      /* Page B — the trace result.
+         The page takes a value and nothing else that could look like a query: the
+         statements are built server-side from the relation graph, so the panel
+         cannot become a SQL console by degrees. What comes back is a walk, and the
+         walk is what the reader has to judge — so every step carries the feedback
+         buttons for the edge that carried it there. */
+      const traceCondition = (step) => {
+        const condition = step.condition || {}
+        const binds = (condition.binds || []).map((item) => String(item))
+        const shown = binds.length > 3 ? `${binds.slice(0, 3).join(', ')}, …` : binds.join(', ')
+        const column = condition.column ? `${condition.column} in (${shown})` : ''
+        return condition.extra ? `${column} ${t('trace.and')} ${condition.extra}` : column
+      }
+
+      const traceSample = (step) => {
+        const sample = step.sample || {}
+        const columns = sample.columns || []
+        const rows = sample.rows || []
+        if (columns.length === 0 || rows.length === 0) return null
+        const first = rows[0] || []
+        return h(
+          'p',
+          { className: 'dbmcp-hint dbmcp-trace-sample' },
+          columns.map((column, index) =>
+            h('span', { key: `${column}:${index}`, className: 'dbmcp-trace-cell' }, `${column}=${first[index] === null || first[index] === undefined ? '∅' : String(first[index])}`),
+          ),
+        )
+      }
+
+      const traceStepActions = (step) => {
+        const edge = step.edge || null
+        if (!edge) return null
+        const open = traceOpen === `${step.index}`
+        const pick = (verdict, reason) => {
+          void judgeStep(edge.id, verdict, reason)
+        }
+        return h(
+          'div',
+          { className: 'dbmcp-trace-judge' },
+          h(
+            'div',
+            { className: 'dbmcp-inline' },
+            h('button', { type: 'button', className: 'dbmcp-btn is-small', onClick: () => pick('ok') }, t('trace.judgeOk')),
+            h('button', { type: 'button', className: 'dbmcp-btn is-small', onClick: () => setTraceOpen(open ? '' : `${step.index}`) }, open ? t('trace.judgeCancel') : t('trace.judgeWrong')),
+          ),
+          open
+            ? h(
+                'div',
+                { className: 'dbmcp-inline dbmcp-trace-reasons' },
+                h('button', { type: 'button', className: 'dbmcp-btn is-small', onClick: () => pick('too_many', 'not_unique') }, t('graph.reasonNotUnique')),
+                h('button', { type: 'button', className: 'dbmcp-btn is-small', onClick: () => pick('too_many', 'wrong_column') }, t('graph.reasonWrongColumn')),
+                h('button', { type: 'button', className: 'dbmcp-btn is-small', onClick: () => pick('too_many', 'needs_condition') }, t('graph.reasonNeedsCondition')),
+                h('button', { type: 'button', className: 'dbmcp-btn is-small is-plain', onClick: () => pick('missing') }, t('trace.judgeMissing')),
+                h('button', { type: 'button', className: 'dbmcp-btn is-small is-danger', onClick: () => pick('irrelevant') }, t('trace.judgeIrrelevant')),
+              )
+            : null,
+        )
+      }
+
+      const renderTraceStep = (step) => {
+        const status = step.status || 'hit'
+        const edge = step.edge || null
+        return h(
+          'div',
+          { key: `${step.index}:${step.table}:${step.depth}`, className: `dbmcp-edge dbmcp-trace-step is-${status === 'empty' ? 'stale' : status === 'error' ? 'rejected' : 'confirmed'}` },
+          h(
+            'div',
+            { className: 'dbmcp-edge-head' },
+            h(
+              'code',
+              { className: 'dbmcp-edge-path' },
+              h('span', { className: 'dbmcp-trace-index' }, `${step.index}.`),
+              ' ',
+              h('span', null, step.table),
+            ),
+            h(
+              'span',
+              { className: 'dbmcp-inline' },
+              step.truncated ? h('span', { className: 'dbmcp-pill dbmcp-trace-cut' }, t('trace.truncated')) : null,
+              edge ? h('span', { className: edgeStatusClass(edge.status) }, edgeStatusLabel(edge.status)) : null,
+            ),
+          ),
+          h('p', { className: 'dbmcp-hint dbmcp-edge-meta' }, traceCondition(step)),
+          h(
+            'p',
+            { className: 'dbmcp-hint dbmcp-edge-meta' },
+            status === 'empty'
+              ? t('trace.chainBreaks')
+              : status === 'error'
+                ? t('trace.stepFailed')
+                : fmt(t('trace.rows'), { n: step.rows }),
+            edge ? ` · ${edgeSourceLabel(edge.source)}` : '',
+            typeof step.fanout === 'number' ? ` · ${fmt(t('graph.fanout'), { value: step.fanout.toFixed(1) })}` : '',
+          ),
+          traceSample(step),
+          step.note ? h('p', { className: 'dbmcp-hint dbmcp-edge-why' }, step.note) : null,
+          traceStepActions(step),
+        )
+      }
+
+      const renderTrace = () => {
+        const summary = (trace && trace.summary) || null
+        const steps = (trace && trace.steps) || []
+        const pending = (trace && trace.pending) || []
+        const warnings = (trace && trace.warnings) || []
+        const stopped = (trace && trace.stoppedAt) || []
+        const entry = (trace && trace.entry) || null
+        const directions = [
+          { id: 'both', label: t('trace.dirBoth') },
+          { id: 'down', label: t('trace.dirDown') },
+          { id: 'up', label: t('trace.dirUp') },
+        ]
+        const sourcePick = sources.length
+          ? h(
+              'select',
+              {
+                className: 'dbmcp-input dbmcp-select',
+                value: traceTarget,
+                onChange: (event) => {
+                  setTraceSource(event.target.value)
+                  setTrace(null)
+                  setTraceError(null)
+                },
+              },
+              sources.map((item) => h('option', { key: item.id, value: item.id }, item.name || item.id)),
+            )
+          : null
+        return h(
+          Card,
+          {
+            title: t('trace.title'),
+            aside: summary ? h('span', { className: 'dbmcp-pill' }, `${summary.tablesHit} / ${summary.tablesVisited}`) : null,
+          },
+          h('p', { className: 'dbmcp-hint' }, t('trace.hint')),
+          sources.length === 0
+            ? h('p', { className: 'dbmcp-hint' }, t('trace.noSources'))
+            : h(
+                'div',
+                { className: 'dbmcp-trace-form' },
+                h(
+                  'label',
+                  { className: 'dbmcp-cell' },
+                  h('span', { className: 'dbmcp-label' }, t('trace.value')),
+                  h('input', {
+                    className: 'dbmcp-input dbmcp-mono',
+                    value: traceValue,
+                    placeholder: t('trace.valuePlaceholder'),
+                    onChange: (event) => setTraceValue(event.target.value),
+                    onKeyDown: (event) => {
+                      if (event.key === 'Enter') void runTrace()
+                    },
+                  }),
+                ),
+                h(
+                  'div',
+                  { className: 'dbmcp-trace-grid' },
+                  sourcePick,
+                  h(
+                    'label',
+                    { className: 'dbmcp-cell' },
+                    h('span', { className: 'dbmcp-label' }, t('trace.entryTable')),
+                    h('input', {
+                      className: 'dbmcp-input dbmcp-mono',
+                      value: traceTable,
+                      placeholder: t('trace.entryOptional'),
+                      onChange: (event) => setTraceTable(event.target.value),
+                    }),
+                  ),
+                  h(
+                    'label',
+                    { className: 'dbmcp-cell' },
+                    h('span', { className: 'dbmcp-label' }, t('trace.entryColumn')),
+                    h('input', {
+                      className: 'dbmcp-input dbmcp-mono',
+                      value: traceColumn,
+                      placeholder: t('trace.entryOptional'),
+                      onChange: (event) => setTraceColumn(event.target.value),
+                    }),
+                  ),
+                  h(
+                    'label',
+                    { className: 'dbmcp-cell' },
+                    h('span', { className: 'dbmcp-label' }, t('trace.direction')),
+                    h(
+                      'select',
+                      {
+                        className: 'dbmcp-input dbmcp-select',
+                        value: traceDirection,
+                        onChange: (event) => setTraceDirection(event.target.value),
+                      },
+                      directions.map((item) => h('option', { key: item.id, value: item.id }, item.label)),
+                    ),
+                  ),
+                ),
+                h(
+                  'div',
+                  { className: 'dbmcp-inline' },
+                  h(
+                    'button',
+                    { type: 'button', className: 'dbmcp-btn is-small is-primary', disabled: traceBusy || !traceTarget, onClick: () => void runTrace() },
+                    traceBusy ? t('trace.running') : t('trace.run'),
+                  ),
+                ),
+              ),
+          traceError ? h('p', { className: 'dbmcp-hint dbmcp-edge-error' }, traceError) : null,
+          traceBusy && !trace ? h('p', { className: 'dbmcp-hint' }, t('loading')) : null,
+          trace && steps.length === 0
+            ? h('p', { className: 'dbmcp-hint' }, t('trace.nothing'))
+            : null,
+          trace && summary && steps.length > 0
+            ? h(
+                'div',
+                { className: 'dbmcp-trace-summary' },
+                h(
+                  'p',
+                  { className: 'dbmcp-hint' },
+                  entry
+                    ? fmt(t('trace.summary'), { table: entry.table || '—', column: entry.column || '—', tables: summary.tablesHit, ms: trace.elapsedMs })
+                    : fmt(t('trace.summaryShort'), { tables: summary.tablesHit, ms: trace.elapsedMs }),
+                ),
+                h(
+                  'p',
+                  { className: 'dbmcp-hint' },
+                  fmt(t('trace.counts'), {
+                    steps: summary.steps,
+                    rows: summary.rowsRead,
+                    depth: summary.depthReached,
+                  }),
+                ),
+              )
+            : null,
+          steps.length > 0 ? h('div', { className: 'dbmcp-edges' }, steps.map(renderTraceStep)) : null,
+          stopped.length > 0
+            ? h(
+                'div',
+                { className: 'dbmcp-trace-aside' },
+                h('p', { className: 'dbmcp-label' }, t('trace.stopped')),
+                stopped.map((item, index) =>
+                  h('p', { key: `${item.table}:${index}`, className: 'dbmcp-hint dbmcp-edge-why' }, `${item.table} — ${item.reason}`),
+                ),
+              )
+            : null,
+          pending.length > 0
+            ? h(
+                'div',
+                { className: 'dbmcp-trace-aside' },
+                h('p', { className: 'dbmcp-label' }, t('trace.pendingTitle')),
+                h('p', { className: 'dbmcp-hint' }, t('trace.pendingHint')),
+                pending.map((item, index) =>
+                  h(
+                    'p',
+                    { key: `${item.wouldReach}:${index}`, className: 'dbmcp-hint dbmcp-trace-pending' },
+                    h('span', { className: edgeStatusClass('pending') }, edgeStatusLabel('pending')),
+                    ' ',
+                    item.edge ? `${item.edge.from.table}.${item.edge.from.column} → ${item.edge.to.table}.${item.edge.to.column}` : '',
+                    item.wouldReach ? ` → ${item.wouldReach}` : '',
+                  ),
+                ),
+              )
+            : null,
+          warnings.length > 0
+            ? h(
+                'div',
+                { className: 'dbmcp-trace-aside' },
+                h('p', { className: 'dbmcp-label' }, t('trace.warnings')),
+                warnings.map((item, index) =>
+                  h('p', { key: `${item.code}:${index}`, className: 'dbmcp-hint dbmcp-edge-why' }, `[${item.code}] ${item.message}`),
+                ),
+              )
+            : null,
+        )
+      }
+
       let body
       if (state.status === 'loading') {
         body = h('div', { className: 'dbmcp-empty' }, t('loading'))
@@ -3453,6 +4286,8 @@ function groupTables(tables) {
               h(Row, { label: t('diag.uptime') }, formatUptime(data.host && data.host.uptimeMs)),
             ),
           ),
+          tab !== 'graph' ? null : renderGraph(),
+          tab !== 'trace' ? null : renderTrace(),
           tab !== 'clients' ? null : renderClients(),
           tab !== 'tools' ? null : renderTools(),
           tab !== 'tools' ? null : renderResults(),

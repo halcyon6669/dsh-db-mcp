@@ -23,6 +23,80 @@ report of each version in more detail.
 
 ### Added
 
+- **The relation graph answers what joins what.** The catalog used to answer that
+  question in two places — `describe_table` repeated each table's foreign keys, and
+  `list_relations` flattened a whole schema — so the answer a model read was not
+  the answer a walker would follow. Both are gone. `discover_relations` imports the
+  declared foreign keys into a per-datasource graph stored in
+  `relations/<sourceId>.json`, `propose_relation` records a join the catalog does not
+  declare, and `list_edges` reports every edge with its source (`fk`, `manual`,
+  `inferred`, `audit_mined`), status (`pending`, `confirmed`, `trusted`, `stale`,
+  `rejected`), optional `condition`, and counts. A proposed edge starts `pending` and
+  is not followed until it is confirmed.
+
+- **`trace_by_key` follows a value across tables.** Give it a value and it finds
+  where the value lives, then walks the relation graph hop by hop — reporting each
+  table, the condition it used, the statement it ran, how many rows came back, and
+  which edge carried it there. It follows only `confirmed` and `trusted` edges; a
+  pending edge that would have continued the walk is listed separately with the
+  reason, and a step with no rows is reported as the place the chain breaks rather
+  than silently ending the trace. Values are always bound parameters, so the SQL it
+  reports is safe to log, and `max_depth` (1–6) and `max_rows_per_table` (1–200) bound
+  the work.
+
+- **An edge now has a state machine, and trust is measured rather than assumed.**
+  `feedback_relation` records what a trace step showed. `ok` is the only verdict
+  that confirms an edge; `too_many` (with `wrong_column`, `needs_condition` or
+  `not_unique`) and `missing` make it `stale`, which stops the walker following it
+  until the column is fixed or the condition is added; `irrelevant` sends it to
+  `rejected`, the blacklist only a fresh `propose_relation` can lift. An edge
+  becomes `trusted` — followed without asking again — only after three
+  confirmations, with no rejection left standing, on an indexed or unique reference
+  column, with an average fanout of 5 or less; that badge is recomputed on every
+  confirmation rather than latched, so a join whose fanout grows falls back to
+  `confirmed`. `set_relation_condition` attaches the predicate a join needs without
+  changing its status, and `delete_edge` removes a typo outright. Traces now report
+  per-step fanout so a caller can pass the measured figure back.
+
+- **The relation graph has a page of its own.** The panel gained a **Relations**
+  tab: pick a data source, then read its edges as a list — each row shows the join
+  path (`t_line.trans_id → t_trans.id`), a status chip, the source, and how many
+  times it was confirmed. Filter chips narrow the list to all / pending / confirmed
+  / stale while the counters keep counting the whole graph, so a filter never hides
+  how much work is left. A pending edge offers confirm, reject (with the reason that
+  made the trace wrong) and add-condition; a stale edge shows what failed last and
+  offers a re-check or a delete; a rejected edge can be re-opened; a confirmed or
+  trusted edge shows its confirmation record. The page only calls the graph tools
+  through dedicated routes — it cannot run SQL.
+
+- **The trace result has a page too.** The **Trace** tab takes one value plus an
+  optional entry table, entry column and direction, and shows the walk as numbered
+  steps: the table, the condition with its bound values, the row count, a few sample
+  cells, the edge that carried it there, and that edge's status. Steps where the
+  chain broke (`0 rows — the chain stops here`), where the read was capped, or where
+  a warning was raised are marked in place; edges that were not followed because
+  they are still pending are listed separately with a pointer back to the graph. Each
+  step can be judged right / too many (with a reason) / missing / unrelated, and the
+  judgement is recorded against the edge behind it — so a wrong walk is also how the
+  graph gets corrected. The page accepts a value and never a statement: the SQL is
+  built server-side from the graph and bound as parameters, and the value itself is
+  never echoed back into the page.
+
+- **Joins can be mined out of the audit log.** Plenty of schemas declare no foreign
+  keys at all, yet the statements that already joined those tables are sitting in
+  `logs/audit.jsonl`. `mine_relations` reads the `execute_sql` and `explain_query`
+  lines, parses the equalities in their `on` clauses, and turns the recurring pairs
+  into edges — no statement is run again and no row data is involved. The statement
+  says the columns are equal, not which side owns the other, so the catalog decides:
+  the side whose column is a primary key or a single-column unique index becomes the
+  parent. A pair where neither side looks unique, or where both do, is reported under
+  `ambiguous` and left out of the graph instead of being guessed — the walker follows
+  every confirmed edge, so a wrong one is worse than a missing one. Mined edges
+  arrive `pending` with source `audit_mined`, and a source is never weakened (`fk` >
+  `manual` > `audit_mined` > `inferred`), so re-mining cannot relabel a declared key
+  or downgrade a hand proposal. The Relations page gained a **Mine the log** button
+  beside **Import foreign keys**.
+
 - **The audit log loads more as you scroll.** The panel used to show only the
   newest 12 calls with no way to reach the older ones. A **Load more** button now
   sits at the bottom of the audit card while entries remain, fetching the next
@@ -53,6 +127,14 @@ report of each version in more detail.
   `dsh-db-mcp` entry from the deprecated profile files (other entries are left
   alone), so the server is not registered twice and the banner has nothing to
   point at.
+
+### Removed
+
+- **`list_relations` and `describe_table.foreignKeys` are gone.** Two copies of the
+  same answer invited a model to read the one the walker would not use. The catalog
+  still holds the foreign keys, and `discover_relations` still reads them — it just
+  puts them in the relation graph instead of answering per call. `engines.list_relations`
+  stays as an internal helper.
 
 ## [1.0.0] - 2026-11-19
 

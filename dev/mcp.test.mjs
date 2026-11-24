@@ -60,14 +60,28 @@ try {
   await client.start()
   check('initialize handshake', client.serverInfo !== null, JSON.stringify(client.serverInfo))
   const names = client.tools.map((tool) => tool.name).sort()
-  check('ten tools listed', names.length === 10 && names.includes('test_connection') && names.includes('get_ddl'), names.join(', '))
+  check('sixteen tools listed', names.length === 16 && names.includes('test_connection') && names.includes('get_ddl'), names.join(', '))
   check(
     'tool names',
-    ['describe_table', 'explain_query', 'list_datasources', 'list_tables', 'list_relations', 'execute_sql', 'sample_rows'].every((name) =>
-      names.includes(name),
-    ),
+    [
+      'describe_table',
+      'explain_query',
+      'list_datasources',
+      'list_tables',
+      'list_edges',
+      'propose_relation',
+      'discover_relations',
+      'mine_relations',
+      'trace_by_key',
+      'feedback_relation',
+      'set_relation_condition',
+      'delete_edge',
+      'execute_sql',
+      'sample_rows',
+    ].every((name) => names.includes(name)),
     names.join(', '),
   )
+  check('list_relations is gone', !names.includes('list_relations'), names.join(', '))
 
   const sources = await client.callTool('list_datasources', {})
   check('list_datasources ok', sources.parsed?.ok === true, sources.text?.slice(0, 300))

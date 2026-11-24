@@ -809,14 +809,13 @@ class DescribeExtras(unittest.TestCase):
     a missing column comment, on the other hand, is not worth a failed call.
     """
 
-    def test_sqlite_reports_keys_indexes_and_size(self):
+    def test_sqlite_reports_indexes_and_size(self):
         cursor = RoutingCursor(
             {
                 'PRAGMA table_info("t")': [
                     (0, "id", "INTEGER", 0, None, 1),
                     (1, "pid", "INTEGER", 1, None, 0),
                 ],
-                'PRAGMA foreign_key_list("t")': [(0, 0, "parent", "pid", "id", "NO ACTION", "NO ACTION", "NONE")],
                 'PRAGMA index_list("t")': [(0, "idx_pid", 0, "c", 0)],
                 'PRAGMA index_info("idx_pid")': [(0, 1, "pid")],
             }
@@ -824,10 +823,9 @@ class DescribeExtras(unittest.TestCase):
         result = engines.describe_table(profile("sqlite"), FakeConnection(cursor), "t", None)
         self.assertEqual(
             sorted(result),
-            ["columns", "comment", "foreignKeys", "indexes", "primaryKey", "rowEstimate", "schema", "table"],
+            ["columns", "comment", "indexes", "primaryKey", "rowEstimate", "schema", "table"],
         )
         self.assertEqual(result["primaryKey"], ["id"])
-        self.assertEqual(result["foreignKeys"], [{"column": "pid", "refTable": "parent", "refColumn": "id", "name": None}])
         self.assertEqual(result["indexes"], [{"name": "idx_pid", "columns": ["pid"], "unique": False}])
         self.assertIsNone(result["comment"])
         self.assertIsNone(result["rowEstimate"])
@@ -836,29 +834,32 @@ class DescribeExtras(unittest.TestCase):
         # A driver or a grant that will not answer the index PRAGMA must not turn
         # a describe call into an error: the columns are the part that matters.
         cursor = RoutingCursor(
-            {
-                'PRAGMA table_info("t")': [(0, "id", "INTEGER", 0, None, 1)],
-                'PRAGMA foreign_key_list("t")': [(0, 0, "parent", "id", "id", "NO ACTION", "NO ACTION", "NONE")],
-            },
+            {'PRAGMA table_info("t")': [(0, "id", "INTEGER", 0, None, 1)]},
             fail=("index_list",),
         )
         result = engines.describe_table(profile("sqlite"), FakeConnection(cursor), "t", None)
         self.assertEqual([column["name"] for column in result["columns"]], ["id"])
-        self.assertEqual(len(result["foreignKeys"]), 1)
         self.assertEqual(result["indexes"], [])
 
-    def test_postgres_gets_keys_indexes_and_a_row_estimate(self):
+    def test_foreign_keys_are_not_answered_here(self):
+        # The relation graph is the one place that answers "what joins what";
+        # describe_table offering a second, weaker answer invites the model to
+        # pick the one the walker does not use.
+        cursor = RoutingCursor({'PRAGMA table_info("t")': [(0, "id", "INTEGER", 0, None, 1)]})
+        result = engines.describe_table(profile("sqlite"), FakeConnection(cursor), "t", None)
+        self.assertNotIn("foreignKeys", result)
+
+    def test_postgres_gets_indexes_and_a_row_estimate(self):
         cursor = RoutingCursor(
             {
-                "FOREIGN KEY": [("pid", "parent", "id", "t_pid_fkey")],
                 "from pg_indexes": [("t_pkey", "CREATE UNIQUE INDEX t_pkey ON public.t USING btree (id)")],
                 "reltuples": [(1234,)],
             }
         )
         extras = engines._describe_extras("postgres", cursor, "t", "public")
-        self.assertEqual(extras["foreignKeys"], [{"column": "pid", "refTable": "parent", "refColumn": "id", "name": "t_pid_fkey"}])
         self.assertEqual(extras["indexes"], [{"name": "t_pkey", "columns": ["id"], "unique": True}])
         self.assertEqual(extras["rowEstimate"], 1234)
+        self.assertNotIn("foreignKeys", extras)
 
     def test_a_never_analysed_table_has_no_estimate(self):
         # `reltuples` is -1 before the first ANALYZE; reporting that as a row
@@ -882,7 +883,11 @@ class DescribeExtras(unittest.TestCase):
 
 
 class Relations(unittest.TestCase):
-    """`list_relations` answers every join path for a schema in one call."""
+    """`list_relations` answers every join path for a schema in one call.
+
+    It is an internal helper now — `discover_relations` imports its rows into the
+    relation graph — so these tests call it directly rather than through a tool.
+    """
 
     def test_sqlite_walks_the_tables_it_has(self):
         cursor = RoutingCursor(

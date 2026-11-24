@@ -1199,6 +1199,44 @@ export function createHost(options = {}) {
     }
   }
 
+  /**
+   * One fixed route per relation-graph tool. The panel never reaches the
+   * database itself and never borrows /mcp/call: that generic door would turn
+   * every future tool into a panel endpoint, and this page is only allowed to
+   * ask the six graph questions plus one trace.
+   */
+  async function callTool(tool, args) {
+    const state = await ensureMcp();
+    if (state.phase !== "ready")
+      return {
+        status: 500,
+        body: {
+          ok: false,
+          error: state.error || "server not running",
+          ...state,
+        },
+      };
+    try {
+      const result = await bridge.call(tool, args, { client: "panel" });
+      if (result.isError === true)
+        return {
+          status: 200,
+          body: {
+            ok: false,
+            tool,
+            error: (result.value && result.value.error) || null,
+            message: result.text || "the tool reported an error",
+          },
+        };
+      return { status: 200, body: { ok: true, tool, ...(result.value || {}) } };
+    } catch (error) {
+      return {
+        status: 500,
+        body: { ok: false, error: String((error && error.message) || error) },
+      };
+    }
+  }
+
   async function readRegistry() {
     const read = await readJson(registryFile);
     if (read.missing)
@@ -3196,6 +3234,16 @@ export function createHost(options = {}) {
         }
         if (route === "/clients")
           return sendJson(response, 200, await inspectClients());
+        if (route === "/relations") {
+          const search = new URL(request.url, "http://localhost").searchParams;
+          const args = {};
+          for (const key of ["datasource", "status", "source"]) {
+            const value = trimmed(search.get(key));
+            if (value) args[key] = value;
+          }
+          const result = await callTool("list_edges", args);
+          return sendJson(response, result.status, result.body);
+        }
         if (route === "/mcp/status") {
           const state = bridge.status();
           return sendJson(response, 200, {
@@ -3358,6 +3406,59 @@ export function createHost(options = {}) {
         const result = await configureClient(payload);
         return sendJson(response, result.status, result.body);
       }
+      if (route === "/relations/discover") {
+        const result = await callTool("discover_relations", {
+          datasource: trimmed(payload.datasource) || undefined,
+          schema: trimmed(payload.schema) || undefined,
+        });
+        return sendJson(response, result.status, result.body);
+      }
+      if (route === "/relations/propose") {
+        const result = await callTool("propose_relation", {
+          from_table: trimmed(payload.from_table),
+          from_column: trimmed(payload.from_column),
+          to_table: trimmed(payload.to_table),
+          to_column: trimmed(payload.to_column),
+          datasource: trimmed(payload.datasource) || undefined,
+          condition: trimmed(payload.condition) || undefined,
+          note: trimmed(payload.note) || undefined,
+        });
+        return sendJson(response, result.status, result.body);
+      }
+      if (route === "/relations/feedback") {
+        const result = await callTool("feedback_relation", {
+          edge_id: trimmed(payload.edge_id),
+          verdict: trimmed(payload.verdict),
+          reason: trimmed(payload.reason) || undefined,
+          note: trimmed(payload.note) || undefined,
+          datasource: trimmed(payload.datasource) || undefined,
+          fanout: typeof payload.fanout === "number" ? payload.fanout : undefined,
+        });
+        return sendJson(response, result.status, result.body);
+      }
+      if (route === "/relations/condition") {
+        const result = await callTool("set_relation_condition", {
+          edge_id: trimmed(payload.edge_id),
+          condition: typeof payload.condition === "string" ? payload.condition : undefined,
+          datasource: trimmed(payload.datasource) || undefined,
+        });
+        return sendJson(response, result.status, result.body);
+      }
+      if (route === "/relations/delete") {
+        const result = await callTool("delete_edge", {
+          edge_id: trimmed(payload.edge_id),
+          datasource: trimmed(payload.datasource) || undefined,
+        });
+        return sendJson(response, result.status, result.body);
+      }
+      if (route === "/relations/mine") {
+        const result = await callTool("mine_relations", {
+          datasource: trimmed(payload.datasource) || undefined,
+          schema: trimmed(payload.schema) || undefined,
+          limit: Number.isFinite(Number(payload.limit)) ? Number(payload.limit) : undefined,
+        });
+        return sendJson(response, result.status, result.body);
+      }
       if (route === "/mcp/start" || route === "/mcp/restart") {
         const state =
           route === "/mcp/start"
@@ -3373,6 +3474,19 @@ export function createHost(options = {}) {
           ok: state.phase === "ready",
           ...state,
         });
+      }
+      if (route === "/trace") {
+        const result = await callTool("trace_by_key", {
+          value: trimmed(payload.value),
+          datasource: trimmed(payload.datasource) || undefined,
+          entry_table: trimmed(payload.entry_table) || undefined,
+          entry_column: trimmed(payload.entry_column) || undefined,
+          max_depth: typeof payload.max_depth === "number" ? payload.max_depth : undefined,
+          max_rows_per_table:
+            typeof payload.max_rows_per_table === "number" ? payload.max_rows_per_table : undefined,
+          direction: trimmed(payload.direction) || undefined,
+        });
+        return sendJson(response, result.status, result.body);
       }
       if (route === "/mcp/call") {
         const tool = trimmed(payload.tool);

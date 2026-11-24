@@ -1342,27 +1342,24 @@ def _describe_extras(kind: str, cursor, table: str, owner: str | None) -> dict:
     `information_schema`, a catalog view a GaussDB build does not carry) leaves
     that field empty and the describe call still succeeds.
     """
-    extras = {"foreignKeys": [], "indexes": [], "comment": None, "rowEstimate": None}
+    # Foreign keys are deliberately absent: the relation graph is the one place
+    # that answers "what joins what" (see `relations.py`), so a describe call
+    # cannot offer a second, weaker answer that the walker would not use.
+    extras = {"indexes": [], "comment": None, "rowEstimate": None}
     if kind == "sqlite":
-        pairs = (
-            ("foreignKeys", lambda: _sqlite_foreign_keys(cursor, table)),
-            ("indexes", lambda: _sqlite_indexes(cursor, table)),
-        )
+        pairs = (("indexes", lambda: _sqlite_indexes(cursor, table)),)
     elif kind in PG_LIKE:
         pairs = (
-            ("foreignKeys", lambda: _pg_foreign_keys(cursor, table, owner or "public")),
             ("indexes", lambda: _pg_indexes(cursor, table, owner or "public")),
             ("rowEstimate", lambda: _pg_row_estimate(cursor, table, owner or "public")),
         )
     elif kind == "mysql":
         pairs = (
-            ("foreignKeys", lambda: _mysql_foreign_keys(cursor, table, owner)),
             ("indexes", lambda: _mysql_indexes(cursor, table, owner)),
             ("rowEstimate", lambda: _mysql_row_estimate(cursor, table, owner)),
         )
     elif kind == "oracle":
         pairs = (
-            ("foreignKeys", lambda: _oracle_foreign_keys(cursor, table, owner)),
             ("indexes", lambda: _oracle_indexes(cursor, table, owner)),
             ("rowEstimate", lambda: _oracle_row_estimate(cursor, table, owner)),
         )
@@ -1374,7 +1371,6 @@ def _describe_extras(kind: str, cursor, table: str, owner: str | None) -> dict:
         except Exception:  # noqa: BLE001 - a missing grant must not fail describe
             extras[key] = [] if key != "rowEstimate" else None
     return extras
-
 
 def _describe_comments(kind: str, cursor, table: str, owner: str | None) -> tuple[str | None, dict[str, str]]:
     try:
@@ -1427,7 +1423,7 @@ def describe_table(profile: dict, connection, table: str, schema: str | None) ->
     owner: str | None = None
     comment: str | None = None
     column_comments: dict[str, str] = {}
-    extras: dict = {"foreignKeys": [], "indexes": [], "comment": None, "rowEstimate": None}
+    extras: dict = {"indexes": [], "comment": None, "rowEstimate": None}
     cursor = connection.cursor()
     try:
         if kind == "sqlite":
@@ -1535,7 +1531,6 @@ def describe_table(profile: dict, connection, table: str, schema: str | None) ->
         "schema": effective,
         "columns": columns,
         "primaryKey": primary,
-        "foreignKeys": extras["foreignKeys"],
         "indexes": extras["indexes"],
         "comment": comment or extras.get("comment"),
         "rowEstimate": extras["rowEstimate"],
@@ -1544,6 +1539,24 @@ def describe_table(profile: dict, connection, table: str, schema: str | None) ->
 
 # --------------------------------------------------------------------------- #
 # relations
+
+
+def indexed_columns(profile: dict, connection, table: str, schema: str | None = None) -> set[str]:
+    """The columns of one table that an index (or the primary key) can serve.
+
+    Probing an unindexed column for a value turns a lookup into a table scan, and
+    entry-point detection does it on several candidate columns at once. Knowing
+    which ones are indexed keeps that cheap.
+    """
+    try:
+        info = describe_table(profile, connection, table, schema)
+    except DbError:
+        return set()
+    covered: set[str] = {name for name in (info.get("primaryKey") or [])}
+    for index in info.get("indexes") or []:
+        for name in index.get("columns") or []:
+            covered.add(name)
+    return {name for name in covered if name}
 
 
 def _relations_sql(kind: str) -> tuple[str, bool]:
@@ -1597,7 +1610,13 @@ def _relations_sql(kind: str) -> tuple[str, bool]:
 
 
 def list_relations(profile: dict, connection, schema: str | None, limit: int = 500) -> dict:
-    """Every foreign key in one schema, as flat rows ready to become joins."""
+    """Every foreign key in one schema, as flat rows ready to become joins.
+
+    Internal: the relation graph (`relations.discover`) calls this to import what
+    the catalog declares. It is deliberately not an MCP tool — the graph is the
+    single answer to "what joins what", and two answers invite the model to pick
+    the one that is not there.
+    """
     kind = profile.get("kind")
     config = profile.get("config") or {}
     effective = schema or config.get("schema") or None
@@ -1639,6 +1658,219 @@ def list_relations(profile: dict, connection, schema: str | None, limit: int = 5
         "relations": relations[:limit],
         "truncated": truncated,
         "total": len(relations),
+    }
+
+
+# --------------------------------------------------------------------------- #
+# tracing: the three dialect-shaped reads the walker needs
+
+# Column names that usually carry a business key. A value the caller hands over
+# has no declared home, so these are the guesses worth probing — cheap, and
+# wrong only in the sense that they return nothing.
+ENTRY_COLUMN_PATTERNS = ("id", "*_id", "*_no", "code", "*_code", "sn")
+
+_NUMERIC_TYPE_MARKERS = (
+    "int",
+    "serial",
+    "numeric",
+    "decimal",
+    "number",
+    "real",
+    "float",
+    "double",
+    "money",
+)
+_TEXT_TYPE_MARKERS = ("char", "text", "clob", "string", "uuid", "enum", "json")
+_TEMPORAL_TYPE_MARKERS = ("date", "time", "timestamp")
+
+
+def _looks_numeric(text: str) -> bool:
+    """Whether the text reads as a plain number.
+
+    `float()` also accepts `nan` and `inf`, which no id column holds, and it
+    accepts `1e5`, which would turn the string "1e5" into a number the column
+    never stored. Only a plain decimal shape counts.
+    """
+    body = str(text).strip()
+    if not body:
+        return False
+    if body[0] in "+-":
+        body = body[1:]
+    if not body:
+        return False
+    head, _, tail = body.partition(".")
+    return (head.isdigit() or not head) and (not tail or tail.isdigit()) and bool(head or tail)
+
+
+def _looks_temporal(text: str) -> bool:
+    body = str(text).strip()
+    if len(body) < 6:
+        return False
+    return body[:4].isdigit() and ("-" in body or ":" in body)
+
+
+def _type_fits(type_name, value) -> bool:
+    """Whether a column of that type could hold the value the caller passed.
+
+    Probing `created_at` with `A001` costs a scan and teaches nothing, so the
+    obvious mismatches are skipped before a query is built. An unknown type is
+    let through: the database is the better judge, and a wrong guess only costs
+    one empty result.
+    """
+    lowered = str(type_name or "").casefold()
+    if not lowered:
+        return True
+    if any(marker in lowered for marker in _TEMPORAL_TYPE_MARKERS):
+        return _looks_temporal(value)
+    if any(marker in lowered for marker in _NUMERIC_TYPE_MARKERS):
+        return _looks_numeric(value)
+    if any(marker in lowered for marker in _TEXT_TYPE_MARKERS):
+        return True
+    return True
+
+
+def _name_matches(name: str, patterns) -> bool:
+    lowered = str(name).casefold()
+    for pattern in patterns:
+        if pattern.startswith("*"):
+            if lowered.endswith(pattern[1:]):
+                return True
+        elif lowered == pattern:
+            return True
+    return False
+
+
+def entry_candidates(
+    profile: dict,
+    connection,
+    table: str,
+    column: str | None = None,
+    value: str | None = None,
+    known=(),
+    schema: str | None = None,
+    limit: int = 8,
+) -> list[dict]:
+    """Columns of one table that could be where `value` enters.
+
+    A caller that names a column gets exactly that column back, or an error: a
+    typo is worth reporting, not worth working around.
+
+    Otherwise the candidates are the columns a join already points at (`known`,
+    the endpoints of the relation graph) plus the indexed or primary-key columns
+    whose name looks like a key. A declared edge column is probed even when no
+    index covers it — the graph says the join is real, and skipping it would make
+    tracing fail on exactly the schemas somebody bothered to describe.
+    """
+    try:
+        info = describe_table(profile, connection, table, schema)
+    except DbError:
+        return []
+    columns = info.get("columns") or []
+    primary = set(info.get("primaryKey") or [])
+    indexed: set[str] = set(primary)
+    for index in info.get("indexes") or []:
+        indexed.update(name for name in (index.get("columns") or []) if name)
+    if column:
+        for entry in columns:
+            if str(entry["name"]).casefold() == str(column).casefold():
+                return [
+                    {
+                        "table": table,
+                        "column": entry["name"],
+                        "reason": "named by the caller",
+                        "indexed": entry["name"] in indexed,
+                        "type": entry.get("type"),
+                    }
+                ]
+        raise DbError(
+            "user_error",
+            f"{table} has no column named {column}",
+            "call describe_table to see the columns of that table",
+        )
+    wanted = {str(name).casefold() for name in known if name}
+    found: list[dict] = []
+    for entry in columns:
+        name = entry["name"]
+        if not _type_fits(entry.get("type"), value):
+            continue
+        if str(name).casefold() in wanted:
+            reason = "an edge of the relation graph points here"
+        elif name in primary:
+            reason = "primary key"
+        elif name in indexed and _name_matches(name, ENTRY_COLUMN_PATTERNS):
+            reason = "indexed, and the name looks like a key"
+        elif name in indexed:
+            reason = "indexed"
+        else:
+            continue
+        found.append(
+            {
+                "table": table,
+                "column": name,
+                "reason": reason,
+                "indexed": name in indexed,
+                "type": entry.get("type"),
+            }
+        )
+    rank = {
+        "an edge of the relation graph points here": 0,
+        "primary key": 1,
+        "indexed, and the name looks like a key": 2,
+        "indexed": 3,
+    }
+    found.sort(key=lambda item: (rank.get(item["reason"], 9), str(item["column"]).casefold()))
+    return found[: max(1, int(limit))]
+
+
+def fetch_matching(
+    profile: dict,
+    connection,
+    table: str,
+    column: str,
+    values,
+    limit: int,
+    extra_condition: str | None = None,
+    schema: str | None = None,
+) -> dict:
+    """Rows where `column` holds one of `values`, plus the SQL that found them.
+
+    The values never reach the SQL text: they travel as bind parameters, so a
+    value that contains a quote cannot change the statement, and the statement
+    the trace reports is the one that ran. One row past `limit` is fetched so
+    truncation can be reported instead of guessed.
+    """
+    kind = profile.get("kind")
+    wanted = [value for value in values if value is not None]
+    if not wanted:
+        return {"columns": [], "rows": [], "truncated": False, "sql": "", "binds": []}
+    if kind == "oracle":
+        tokens = [f":{index + 1}" for index in range(len(wanted))]
+    elif kind == "sqlite":
+        tokens = ["?"] * len(wanted)
+    else:
+        tokens = ["%s"] * len(wanted)
+    where = f"{_quote(kind, column)} in ({', '.join(tokens)})"
+    if extra_condition:
+        where = f"({where}) and ({extra_condition})"
+    cap = max(1, int(limit)) + 1
+    sql = f"select * from {qualified(profile, table, exact=True)} where {where}{_limit_clause(kind, cap)}"
+    if kind == "sqlite":
+        _arm_sqlite_timeout(connection)
+    cursor = connection.cursor()
+    try:
+        cursor.execute(sql, list(wanted))
+        columns, rows, more = _rows(cursor, cap)
+    finally:
+        cursor.close()
+        if kind == "sqlite":
+            _disarm_sqlite_timeout(connection)
+    truncated = bool(more) or len(rows) > limit
+    return {
+        "columns": columns,
+        "rows": rows[: max(1, int(limit))],
+        "truncated": truncated,
+        "sql": sql,
+        "binds": list(wanted),
     }
 
 

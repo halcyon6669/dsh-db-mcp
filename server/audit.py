@@ -44,6 +44,36 @@ def path() -> Path:
     return store.runtime_dir() / AUDIT_FILE
 
 
+def lines() -> list[dict]:
+    """Every parsable line in the log, oldest rotation first.
+
+    Reading is not gated by `enabled()`: that switch decides who *writes*, and a
+    process that does not write can still want to read what another one wrote —
+    mining joins out of past statements is exactly that case. A rotated file is
+    included so a long-running install does not forget last week's joins, and a
+    line that does not parse is skipped rather than failing the whole read: one
+    truncated line from a killed process must not make the history unreadable.
+    """
+    base = path()
+    found: list[dict] = []
+    for target in (base.parent / "audit.1.jsonl", base):
+        try:
+            with target.open("r", encoding="utf-8") as handle:
+                for raw in handle:
+                    text = raw.strip()
+                    if not text:
+                        continue
+                    try:
+                        record = json.loads(text)
+                    except ValueError:
+                        continue
+                    if isinstance(record, dict):
+                        found.append(record)
+        except OSError:
+            continue
+    return found
+
+
 def _settings() -> dict:
     try:
         with (store.runtime_dir() / "settings.json").open("r", encoding="utf-8") as handle:

@@ -24,6 +24,9 @@ const runtimeDir = process.env.DB_MCP_RUNTIME || join(process.env.DSH_HOME || jo
 const testFiles = [
   join(packageDir, 'dev', 'engines.test.py'),
   join(packageDir, 'dev', 'writes.test.py'),
+  join(packageDir, 'dev', 'relations.test.py'),
+  join(packageDir, 'dev', 'trace.test.py'),
+  join(packageDir, 'dev', 'mining.test.py'),
   join(packageDir, 'dev', 'secretbox.test.py'),
   join(packageDir, 'dev', 'audit.test.py'),
   join(packageDir, 'dev', 'main.test.py'),

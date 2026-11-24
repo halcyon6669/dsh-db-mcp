@@ -47,6 +47,49 @@ export function renderScope(value) {
   return `this conversation may only use: ${ids.join(', ')}`;
 }
 
+/**
+ * Render a trace as a walk: one line per step, with the branch that stopped.
+ * The value itself is never printed — it may be personal data and the caller
+ * already knows what it searched for.
+ */
+function renderTrace(value) {
+  const entry = value.entry || {}
+  const summary = value.summary || {}
+  const steps = Array.isArray(value.steps) ? value.steps : []
+  const head = []
+  const where = entry.table ? `${entry.table}.${entry.column}` : 'no entry point'
+  head.push(`trace ${where} — ${summary.tablesHit || 0} table(s) hit in ${value.elapsedMs || 0}ms`)
+  const lines = steps.map((step) => {
+    const edge = step.edge || {}
+    const notes = []
+    if (edge.source) notes.push(edge.source)
+    if (edge.status) notes.push(edge.status)
+    const when = step.condition && step.condition.extra ? `  where ${step.condition.extra}` : ''
+    const count = step.status === 'empty' ? '0 rows — the chain stops here' : `${step.rows} row(s)`
+    if (step.status === 'empty') notes.push('broken')
+    if (step.truncated) notes.push('truncated')
+    const fanout = typeof step.fanout === 'number' ? `  fanout ${step.fanout}` : ''
+    const label = notes.filter(Boolean).join(' · ')
+    const line = `${step.index}. ${step.table}.${step.condition ? step.condition.column : ''}  ${count}${label ? `  [${label}]` : ''}${fanout}${when}`
+    return line
+  })
+  const tail = []
+  const pending = Array.isArray(value.pending) ? value.pending : []
+  for (const item of pending) {
+    const edge = item.edge || {}
+    const frm = edge.from || {}
+    const to = edge.to || {}
+    tail.push(`pending: ${frm.table}.${frm.column} -> ${to.table}.${to.column} was not followed (${item.reason || 'not confirmed'})`)
+  }
+  for (const warning of value.warnings || []) {
+    tail.push(`warning [${warning.code}]: ${warning.message}`)
+  }
+  for (const stopped of value.stoppedAt || []) {
+    tail.push(`stopped at ${stopped.table}: ${stopped.reason}`)
+  }
+  return [...head, ...lines, ...tail].join('\n')
+}
+
 /** Render one MCP tool result as readable text. */
 export function renderResult(value) {
   if (!value || typeof value !== 'object') return typeof value === 'string' ? value : JSON.stringify(value);
@@ -97,23 +140,102 @@ export function renderResult(value) {
     if (Array.isArray(value.primaryKey) && value.primaryKey.length) {
       head.push(`primary key (${value.primaryKey.join(', ')})`);
     }
-    const keys = (value.foreignKeys || [])
-      .filter((key) => key && key.column)
-      .map((key) => `  ${key.column} -> ${key.refTable}.${key.refColumn}`);
-    if (keys.length) head.push('foreign keys:', ...keys);
     const indexes = (value.indexes || [])
       .filter((index) => index && index.name)
       .map((index) => `  ${index.name}${index.unique ? ' unique' : ''} (${(index.columns || []).join(', ')})`);
     if (indexes.length) head.push('indexes:', ...indexes);
     return `${head.join('\n')}\n${lines.join('\n')}`;
   }
-  if (Array.isArray(value.relations)) {
-    if (value.relations.length === 0) return value.schema ? `no foreign keys in ${value.schema}` : 'no foreign keys';
-    const lines = value.relations.map((entry) => `${entry.table}.${entry.column} -> ${entry.refTable}.${entry.refColumn}${entry.name ? `  (${entry.name})` : ''}`);
-    const more = value.truncated ? `\n… truncated (${value.total} total)` : '';
-    return lines.join('\n') + more;
+  if (value.edge && value.previousStatus) {
+    const edge = value.edge
+    const frm = edge.from || {}
+    const to = edge.to || {}
+    const stats = edge.stats || {}
+    const notes = [`${edge.source} · ${value.previousStatus} -> ${edge.status}`]
+    if (stats.confirmCount) notes.push(`${stats.confirmCount} confirmed`)
+    if (stats.rejectCount) notes.push(`${stats.rejectCount} rejected`)
+    if (typeof stats.avgFanout === 'number') notes.push(`fanout ${stats.avgFanout}`)
+    const last = stats.lastFailure
+    const why = last ? `\nlast failure: ${last.verdict}${last.reason ? ` (${last.reason})` : ''}` : ''
+    return `${frm.table}.${frm.column} -> ${to.table}.${to.column}  [${notes.join(' · ')}]${why}`
   }
-  return JSON.stringify(value, null, 2);
+  if (value.edge && !Array.isArray(value.edges)) {
+    const edge = value.edge
+    const frm = edge.from || {}
+    const to = edge.to || {}
+    const stats = edge.stats || {}
+    const notes = [edge.source, edge.status]
+    if (stats.confirmCount) notes.push(`${stats.confirmCount} confirmed`)
+    if (typeof stats.avgFanout === 'number') notes.push(`fanout ${stats.avgFanout}`)
+    const condition = edge.condition ? `  when ${edge.condition}` : ''
+    const headline = `${frm.table}.${frm.column} -> ${to.table}.${to.column}  [${notes.filter(Boolean).join(' · ')}]${condition}`
+    const changes = []
+    if (value.created) changes.push('new edge — it starts out pending')
+    if (value.reopened) changes.push('reopened — the earlier verdict was dropped')
+    if (value.changed === true) changes.push(edge.condition ? 'condition set' : 'condition cleared')
+    if (value.changed === false) changes.push('nothing changed')
+    return [headline, ...changes].join('\n')
+  }
+  if (typeof value.mined === 'number' && Array.isArray(value.ambiguous)) {
+    const imported = value.imported || 0
+    const skipped = value.skipped || 0
+    const head = `mined ${value.mined} join(s) from the audit log — ${imported} new, ${skipped} already known`
+    const lines = [head]
+    if (!value.mined) {
+      lines.push('the log holds no statement that joined two tables for this source')
+      return lines.join('\n')
+    }
+    const tally = ['pending', 'confirmed', 'trusted', 'stale', 'rejected']
+      .filter((status) => value.counts && value.counts[status])
+      .map((status) => `${value.counts[status]} ${status}`)
+    if (tally.length) lines.push(`graph now: ${tally.join(', ')}`)
+    if (value.ambiguous.length) {
+      lines.push('could not tell which side is the parent:')
+      for (const item of value.ambiguous.slice(0, 10)) {
+        lines.push(`  ${item.left.table}.${item.left.column} = ${item.right.table}.${item.right.column}  (${item.reason})`)
+      }
+      if (value.ambiguous.length > 10) lines.push(`  … ${value.ambiguous.length - 10} more`)
+      lines.push('propose_relation records the direction you know')
+    }
+    return lines.join('\n')
+  }
+  if (value.deleted && value.counts) {
+    const edge = value.deleted
+    const frm = edge.from || {}
+    const to = edge.to || {}
+    const tally = ['pending', 'confirmed', 'trusted', 'stale', 'rejected']
+      .filter((status) => value.counts[status])
+      .map((status) => `${value.counts[status]} ${status}`)
+    const left = tally.length ? `${tally.join(', ')} left` : 'the graph is empty now'
+    return `removed ${frm.table}.${frm.column} -> ${to.table}.${to.column}  (${left})`
+  }
+  if (Array.isArray(value.edges) && value.counts) {
+    const counts = value.counts || {}
+    const tally = ['pending', 'confirmed', 'trusted', 'stale', 'rejected']
+      .filter((status) => counts[status])
+      .map((status) => `${counts[status]} ${status}`)
+    if (!value.edges.length) {
+      const none = tally.length ? `no edges match — ${tally.join(', ')}` : 'no relations recorded yet'
+      return `${none}\ncall discover_relations to import the declared foreign keys`
+    }
+    const lines = value.edges.map((edge) => {
+      const frm = edge.from || {}
+      const to = edge.to || {}
+      const stats = edge.stats || {}
+      const notes = [edge.source, edge.status]
+      if (stats.confirmCount) notes.push(`${stats.confirmCount} confirmed`)
+      if (typeof stats.avgFanout === 'number') notes.push(`fanout ${stats.avgFanout}`)
+      const condition = edge.condition ? `  when ${edge.condition}` : ''
+      return `${frm.table}.${frm.column} -> ${to.table}.${to.column}  [${notes.filter(Boolean).join(' · ')}]${condition}`
+    })
+    const head = tally.length ? [`edges — ${tally.join(', ')}`] : []
+    const more = value.truncated ? `\n… truncated (${value.total} total)` : ''
+    return [...head, ...lines].join('\n') + more
+  }
+  if (Array.isArray(value.steps) && value.summary && value.entry) {
+    return renderTrace(value)
+  }
+  return JSON.stringify(value, null, 2)
 }
 
 /**

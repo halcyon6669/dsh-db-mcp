@@ -1,0 +1,556 @@
+"""Trace one value through the relation graph.
+
+The walker is deliberately dumb. It never invents a join: it only follows edges
+somebody confirmed, it reads rows with bound parameters, and it reports every
+place the walk stopped instead of quietly returning a shorter answer.
+
+Two rules keep the output honest:
+
+* a value never enters the SQL text. `fetch_matching` binds it, so the statement
+  reported next to a step is the statement that ran, and a value containing a
+  quote cannot change it.
+* a step that found nothing is a step. `status: "empty"` is the chain breaking,
+  and the caller sees it instead of a silently missing branch.
+"""
+
+from __future__ import annotations
+
+import time
+from collections import deque
+
+import engines
+import relations
+import store
+
+MAX_DEPTH_LIMIT = 6
+MAX_ROWS_LIMIT = 200
+MAX_STEPS = 200
+PROBE_COLUMNS = 8
+PROBE_SECONDS = 3.0
+SAMPLE_ROWS = 3
+SAMPLE_COLUMNS = 6
+
+# Only these two are walked. A pending edge is a suggestion nobody confirmed, and
+# a rejected one is on the blacklist; following either would make the trace
+# assert joins the graph itself does not claim.
+WALK_STATUSES = ("confirmed", "trusted")
+DIRECTIONS = ("down", "up", "both")
+
+
+def _clamp(value, low: int, high: int, default: int) -> int:
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(low, min(high, number))
+
+
+def _fold(text) -> str:
+    return str(text or "").casefold()
+
+
+def _direction(value) -> str:
+    text = str(value or "").strip().lower() or "both"
+    if text not in DIRECTIONS:
+        raise store.StoreError(
+            "user_error",
+            f"unknown direction: {value}",
+            "use one of: " + ", ".join(DIRECTIONS),
+        )
+    return text
+
+
+def _edge_summary(edge: dict) -> dict:
+    return {
+        "id": edge.get("id"),
+        "source": edge.get("source"),
+        "status": edge.get("status"),
+        "from": dict(edge.get("from") or {}),
+        "to": dict(edge.get("to") or {}),
+    }
+
+
+def _walkable(edges) -> list[dict]:
+    return [edge for edge in edges if edge.get("status") in WALK_STATUSES]
+
+
+def _incident(edges, table: str) -> list[tuple]:
+    """Edges touching `table`, each with the endpoint on that table's side.
+
+    The tuple is (edge, side, here, there): `here` is the endpoint in `table`,
+    `there` the endpoint in the other table. `side` says which side of the edge
+    `table` sits on, which is what the direction filter needs.
+    """
+    wanted = _fold(table)
+    found = []
+    for edge in edges:
+        frm = edge.get("from") or {}
+        to = edge.get("to") or {}
+        if _fold(frm.get("table")) == wanted:
+            found.append((edge, "from", frm, to))
+        elif _fold(to.get("table")) == wanted:
+            found.append((edge, "to", to, frm))
+    return found
+
+
+def _follows(side: str, direction: str) -> bool:
+    """Whether a hop off `side` is allowed in `direction`.
+
+    `to` is the referenced side (the one side), so leaving it walks towards the
+    rows that point at it — `down`, the direction data flows. `from` holds the
+    value, so leaving it follows the foreign key to the row it names — `up`.
+    """
+    if side == "to":
+        return direction in ("down", "both")
+    return direction in ("up", "both")
+
+
+def _column_index(columns, name):
+    wanted = _fold(name)
+    for index, label in enumerate(columns):
+        if _fold(label) == wanted:
+            return index
+    return None
+
+
+def _entry_tables(edges) -> list[str]:
+    """Tables worth probing for an entry point, most connected first.
+
+    A table nobody joins to is a bad guess, so the order follows how many edges
+    touch a table. Ties go by name to keep the report stable.
+    """
+    tally: dict[str, int] = {}
+    spelling: dict[str, str] = {}
+    for edge in edges:
+        for endpoint in (edge.get("from") or {}, edge.get("to") or {}):
+            table = endpoint.get("table")
+            if not table:
+                continue
+            key = _fold(table)
+            tally[key] = tally.get(key, 0) + 1
+            spelling.setdefault(key, str(table))
+    order = sorted(tally, key=lambda key: (-tally[key], key))
+    return [spelling[key] for key in order]
+
+
+def _known_columns(edges, table: str) -> list[str]:
+    """Columns of `table` that an edge already points at."""
+    wanted = _fold(table)
+    names = []
+    for edge in edges:
+        for endpoint in (edge.get("from") or {}, edge.get("to") or {}):
+            if _fold(endpoint.get("table")) == wanted and endpoint.get("column"):
+                names.append(str(endpoint["column"]))
+    return names
+
+
+def _probe(profile, connection, edges, value, entry_table, entry_column):
+    """Find where the value enters. Returns (picked, candidates, warnings)."""
+    warnings = []
+    candidates: list[dict] = []
+    if entry_table:
+        candidates = engines.entry_candidates(
+            profile,
+            connection,
+            entry_table,
+            column=entry_column,
+            value=value,
+            known=_known_columns(edges, entry_table),
+            limit=PROBE_COLUMNS,
+        )
+    else:
+        for table in _entry_tables(edges):
+            candidates.extend(
+                engines.entry_candidates(
+                    profile,
+                    connection,
+                    table,
+                    value=value,
+                    known=_known_columns(edges, table),
+                    limit=PROBE_COLUMNS,
+                )
+            )
+            if len(candidates) >= PROBE_COLUMNS:
+                break
+    started = time.perf_counter()
+    tried = []
+    for candidate in candidates[:PROBE_COLUMNS]:
+        if time.perf_counter() - started > PROBE_SECONDS:
+            warnings.append(
+                {
+                    "code": "probe_timeout",
+                    "message": (
+                        f"stopped probing after {PROBE_SECONDS:g}s; "
+                        "name the entry table and column to skip the search"
+                    ),
+                }
+            )
+            break
+        tried.append(candidate)
+        try:
+            found = engines.fetch_matching(
+                profile,
+                connection,
+                candidate["table"],
+                candidate["column"],
+                [value],
+                1,
+            )
+        except engines.DbError as error:
+            warnings.append(
+                {
+                    "code": "probe_failed",
+                    "message": f"{candidate['table']}.{candidate['column']}: {error}",
+                }
+            )
+            continue
+        if found["rows"]:
+            return candidate, tried, warnings
+    return None, tried, warnings
+
+
+def _sample(columns, rows, primary, current_column) -> dict:
+    """A few readable cells per row: the keys first, then the rest."""
+    if not rows:
+        return {"columns": [], "rows": []}
+    preferred = []
+    for name in list(primary or []) + [current_column]:
+        if name and _column_index(columns, name) is not None and _fold(name) not in {
+            _fold(item) for item in preferred
+        }:
+            preferred.append(name)
+    chosen = list(preferred)
+    for label in columns:
+        if len(chosen) >= SAMPLE_COLUMNS:
+            break
+        if _fold(label) not in {_fold(item) for item in chosen}:
+            chosen.append(label)
+    indexes = [index for index in (_column_index(columns, name) for name in chosen) if index is not None]
+    return {
+        "columns": [columns[index] for index in indexes],
+        "rows": [[row[index] for index in indexes] for row in rows[:SAMPLE_ROWS]],
+    }
+
+
+def trace(
+    profile: dict,
+    connection,
+    value,
+    entry_table: str | None = None,
+    entry_column: str | None = None,
+    max_depth=3,
+    max_rows_per_table=20,
+    direction="both",
+) -> dict:
+    """Follow one value across every confirmed join that touches it."""
+    started = time.perf_counter()
+    text = str(value if value is not None else "").strip()
+    if not text:
+        raise store.StoreError(
+            "user_error",
+            "trace_by_key needs a value to look for",
+            "pass the key itself, for example an order id or a customer code",
+        )
+    depth_limit = _clamp(max_depth, 1, MAX_DEPTH_LIMIT, 3)
+    row_limit = _clamp(max_rows_per_table, 1, MAX_ROWS_LIMIT, 20)
+    heading = _direction(direction)
+
+    doc = relations.load(profile)
+    all_edges = doc.get("edges") or []
+    walkable = _walkable(all_edges)
+    pending = [edge for edge in all_edges if edge.get("status") == "pending"]
+
+    warnings: list[dict] = []
+    if not walkable:
+        warnings.append(
+            {
+                "code": "no_edges",
+                "message": (
+                    "no confirmed edge to follow — run discover_relations to import "
+                    "the declared foreign keys, or propose_relation for a join the "
+                    "catalog does not declare"
+                ),
+            }
+        )
+
+    picked, tried, probe_warnings = _probe(
+        profile, connection, walkable, text, entry_table, entry_column
+    )
+    warnings.extend(probe_warnings)
+    entry = {
+        "table": (picked or {}).get("table") or entry_table,
+        "column": (picked or {}).get("column") or entry_column,
+        "picked": picked is not None,
+        "candidates": tried,
+    }
+    if picked is None:
+        warnings.append(
+            {
+                "code": "no_entry",
+                "message": (
+                    f"no column held {text!r} in any table worth probing — "
+                    "name the entry table and column if you know where it lives"
+                ),
+            }
+        )
+        return {
+            "value": text,
+            "direction": heading,
+            "elapsedMs": int((time.perf_counter() - started) * 1000),
+            "entry": entry,
+            "summary": {
+                "tablesHit": 0,
+                "tablesVisited": 0,
+                "rowsRead": 0,
+                "steps": 0,
+                "depthReached": 0,
+            },
+            "steps": [],
+            "pending": [],
+            "warnings": warnings,
+            "stoppedAt": [],
+        }
+
+    # One metadata read per table, reused for the sample and the pending hints.
+    described: dict[str, dict] = {}
+
+    def describe(table: str) -> dict:
+        key = _fold(table)
+        if key not in described:
+            try:
+                described[key] = engines.describe_table(profile, connection, table, None)
+            except engines.DbError:
+                described[key] = {}
+        return described[key]
+
+    steps: list[dict] = []
+    stopped: list[dict] = []
+    seen: set[tuple[str, str, str]] = set()
+    hit_tables: set[str] = set()
+    visited_tables: set[str] = set()
+    rows_read = 0
+    depth_reached = 0
+
+    queue = deque(
+        [
+            {
+                "table": entry["table"],
+                "column": entry["column"],
+                "values": [text],
+                "depth": 0,
+                "edge": None,
+                "side": None,
+            }
+        ]
+    )
+
+    while queue and len(steps) < MAX_STEPS:
+        node = queue.popleft()
+        table = node["table"]
+        column = node["column"]
+        depth = node["depth"]
+        fresh = []
+        for candidate in node["values"]:
+            key = (_fold(table), _fold(column), str(candidate))
+            if key in seen:
+                continue
+            seen.add(key)
+            fresh.append(candidate)
+        if not fresh:
+            continue
+
+        edge = node["edge"]
+        # A condition describes the side holding the value, so it only narrows a
+        # query against that side. Applying it to the referenced table would ask
+        # for a column that lives somewhere else.
+        extra = None
+        if edge and edge.get("condition"):
+            here = _fold((edge.get("from") or {}).get("table"))
+            if here == _fold(table):
+                extra = edge["condition"]
+
+        info = describe(table)
+        failure = None
+        try:
+            found = engines.fetch_matching(
+                profile,
+                connection,
+                table,
+                column,
+                fresh,
+                row_limit,
+                extra_condition=extra,
+            )
+            status = "hit" if found["rows"] else "empty"
+        except engines.DbError as error:
+            found = {"columns": [], "rows": [], "truncated": False, "sql": "", "binds": fresh}
+            status = "error"
+            failure = str(error)
+        except Exception as error:  # a driver error the guard did not classify
+            found = {"columns": [], "rows": [], "truncated": False, "sql": "", "binds": fresh}
+            status = "error"
+            failure = str(error)
+        # A condition is a user's guess about a column that may not exist. Losing
+        # the whole trace over a typo in it would be worse than losing the
+        # narrowing: retry without it, say so, and keep walking. The step then
+        # reports the statement that actually ran, so `extra` is cleared.
+        if status == "error" and extra:
+            try:
+                found = engines.fetch_matching(
+                    profile, connection, table, column, fresh, row_limit
+                )
+                status = "hit" if found["rows"] else "empty"
+                failure = None
+                warnings.append(
+                    {
+                        "code": "condition_failed",
+                        "message": (
+                            f"{table}: the condition {extra!r} could not be applied, "
+                            "so this step ran without it"
+                        ),
+                    }
+                )
+                extra = None
+            except Exception:
+                pass
+        if failure is not None:
+            warnings.append(
+                {
+                    "code": "step_failed",
+                    "message": f"{table}.{column}: {failure}",
+                }
+            )
+
+        rows = found["rows"]
+        visited_tables.add(_fold(table))
+        if rows:
+            hit_tables.add(_fold(table))
+        rows_read += len(rows)
+        depth_reached = max(depth_reached, depth)
+
+        # Fanout is rows-per-value, and it only means something measured on the
+        # referencing side: how many children one parent value pulled in. Measured
+        # while walking the other way it would say "how many parents one child
+        # has", which is not the number that makes a join expensive, so the walker
+        # reports nothing there rather than a misleading figure.
+        fanout = None
+        if edge is not None and _fold((edge.get("from") or {}).get("table")) == _fold(table) and fresh:
+            fanout = round(len(rows) / len(fresh), 2)
+
+        step = {
+            "index": len(steps) + 1,
+            "depth": depth,
+            "table": table,
+            "schema": info.get("schema"),
+            "condition": {
+                "column": column,
+                "operator": "in",
+                "binds": list(found.get("binds") or fresh),
+                "extra": extra,
+            },
+            "sql": found["sql"],
+            "rows": len(rows),
+            "truncated": bool(found["truncated"]),
+            "status": status,
+            "edge": _edge_summary(edge) if edge else None,
+            "sample": _sample(found["columns"], rows, info.get("primaryKey"), column),
+            "fanout": fanout,
+            "note": None,
+        }
+        if status == "empty":
+            step["note"] = "0 rows, the chain breaks here"
+            stopped.append({"table": table, "reason": f"no row held the value in {column}"})
+        elif found["truncated"]:
+            step["note"] = f"stopped at {row_limit} rows; the value has more matches than that"
+        steps.append(step)
+
+        if not rows:
+            continue
+        if depth >= depth_limit:
+            if _incident(walkable, table):
+                warnings.append(
+                    {
+                        "code": "depth_limit",
+                        "message": f"{table} is at depth {depth}; raise max_depth to go further",
+                    }
+                )
+            continue
+
+        for other_edge, side, here, there in _incident(walkable, table):
+            if not _follows(side, heading):
+                continue
+            other_table = there.get("table")
+            other_column = there.get("column")
+            if not other_table or not other_column:
+                continue
+            index = _column_index(found["columns"], here.get("column"))
+            if index is None:
+                continue
+            values = []
+            for row in rows:
+                cell = row[index]
+                if cell is None:
+                    continue
+                if str(cell) not in {str(item) for item in values}:
+                    values.append(cell)
+            if not values:
+                continue
+            queue.append(
+                {
+                    "table": other_table,
+                    "column": other_column,
+                    "values": values,
+                    "depth": depth + 1,
+                    "edge": other_edge,
+                    "side": side,
+                }
+            )
+
+    if queue and len(steps) >= MAX_STEPS:
+        warnings.append(
+            {
+                "code": "step_limit",
+                "message": f"stopped after {MAX_STEPS} steps; narrow the value or lower max_depth",
+            }
+        )
+
+    # Pending edges are reported, not followed: they are the next thing the
+    # caller can turn on, and silently ignoring them looks like a missing join.
+    hints = []
+    for edge in pending:
+        frm = edge.get("from") or {}
+        to = edge.get("to") or {}
+        if _fold(frm.get("table")) in visited_tables:
+            hints.append(
+                {
+                    "edge": _edge_summary(edge),
+                    "wouldReach": {"table": to.get("table"), "column": to.get("column")},
+                    "reason": "the edge is pending — confirm it to let the trace follow it",
+                }
+            )
+        elif _fold(to.get("table")) in visited_tables:
+            hints.append(
+                {
+                    "edge": _edge_summary(edge),
+                    "wouldReach": {"table": frm.get("table"), "column": frm.get("column")},
+                    "reason": "the edge is pending — confirm it to let the trace follow it",
+                }
+            )
+
+    return {
+        "value": text,
+        "direction": heading,
+        "elapsedMs": int((time.perf_counter() - started) * 1000),
+        "entry": entry,
+        "summary": {
+            "tablesHit": len(hit_tables),
+            "tablesVisited": len(visited_tables),
+            "rowsRead": rows_read,
+            "steps": len(steps),
+            "depthReached": depth_reached,
+        },
+        "steps": steps,
+        "pending": hints,
+        "warnings": warnings,
+        "stoppedAt": stopped,
+    }

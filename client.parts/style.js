@@ -2086,6 +2086,238 @@
       .dbmcp-scan-all .dbmcp-hint {
         font-variant-numeric: tabular-nums;
       }
+      /* Relation graph — page A. An edge is one claim about a join, so the row
+         is a small card rather than a table line: the join path, the evidence
+         under it, and the buttons the current status allows. */
+      .dbmcp-edge-toolbar {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin: 10px 0 4px;
+      }
+      .dbmcp-edge-toolbar .dbmcp-select {
+        width: auto;
+        min-width: 140px;
+        flex: 0 0 auto;
+      }
+      .dbmcp-edge-filters {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        flex-wrap: wrap;
+      }
+      .dbmcp-filter {
+        border: 1px solid transparent;
+        border-radius: 999px;
+        background: transparent;
+        color: var(--dsw-alias-label-secondary);
+        font: inherit;
+        font-size: 12px;
+        font-variant-numeric: tabular-nums;
+        padding: 3px 10px;
+        cursor: pointer;
+        transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+      }
+      .dbmcp-filter:hover {
+        color: var(--dsw-alias-label-primary);
+        background: var(--dsw-alias-bg-layer-2);
+      }
+      .dbmcp-filter.is-on {
+        color: var(--dsw-alias-label-primary);
+        border-color: var(--dsw-alias-border-l1);
+        background: var(--dsw-alias-bg-layer-2);
+      }
+      .dbmcp-edges {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        margin-top: 10px;
+      }
+      .dbmcp-edge {
+        border: 1px solid var(--dsw-alias-border-l1);
+        border-left-width: 3px;
+        border-radius: 10px;
+        padding: 9px 11px;
+        background: var(--dsw-alias-bg-layer-2);
+      }
+      /* The left border is the status, so a list of edges reads at a glance. */
+      .dbmcp-edge.is-pending {
+        border-left-color: var(--dsw-alias-state-warn-primary);
+      }
+      .dbmcp-edge.is-confirmed {
+        border-left-color: var(--dsw-alias-state-idle-primary);
+      }
+      .dbmcp-edge.is-trusted {
+        border-left-color: var(--dsw-alias-state-success-primary);
+      }
+      .dbmcp-edge.is-stale,
+      .dbmcp-edge.is-rejected {
+        border-left-color: var(--dsw-alias-state-error-primary);
+      }
+      .dbmcp-edge-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        justify-content: space-between;
+      }
+      .dbmcp-edge-path {
+        font-size: 13px;
+        color: var(--dsw-alias-label-primary);
+        word-break: break-all;
+      }
+      .dbmcp-edge-arrow {
+        color: var(--dsw-alias-label-secondary);
+      }
+      .dbmcp-edge-chip {
+        flex: 0 0 auto;
+        text-transform: lowercase;
+      }
+      .dbmcp-edge-chip.is-pending {
+        border-color: var(--dsw-alias-state-warn-primary);
+        color: var(--dsw-alias-state-warn-primary);
+      }
+      .dbmcp-edge-chip.is-confirmed {
+        border-color: var(--dsw-alias-state-idle-primary);
+        color: var(--dsw-alias-state-idle-primary);
+      }
+      .dbmcp-edge-chip.is-trusted {
+        border-color: var(--dsw-alias-state-success-primary);
+        color: var(--dsw-alias-state-success-primary);
+      }
+      .dbmcp-edge-chip.is-stale,
+      .dbmcp-edge-chip.is-rejected {
+        border-color: var(--dsw-alias-state-error-primary);
+        color: var(--dsw-alias-state-error-primary);
+      }
+      .dbmcp-edge-meta {
+        margin: 4px 0 0;
+        font-variant-numeric: tabular-nums;
+      }
+      .dbmcp-edge-when {
+        margin: 2px 0 0;
+        color: var(--dsw-alias-label-primary);
+      }
+      .dbmcp-edge-why {
+        margin: 4px 0 0;
+        color: var(--dsw-alias-state-error-primary);
+      }
+      .dbmcp-edge-error {
+        margin: 6px 0 0;
+        color: var(--dsw-alias-state-error-primary);
+      }
+      .dbmcp-edge-actions {
+        margin-top: 8px;
+        flex-wrap: wrap;
+      }
+      .dbmcp-edge-form {
+        margin-top: 8px;
+        padding: 8px 10px;
+        border: 1px solid var(--dsw-alias-border-l1);
+        border-radius: 8px;
+        background: var(--dsw-alias-bg-base);
+      }
+      .dbmcp-edge-form.is-new {
+        margin: 10px 0 0;
+      }
+      .dbmcp-edge-form .dbmcp-input {
+        margin-bottom: 6px;
+      }
+      .dbmcp-edge-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+      }
+      .dbmcp-edge-record {
+        margin-top: 8px;
+        padding-top: 6px;
+        border-top: 1px solid var(--dsw-alias-border-l1);
+      }
+      .dbmcp-edge-history {
+        list-style: none;
+        margin: 4px 0 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        font-size: 12px;
+        color: var(--dsw-alias-label-secondary);
+      }
+      .dbmcp-edge-history code {
+        font-variant-numeric: tabular-nums;
+      }
+
+      /* Page B — the trace result. A step is the same shape as an edge row so the
+         two pages read alike; the numbered marker is the walk order, which is the
+         one thing the edge row cannot show. */
+      .dbmcp-trace-form {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        margin: 4px 0 8px;
+      }
+      .dbmcp-trace-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 8px;
+        align-items: end;
+      }
+      .dbmcp-trace-summary {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        padding: 6px 0;
+      }
+      .dbmcp-trace-index {
+        font-variant-numeric: tabular-nums;
+        color: var(--dsw-alias-label-secondary);
+      }
+      .dbmcp-trace-step .dbmcp-edge-head {
+        align-items: baseline;
+      }
+      .dbmcp-trace-cut {
+        color: var(--dsw-alias-state-warn-primary);
+        border-color: var(--dsw-alias-state-warn-primary);
+      }
+      .dbmcp-trace-sample {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin: 2px 0;
+      }
+      .dbmcp-trace-cell {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 12px;
+        color: var(--dsw-alias-label-primary);
+        background: var(--dsw-alias-bg-layer-2);
+        border-radius: 4px;
+        padding: 1px 6px;
+      }
+      .dbmcp-trace-judge {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        margin-top: 4px;
+      }
+      .dbmcp-trace-reasons {
+        flex-wrap: wrap;
+        row-gap: 4px;
+      }
+      .dbmcp-trace-aside {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        margin-top: 10px;
+        padding-top: 8px;
+        border-top: 1px solid var(--dsw-alias-border-l1);
+      }
+      .dbmcp-trace-pending {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-wrap: wrap;
+      }
+
       /* Narrow sidebar: two- and three-column rows have no room to sit side by
          side, and before this query they simply ran past the right edge — the
          labels and inputs on the right were cut off with no scrollbar to say
@@ -2093,6 +2325,12 @@
       @container (max-width: 560px) {
         .dbmcp-form-section.is-two,
         .dbmcp-form-section.is-three {
+          grid-template-columns: minmax(0, 1fr);
+        }
+        .dbmcp-edge-grid {
+          grid-template-columns: minmax(0, 1fr);
+        }
+        .dbmcp-trace-grid {
           grid-template-columns: minmax(0, 1fr);
         }
         .dbmcp-form-head {

@@ -180,10 +180,10 @@ if (panel) {
   const header = collect(panel, (node) => node.type === 'h1')
   check('main panel: title rendered', header.length === 1)
   const tabs = collect(panel, (node) => node.type === 'button' && node.props.role === 'tab')
-  check('main panel: seven tabs', tabs.length === 7, String(tabs.length))
+  check('main panel: nine tabs', tabs.length === 9, String(tabs.length))
   check(
     'main panel: first tab is active',
-    tabs.length === 7 && tabs[0].props['aria-selected'] === true && tabs[1].props['aria-selected'] === false,
+    tabs.length === 9 && tabs[0].props['aria-selected'] === true && tabs[1].props['aria-selected'] === false,
   )
   check(
     'main panel: the tools tab is its own step',
@@ -196,8 +196,13 @@ if (panel) {
     order.join(','),
   )
   check(
+    'main panel: the trace tab sits before the endpoint tab',
+    order.indexOf('trace') + 1 === order.indexOf('clients'),
+    order.join(','),
+  )
+  check(
     'main panel: the tabs line up left to right',
-    tabs.length === 7 && tabs.map((node) => texts(node).join('')).join(',') === order.map((id) => `tab.${id}`).join(','),
+    tabs.length === 9 && tabs.map((node) => texts(node).join('')).join(',') === order.map((id) => `tab.${id}`).join(','),
     tabs.map((node) => texts(node).join('')).join(','),
   )
   const back = collect(panel, (node) => node.type === 'button' && node.props.className === 'dbmcp-back')
@@ -543,22 +548,214 @@ const described = renderResult({
 })
 check('renderer: describe names the table and its comment', described.includes('main.InvoiceLine') && described.includes('-- one row per sold item'), described)
 check('renderer: describe shows the row estimate', described.includes('~2240 row(s) (estimate)'), described)
-check('renderer: describe lists the foreign key as a path', described.includes('TrackId -> Track.TrackId'), described)
+check('renderer: describe leaves joins to the relation graph', !described.includes('foreign keys:'), described)
 check('renderer: describe lists indexes with their columns', described.includes('IFK_InvoiceLineTrackId (TrackId)'), described)
 check('renderer: describe keeps the column comments', described.includes('-- which track'), described)
-check('renderer: a describe with no keys does not print empty sections', !renderResult({ ok: true, table: 't', columns: [{ name: 'a', type: 'TEXT', nullable: true, primaryKey: false }], primaryKey: [], foreignKeys: [], indexes: [], comment: null, rowEstimate: null }).includes('foreign keys:'))
+check('renderer: a describe with no keys does not print empty sections', !renderResult({ ok: true, table: 't', columns: [{ name: 'a', type: 'TEXT', nullable: true, primaryKey: false }], primaryKey: [], indexes: [], comment: null, rowEstimate: null }).includes('indexes:'))
 
 const related = renderResult({
   ok: true,
-  schema: 'public',
-  relations: [
-    { table: 'orders', column: 'customer_id', refTable: 'customers', refColumn: 'id', name: 'orders_customer_fkey' },
+  datasource: { id: 'shop', kind: 'sqlite' },
+  edges: [
+    {
+      id: 'e_9c1f2a',
+      from: { table: 'orders', column: 'customer_id' },
+      to: { table: 'customers', column: 'id' },
+      source: 'fk',
+      status: 'confirmed',
+      condition: null,
+      stats: { confirmCount: 3, avgFanout: 1 },
+    },
   ],
-  truncated: false,
+  counts: { pending: 2, confirmed: 1, trusted: 0, stale: 0, rejected: 1 },
   total: 1,
+  truncated: false,
 })
-check('renderer: relations reads as join paths', related === 'orders.customer_id -> customers.id  (orders_customer_fkey)', related)
-check('renderer: an empty schema says so', renderResult({ ok: true, schema: 'public', relations: [], total: 0, truncated: false }) === 'no foreign keys in public')
+check('renderer: edges read as join paths', related.includes('orders.customer_id -> customers.id'), related)
+check('renderer: an edge carries its source and status', related.includes('fk · confirmed'), related)
+check('renderer: the edge header counts every status', related.includes('2 pending') && related.includes('1 rejected'), related)
+check(
+  'renderer: a filtered graph with no rows still counts what exists',
+  renderResult({ ok: true, edges: [], counts: { pending: 2, confirmed: 0, trusted: 0, stale: 0, rejected: 0 }, total: 0, truncated: false }).startsWith('no edges match — 2 pending'),
+)
+check(
+  'renderer: an empty graph points at discover_relations',
+  renderResult({ ok: true, edges: [], counts: { pending: 0, confirmed: 0, trusted: 0, stale: 0, rejected: 0 }, total: 0, truncated: false }).includes('discover_relations'),
+)
+check(
+  'renderer: an edge condition is shown with the path',
+  renderResult({
+    ok: true,
+    edges: [
+      {
+        from: { table: 't_trans', column: 'order_id' },
+        to: { table: 't_order', column: 'id' },
+        source: 'manual',
+        status: 'trusted',
+        condition: "status = 'POSTED'",
+        stats: {},
+      },
+    ],
+    counts: { pending: 0, confirmed: 0, trusted: 1, stale: 0, rejected: 0 },
+    total: 1,
+    truncated: false,
+  }).includes("when status = 'POSTED'"),
+)
+
+const feedback = renderResult({
+  ok: true,
+  previousStatus: 'pending',
+  edge: {
+    from: { table: 't_trans', column: 'order_id' },
+    to: { table: 't_order', column: 'id' },
+    source: 'fk',
+    status: 'confirmed',
+    stats: { confirmCount: 1, rejectCount: 0, avgFanout: 1, lastFailure: null },
+  },
+})
+check('renderer: feedback reads as a status move', feedback.includes('fk · pending -> confirmed'), feedback)
+check('renderer: feedback reports the counters it changed', feedback.includes('1 confirmed') && feedback.includes('fanout 1'), feedback)
+check(
+  'renderer: a rejection carries its reason',
+  renderResult({
+    ok: true,
+    previousStatus: 'pending',
+    edge: {
+      from: { table: 'a', column: 'id' },
+      to: { table: 'b', column: 'id' },
+      source: 'manual',
+      status: 'stale',
+      stats: { confirmCount: 0, rejectCount: 1, lastFailure: { verdict: 'too_many', reason: 'not_unique' } },
+    },
+  }).includes('last failure: too_many (not_unique)'),
+)
+check(
+  'renderer: proposing a new edge says it starts out pending',
+  renderResult({
+    ok: true,
+    created: true,
+    edge: {
+      from: { table: 'a', column: 'id' },
+      to: { table: 'b', column: 'id' },
+      source: 'manual',
+      status: 'pending',
+      stats: {},
+    },
+  }).includes('new edge — it starts out pending'),
+)
+check(
+  'renderer: clearing a condition says so',
+  renderResult({
+    ok: true,
+    changed: true,
+    edge: {
+      from: { table: 'a', column: 'id' },
+      to: { table: 'b', column: 'id' },
+      source: 'manual',
+      status: 'confirmed',
+      condition: null,
+      stats: {},
+    },
+  }).includes('condition cleared'),
+)
+check(
+  'renderer: deleting an edge names it and counts what is left',
+  renderResult({
+    ok: true,
+    deleted: { from: { table: 'a', column: 'id' }, to: { table: 'b', column: 'id' } },
+    counts: { pending: 2, confirmed: 0, trusted: 0, stale: 0, rejected: 0 },
+  }).includes('removed a.id -> b.id  (2 pending left)'),
+)
+
+const minedClean = renderResult({
+  ok: true,
+  mined: 2,
+  ambiguous: [],
+  imported: 1,
+  updated: 0,
+  skipped: 1,
+  edges: [],
+  counts: { pending: 1, confirmed: 0, trusted: 0, stale: 0, rejected: 0 },
+})
+check('renderer: a mined join says where it came from', minedClean.includes('mined 2 join(s) from the audit log'), minedClean)
+check('renderer: mining reports what was new and what was already known', minedClean.includes('1 new, 1 already known'), minedClean)
+check('renderer: mining shows the graph it left behind', minedClean.includes('graph now: 1 pending'), minedClean)
+
+const minedAmbiguous = renderResult({
+  ok: true,
+  mined: 2,
+  imported: 0,
+  updated: 0,
+  skipped: 0,
+  edges: [],
+  counts: { pending: 0, confirmed: 0, trusted: 0, stale: 0, rejected: 0 },
+  ambiguous: [
+    { left: { table: 't_note', column: 'trans_id' }, right: { table: 't_trans', column: 'id' }, hits: 1, reason: 'neither unique' },
+  ],
+})
+check(
+  'renderer: an undecidable direction names both columns and why',
+  minedAmbiguous.includes('t_note.trans_id = t_trans.id  (neither unique)'),
+  minedAmbiguous,
+)
+check('renderer: an ambiguous pair points at the way to decide it', minedAmbiguous.includes('propose_relation'), minedAmbiguous)
+
+const minedEmpty = renderResult({ ok: true, mined: 0, ambiguous: [], imported: 0, updated: 0, skipped: 0, edges: [], counts: {} })
+check('renderer: an empty log says so instead of pretending', minedEmpty.includes('holds no statement that joined two tables'), minedEmpty)
+
+const walked = renderResult({
+  ok: true,
+  value: 'A001',
+  direction: 'down',
+  elapsedMs: 12,
+  entry: { table: 't_order', column: 'id', picked: true, candidates: [] },
+  summary: { tablesHit: 2, tablesVisited: 3, rowsRead: 4, steps: 2, depthReached: 1 },
+  steps: [
+    {
+      index: 1,
+      depth: 0,
+      table: 't_order',
+      condition: { column: 'id', operator: 'in', binds: ['1'], extra: null },
+      sql: 'select * from t_order where "id" in (?) limit 2',
+      rows: 1,
+      truncated: false,
+      status: 'hit',
+      edge: null,
+      sample: { columns: ['id'], rows: [[1]] },
+      note: null,
+    },
+    {
+      index: 2,
+      depth: 1,
+      table: 't_trans',
+      condition: { column: 'order_id', operator: 'in', binds: ['1'], extra: null },
+      sql: 'select * from t_trans where "order_id" in (?) limit 2',
+      rows: 0,
+      truncated: false,
+      status: 'empty',
+      edge: { source: 'fk', status: 'confirmed', from: { table: 't_trans', column: 'order_id' }, to: { table: 't_order', column: 'id' } },
+      sample: { columns: [], rows: [] },
+      note: null,
+    },
+  ],
+  pending: [
+    {
+      edge: { from: { table: 't_line', column: 'trans_id' }, to: { table: 't_trans', column: 'id' }, status: 'pending' },
+      wouldReach: 't_trans',
+      reason: 'not confirmed',
+    },
+  ],
+  warnings: [{ code: 'depth_limit', message: 'stopped at depth 1' }],
+  stoppedAt: [{ table: 't_trans', reason: 'the value is not there' }],
+})
+check('renderer: a trace names where it started', walked.includes('trace t_order.id'), walked)
+check('renderer: a trace counts the tables it reached', walked.includes('2 table(s) hit'), walked)
+check('renderer: every step is a numbered line', walked.includes('1. t_order.id') && walked.includes('2. t_trans.order_id'), walked)
+check('renderer: a broken step says the chain stops there', walked.includes('the chain stops here'), walked)
+check('renderer: a step names the edge it followed', walked.includes('fk · confirmed'), walked)
+check('renderer: an unfollowed pending edge is reported, not walked', walked.includes('was not followed'), walked)
+check('renderer: warnings and stop reasons are listed', walked.includes('warning [depth_limit]') && walked.includes('stopped at t_trans'), walked)
+check('renderer: the traced value is never printed', !walked.includes('A001'), walked)
 
 // The audit card may hold entries from earlier days, so a bare clock is not enough.
 const clock = localClock('2026-11-09T11:29:38.782Z')
@@ -774,6 +971,118 @@ check('scopes card: a missing name still has a cell', /t\('scopes\.noTitle'\)/.t
 check('scopes card: the header sticks while the body scrolls', /\.dbmcp-scope-th \{[^}]*position: sticky/.test(source))
 check('scopes card: the id column wraps instead of truncating', /\.dbmcp-scope-id \{[^}]*word-break: break-all/.test(source))
 check('scopes card: the box scrolls on its own', /\.dbmcp-scope-box \{[^}]*overflow: auto/.test(source))
+
+/* Page A — the relation graph. Two things matter and both are visible here:
+   an edge reads as a join path rather than as metadata, and the buttons a row
+   offers are decided by its status. A pending edge can be confirmed; a trusted
+   one cannot be quietly changed. */
+const graphCard = source.slice(source.indexOf('const edgeStatusClass ='), source.indexOf('let body'))
+check('graph page: it is its own tab', /tab !== 'graph' \? null : renderGraph\(\)/.test(source))
+check(
+  'graph page: the tab sits between import and connect',
+  mod.__test.TABS.map((tab) => tab.id).indexOf('graph') === 3,
+  mod.__test.TABS.map((tab) => tab.id).join(','),
+)
+check('graph page: an edge reads left to right', /edge\.from\.table\}\.\$\{edge\.from\.column/.test(graphCard) && /edge\.to\.table\}\.\$\{edge\.to\.column/.test(graphCard))
+check('graph page: the arrow says the direction', /dbmcp-edge-arrow/.test(graphCard) && /' → '/.test(graphCard))
+check('graph page: the status is a chip of its own', /edgeStatusClass\(status\)/.test(graphCard))
+check('graph page: the second line carries the evidence', /edgeMeta\(edge\)/.test(graphCard))
+check(
+  'graph page: the evidence names the source and the counters',
+  /graph\.sourceFk/.test(source) && /graph\.confirmedTimes/.test(source) && /graph\.fanout/.test(source),
+)
+check('graph page: four filters, each with a count', /graph\.filterAll/.test(graphCard) && /graph\.filterPending/.test(graphCard) && /graph\.filterConfirmed/.test(graphCard) && /graph\.filterBroken/.test(graphCard))
+check(
+  'graph page: a filter button shows its count',
+  /\$\{filter\.label\} \$\{filter\.count\}/.test(graphCard),
+)
+check('graph page: a pending edge offers confirm and reject', /status === 'pending'/.test(graphCard) && /sendFeedback\(edge, 'ok'\)/.test(graphCard) && /setGraphReason\(edge\.id\)/.test(graphCard))
+check('graph page: rejecting asks for the reason', /graph\.rejectHint/.test(source) && /pick\('wrong_column'\)/.test(graphCard) && /pick\('needs_condition'\)/.test(graphCard) && /pick\('not_unique'\)/.test(graphCard))
+check('graph page: a condition can be attached from the row', /setGraphCondition\(edge\.id\)/.test(graphCard) && /saveCondition\(edge, graphConditionDraft\)/.test(graphCard))
+check(
+  'graph page: a stale edge says why it broke',
+  /status === 'stale' \|\| status === 'rejected' \? edgeReason\(edge\)/.test(graphCard) && /graph\.failedBecause/.test(source),
+)
+check(
+  'graph page: a stale edge can be repaired or dropped',
+  /status === 'stale'/.test(graphCard) && /removeEdge\(edge\)/.test(graphCard),
+)
+check(
+  'graph page: a confirmed or trusted edge has no verdict buttons',
+  /status === 'confirmed' \|\| status === 'trusted'/.test(graphCard) && !/status === 'confirmed'[^\n]*sendFeedback/.test(graphCard),
+)
+check(
+  'graph page: its confirmation record can be opened',
+  /setGraphOpen\(open \? '' : edge\.id\)/.test(graphCard) && /edgeHistory\(edge\)/.test(graphCard),
+)
+check('graph page: a new join is added from a form', /renderEdgeForm\(\)/.test(graphCard) && /graph\.addHint/.test(source))
+check('graph page: the foreign keys can be imported', /discoverEdges\(\)/.test(graphCard) && /graph\.discover/.test(graphCard))
+check('graph page: the datasource is picked, not typed', /className: 'dbmcp-input dbmcp-select'/.test(graphCard))
+check(
+  'graph page: a datasource is required before anything is read',
+  /sources\.length === 0/.test(graphCard) && /graph\.noSources/.test(source),
+)
+check('graph page: an empty graph explains what to do next', /graph\.empty/.test(graphCard) && /graph\.emptyFiltered/.test(graphCard))
+check('graph page: the row border carries the status colour', /\.dbmcp-edge\.is-pending \{/.test(source) && /\.dbmcp-edge\.is-trusted \{/.test(source))
+
+// Page B — the trace result. The page must take a value and nothing else that
+// could look like a statement, and every step must be judgeable.
+const traceCard = source.slice(source.indexOf('const traceCondition ='), source.indexOf('let body'))
+const traceLogic = source.slice(source.indexOf('const traceTarget ='), source.indexOf('const [textPolicyDraft'))
+check('trace page: it is its own tab', /tab !== 'trace' \? null : renderTrace\(\)/.test(source))
+check(
+  'trace page: the tab sits between relations and connect',
+  mod.__test.TABS.map((tab) => tab.id).indexOf('trace') === 4,
+  mod.__test.TABS.map((tab) => tab.id).join(','),
+)
+check(
+  'trace page: it takes a value, never a statement',
+  /apiPost\('\/trace', \{/.test(traceLogic) && /value,/.test(traceLogic) && !/\bsql\s*:/.test(traceLogic),
+)
+check(
+  'trace page: the entry table and column are optional',
+  /entry_table: traceTable\.trim\(\) \|\| undefined/.test(traceLogic) && /entry_column: traceColumn\.trim\(\) \|\| undefined/.test(traceLogic),
+)
+check(
+  'trace page: the direction is one of three',
+  /trace\.dirBoth/.test(source) && /trace\.dirDown/.test(source) && /trace\.dirUp/.test(source),
+)
+check('trace page: a blank value is refused before the walk', /trace\.needValue/.test(traceLogic))
+check(
+  'trace page: a step reads as its order, its table and its rows',
+  /dbmcp-trace-index/.test(traceCard) && /step\.table/.test(traceCard) && /trace\.rows/.test(traceCard),
+)
+check(
+  'trace page: a broken chain says so in the step',
+  /status === 'empty'/.test(traceCard) && /trace\.chainBreaks/.test(source),
+)
+check('trace page: a capped step is marked', /step\.truncated/.test(traceCard) && /trace\.truncated/.test(source))
+check(
+  'trace page: each step shows the edge it travelled',
+  /edgeStatusClass\(edge\.status\)/.test(traceCard) && /edgeSourceLabel\(edge\.source\)/.test(traceCard),
+)
+check(
+  'trace page: each step carries the four judgements',
+  /pick\('ok'\)/.test(traceCard) && /pick\('too_many', 'not_unique'\)/.test(traceCard) && /pick\('missing'\)/.test(traceCard) && /pick\('irrelevant'\)/.test(traceCard),
+)
+check(
+  'trace page: judging a step feeds the edge behind it',
+  /judgeStep\(edge\.id, verdict, reason\)/.test(traceCard) && /edge_id: edgeId/.test(source),
+)
+check(
+  'trace page: pending edges are listed but not walked',
+  /trace\.pendingTitle/.test(source) && /trace\.pendingHint/.test(source) && /pending\.map/.test(traceCard),
+)
+check(
+  'trace page: the summary names the entry it picked',
+  /trace\.summary/.test(source) && /entry\.table/.test(traceCard) && /entry\.column/.test(traceCard),
+)
+check(
+  'trace page: warnings and stops stay visible',
+  /trace\.warnings/.test(source) && /trace\.stopped/.test(source) && /warnings\.map/.test(traceCard) && /stopped\.map/.test(traceCard),
+)
+check('trace page: the value itself is never echoed back', !/traceValue\}/.test(traceCard))
+check('trace page: a datasource is required before anything is walked', /trace\.noSources/.test(source))
 
 // the component's own header still took a min-height plus a bottom margin when
 // it rendered empty — about thirty pixels of nothing above the list.

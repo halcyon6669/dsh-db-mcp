@@ -27,6 +27,8 @@ window.__ModuleLoader__.load({
       { id: 'list' },
       { id: 'create' },
       { id: 'import' },
+      { id: 'graph' },
+      { id: 'trace' },
       { id: 'clients' },
       { id: 'runtime' },
       { id: 'tools' },
@@ -37,6 +39,8 @@ window.__ModuleLoader__.load({
     function tabLabel(t, id) {
       if (id === 'create') return t('tab.create')
       if (id === 'import') return t('tab.import')
+      if (id === 'graph') return t('tab.graph')
+      if (id === 'trace') return t('tab.trace')
       if (id === 'runtime') return t('tab.runtime')
       if (id === 'clients') return t('tab.clients')
       if (id === 'tools') return t('tab.tools')
@@ -48,6 +52,8 @@ window.__ModuleLoader__.load({
     function tabOfMode(mode) {
       if (mode === 'create' || mode === 'edit') return 'create'
       if (mode === 'import') return 'import'
+      if (mode === 'graph') return 'graph'
+      if (mode === 'trace') return 'trace'
       if (mode === 'runtime') return 'runtime'
       if (mode === 'clients') return 'clients'
       if (mode === 'tools') return 'tools'
@@ -283,10 +289,107 @@ window.__ModuleLoader__.load({
         'tab.list': 'Data source list',
         'tab.create': 'New data source',
         'tab.import': 'Import from DBeaver',
+        'tab.graph': 'Relations',
+        'tab.trace': 'Trace',
         'tab.runtime': 'Runtime',
         'tab.clients': 'Connect',
       'tab.tools': 'Tools',
         'tab.audit': 'Audit log',
+        'graph.title': 'Relation graph',
+        'graph.hint': 'Every join this datasource knows about. An edge is a claim, so it only gets followed once you have confirmed it — pending edges are listed but never walked.',
+        'graph.busy': 'working…',
+        'graph.noSources': 'Add a data source first; a graph belongs to one datasource.',
+        'graph.discover': 'Import foreign keys',
+        'graph.mine': 'Mine the log',
+        'graph.add': 'Add a join',
+        'graph.cancel': 'Cancel',
+        'graph.save': 'Save the join',
+        'graph.addHint': 'Record a join the catalog does not declare. The left side is the table holding the value; the right side is the table it points at.',
+        'graph.fromTable': 'From table',
+        'graph.fromColumn': 'From column',
+        'graph.toTable': 'To table',
+        'graph.toColumn': 'To column',
+        'graph.condition': 'Condition (optional)',
+        'graph.conditionHint': 'Extra SQL the join needs to be true, for example status = \'POSTED\'. A condition never changes the status of an edge.',
+        'graph.conditionPlaceholder': "status = 'POSTED'",
+        'graph.saveCondition': 'Save condition',
+        'graph.whenClause': 'when',
+        'graph.filterAll': 'All',
+        'graph.filterPending': 'Pending',
+        'graph.filterConfirmed': 'Confirmed',
+        'graph.filterBroken': 'Broken',
+        'graph.empty': 'No relations recorded yet. Import the declared foreign keys, or add a join by hand.',
+        'graph.emptyFiltered': 'No edge in this state.',
+        'graph.truncated': 'Showing the first {n} edges; the rest stay in the file.',
+        'graph.statusPending': 'pending',
+        'graph.statusConfirmed': 'confirmed',
+        'graph.statusTrusted': 'trusted',
+        'graph.statusStale': 'stale',
+        'graph.statusRejected': 'rejected',
+        'graph.sourceFk': 'foreign key',
+        'graph.sourceManual': 'added by hand',
+        'graph.sourceInferred': 'inferred',
+        'graph.sourceMined': 'mined from the audit log',
+        'graph.confirmedTimes': '{n} confirmed',
+        'graph.rejectedTimes': '{n} rejected',
+        'graph.fanout': 'fanout {value}',
+        'graph.when': 'on {at}',
+        'graph.failedBecause': 'Last attempt failed: {verdict} ({reason})',
+        'graph.verdictTooMany': 'matched too many rows',
+        'graph.verdictMissing': 'missed rows it should have found',
+        'graph.reasonWrongColumn': 'wrong column',
+        'graph.reasonNeedsCondition': 'needs a condition',
+        'graph.reasonNotUnique': 'value is not unique',
+        'graph.rejectHint': 'Why is this join wrong? The answer decides how it is repaired.',
+        'graph.confirm': 'Confirm',
+        'graph.reject': 'Reject',
+        'graph.addCondition': 'Add condition',
+        'graph.reopen': 'Reopen',
+        'graph.remove': 'Delete',
+        'graph.record': 'Confirmation record',
+        'graph.hideRecord': 'Hide record',
+        'graph.recordHint': 'This edge is followed. Withdraw a confirmation if it was wrong.',
+        'graph.noHistory': 'No record yet.',
+        'trace.title': 'Trace a value',
+        'trace.hint': 'Give it a value and it finds where the value lives, then walks the confirmed joins that carry it across tables. The statements are built here from the relation graph — this page takes a value, never SQL.',
+        'trace.noSources': 'Add a data source first; a trace runs against one datasource.',
+        'trace.value': 'Value',
+        'trace.valuePlaceholder': 'order id, code, sku…',
+        'trace.entryTable': 'Entry table (optional)',
+        'trace.entryColumn': 'Entry column (optional)',
+        'trace.entryOptional': 'leave blank to probe',
+        'trace.direction': 'Direction',
+        'trace.dirBoth': 'both ways',
+        'trace.dirDown': 'down to the rows that reference it',
+        'trace.dirUp': 'up to the row it references',
+        'trace.run': 'Trace',
+        'trace.running': 'walking…',
+        'trace.needValue': 'Type a value to look for.',
+        'trace.nothing': 'Nothing was reached: no confirmed edge leads anywhere from this value.',
+        'trace.summary': 'Started at {table}.{column} — {tables} table(s) reached in {ms}ms',
+        'trace.summaryShort': '{tables} table(s) reached in {ms}ms',
+        'trace.counts': '{steps} step(s), {rows} row(s) read, depth {depth}',
+        'trace.rows': '{n} row(s)',
+        'trace.and': 'and',
+        'trace.chainBreaks': '0 rows — the chain stops here',
+        'trace.stepFailed': 'this step failed',
+        'trace.truncated': 'capped',
+        'trace.stopped': 'Where it stopped',
+        'trace.pendingTitle': 'Edges not followed',
+        'trace.pendingHint': 'These joins would have continued the walk, but they are still pending. Confirm one on the Relations page and trace again.',
+        'trace.warnings': 'Warnings',
+        'trace.judgeOk': 'This is right',
+        'trace.judgeWrong': 'Something is off',
+        'trace.judgeCancel': 'Close',
+        'trace.judgeMissing': 'Rows are missing',
+        'trace.judgeIrrelevant': 'Not related at all',
+        'notice.discovered': 'Imported the declared foreign keys.',
+        'notice.mined': 'Mined the audit log for joins — they arrive as pending.',
+        'notice.verdict': 'Recorded "{verdict}".',
+        'notice.conditionSet': 'Condition saved.',
+        'notice.conditionCleared': 'Condition cleared.',
+        'notice.edgeDeleted': 'Edge deleted.',
+        'notice.edgeProposed': 'Join recorded; it starts out pending.',
         'header.backToChat': 'Back to chat',
         'form.group': 'Group',
         'form.groupHint': 'Sources sharing a group are listed together',
@@ -566,10 +669,107 @@ window.__ModuleLoader__.load({
         'tab.list': '数据源列表',
         'tab.create': '新建数据源',
         'tab.import': '从 DBeaver 导入',
+        'tab.graph': '关系图',
+        'tab.trace': '追踪',
         'tab.runtime': '运行时诊断',
         'tab.clients': '接入其它客户端',
       'tab.tools': '工具',
         'tab.audit': '审计日志',
+        'graph.title': '关系图',
+        'graph.hint': '这个数据源知道的所有表间连接。一条边是一个「说法」，只有你确认过才会被跟随——待确认的边会列出来，但从不参与追踪。',
+        'graph.busy': '处理中…',
+        'graph.noSources': '先添加数据源；关系图属于某一个数据源。',
+        'graph.discover': '导入外键',
+        'graph.mine': '从日志挖掘',
+        'graph.add': '添加连接',
+        'graph.cancel': '取消',
+        'graph.save': '保存连接',
+        'graph.addHint': '记录一个数据库没有声明的连接。左边是持有值的表，右边是它指向的表。',
+        'graph.fromTable': '左表',
+        'graph.fromColumn': '左列',
+        'graph.toTable': '右表',
+        'graph.toColumn': '右列',
+        'graph.condition': '适用条件（可选）',
+        'graph.conditionHint': "连接成立需要的额外 SQL，例如 status = 'POSTED'。设置条件不会改变边的状态。",
+        'graph.conditionPlaceholder': "status = 'POSTED'",
+        'graph.saveCondition': '保存条件',
+        'graph.whenClause': '条件',
+        'graph.filterAll': '全部',
+        'graph.filterPending': '待确认',
+        'graph.filterConfirmed': '已确认',
+        'graph.filterBroken': '已失效',
+        'graph.empty': '还没有记录任何连接。导入已声明的外键，或者手动添加一条。',
+        'graph.emptyFiltered': '这个状态下没有边。',
+        'graph.truncated': '只显示前 {n} 条，其余留在文件里。',
+        'graph.statusPending': '待确认',
+        'graph.statusConfirmed': '已确认',
+        'graph.statusTrusted': '自动信任',
+        'graph.statusStale': '已失效',
+        'graph.statusRejected': '已拒绝',
+        'graph.sourceFk': '外键',
+        'graph.sourceManual': '手动添加',
+        'graph.sourceInferred': '推断',
+        'graph.sourceMined': '从审计日志挖掘',
+        'graph.confirmedTimes': '确认 {n} 次',
+        'graph.rejectedTimes': '拒绝 {n} 次',
+        'graph.fanout': '扇出 {value}',
+        'graph.when': '于 {at}',
+        'graph.failedBecause': '上次验证失败：{verdict}（{reason}）',
+        'graph.verdictTooMany': '匹配到过多行',
+        'graph.verdictMissing': '漏掉了本该找到的行',
+        'graph.reasonWrongColumn': '连错列',
+        'graph.reasonNeedsCondition': '需要加条件',
+        'graph.reasonNotUnique': '值不唯一',
+        'graph.rejectHint': '这条连接为什么不对？选择决定它怎么修。',
+        'graph.confirm': '确认',
+        'graph.reject': '拒绝',
+        'graph.addCondition': '加条件',
+        'graph.reopen': '重新打开',
+        'graph.remove': '删除',
+        'graph.record': '确认记录',
+        'graph.hideRecord': '收起记录',
+        'graph.recordHint': '这条边会被跟随。如果确认错了，可以在这里撤销。',
+        'graph.noHistory': '还没有记录。',
+        'trace.title': '按值追踪',
+        'trace.hint': '给它一个值，它会先找出这个值落在哪张表哪一列，再沿已确认的 join 跨表走。SQL 由服务端按关系图拼装——这一页只收一个值，永远不收 SQL。',
+        'trace.noSources': '先添加数据源；追踪是针对单个数据源跑的。',
+        'trace.value': '值',
+        'trace.valuePlaceholder': '订单号、编码、SKU…',
+        'trace.entryTable': '入口表（可选）',
+        'trace.entryColumn': '入口列（可选）',
+        'trace.entryOptional': '留空则自动探测',
+        'trace.direction': '方向',
+        'trace.dirBoth': '双向',
+        'trace.dirDown': '向下：引用它的行',
+        'trace.dirUp': '向上：它引用的行',
+        'trace.run': '追踪',
+        'trace.running': '正在走…',
+        'trace.needValue': '先输入要查的值。',
+        'trace.nothing': '什么都没走到：从这个值出发没有已确认的边。',
+        'trace.summary': '从 {table}.{column} 出发 — 命中 {tables} 张表，耗时 {ms}ms',
+        'trace.summaryShort': '命中 {tables} 张表，耗时 {ms}ms',
+        'trace.counts': '{steps} 步，读取 {rows} 行，深度 {depth}',
+        'trace.rows': '{n} 行',
+        'trace.and': '且',
+        'trace.chainBreaks': '0 行 —— 链路在此中断',
+        'trace.stepFailed': '这一步失败了',
+        'trace.truncated': '已截断',
+        'trace.stopped': '中断位置',
+        'trace.pendingTitle': '未跟随的边',
+        'trace.pendingHint': '这些 join 本可以继续往下走，但它们还是待确认状态。到「关系图」页确认一条再重新追踪。',
+        'trace.warnings': '警告',
+        'trace.judgeOk': '这一步是对的',
+        'trace.judgeWrong': '不太对',
+        'trace.judgeCancel': '收起',
+        'trace.judgeMissing': '漏了行',
+        'trace.judgeIrrelevant': '根本无关',
+        'notice.discovered': '已导入数据库声明的外键。',
+        'notice.mined': '已从审计日志挖掘表间连接——它们以「待确认」状态进入关系图。',
+        'notice.verdict': '已记录「{verdict}」。',
+        'notice.conditionSet': '条件已保存。',
+        'notice.conditionCleared': '条件已清除。',
+        'notice.edgeDeleted': '边已删除。',
+        'notice.edgeProposed': '连接已记录，起始状态为待确认。',
         'header.backToChat': '返回会话',
         'form.group': '分组',
         'form.groupHint': '同一分组的数据源会列在一起',
@@ -2727,6 +2927,238 @@ window.__ModuleLoader__.load({
       .dbmcp-scan-all .dbmcp-hint {
         font-variant-numeric: tabular-nums;
       }
+      /* Relation graph — page A. An edge is one claim about a join, so the row
+         is a small card rather than a table line: the join path, the evidence
+         under it, and the buttons the current status allows. */
+      .dbmcp-edge-toolbar {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin: 10px 0 4px;
+      }
+      .dbmcp-edge-toolbar .dbmcp-select {
+        width: auto;
+        min-width: 140px;
+        flex: 0 0 auto;
+      }
+      .dbmcp-edge-filters {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        flex-wrap: wrap;
+      }
+      .dbmcp-filter {
+        border: 1px solid transparent;
+        border-radius: 999px;
+        background: transparent;
+        color: var(--dsw-alias-label-secondary);
+        font: inherit;
+        font-size: 12px;
+        font-variant-numeric: tabular-nums;
+        padding: 3px 10px;
+        cursor: pointer;
+        transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+      }
+      .dbmcp-filter:hover {
+        color: var(--dsw-alias-label-primary);
+        background: var(--dsw-alias-bg-layer-2);
+      }
+      .dbmcp-filter.is-on {
+        color: var(--dsw-alias-label-primary);
+        border-color: var(--dsw-alias-border-l1);
+        background: var(--dsw-alias-bg-layer-2);
+      }
+      .dbmcp-edges {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        margin-top: 10px;
+      }
+      .dbmcp-edge {
+        border: 1px solid var(--dsw-alias-border-l1);
+        border-left-width: 3px;
+        border-radius: 10px;
+        padding: 9px 11px;
+        background: var(--dsw-alias-bg-layer-2);
+      }
+      /* The left border is the status, so a list of edges reads at a glance. */
+      .dbmcp-edge.is-pending {
+        border-left-color: var(--dsw-alias-state-warn-primary);
+      }
+      .dbmcp-edge.is-confirmed {
+        border-left-color: var(--dsw-alias-state-idle-primary);
+      }
+      .dbmcp-edge.is-trusted {
+        border-left-color: var(--dsw-alias-state-success-primary);
+      }
+      .dbmcp-edge.is-stale,
+      .dbmcp-edge.is-rejected {
+        border-left-color: var(--dsw-alias-state-error-primary);
+      }
+      .dbmcp-edge-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        justify-content: space-between;
+      }
+      .dbmcp-edge-path {
+        font-size: 13px;
+        color: var(--dsw-alias-label-primary);
+        word-break: break-all;
+      }
+      .dbmcp-edge-arrow {
+        color: var(--dsw-alias-label-secondary);
+      }
+      .dbmcp-edge-chip {
+        flex: 0 0 auto;
+        text-transform: lowercase;
+      }
+      .dbmcp-edge-chip.is-pending {
+        border-color: var(--dsw-alias-state-warn-primary);
+        color: var(--dsw-alias-state-warn-primary);
+      }
+      .dbmcp-edge-chip.is-confirmed {
+        border-color: var(--dsw-alias-state-idle-primary);
+        color: var(--dsw-alias-state-idle-primary);
+      }
+      .dbmcp-edge-chip.is-trusted {
+        border-color: var(--dsw-alias-state-success-primary);
+        color: var(--dsw-alias-state-success-primary);
+      }
+      .dbmcp-edge-chip.is-stale,
+      .dbmcp-edge-chip.is-rejected {
+        border-color: var(--dsw-alias-state-error-primary);
+        color: var(--dsw-alias-state-error-primary);
+      }
+      .dbmcp-edge-meta {
+        margin: 4px 0 0;
+        font-variant-numeric: tabular-nums;
+      }
+      .dbmcp-edge-when {
+        margin: 2px 0 0;
+        color: var(--dsw-alias-label-primary);
+      }
+      .dbmcp-edge-why {
+        margin: 4px 0 0;
+        color: var(--dsw-alias-state-error-primary);
+      }
+      .dbmcp-edge-error {
+        margin: 6px 0 0;
+        color: var(--dsw-alias-state-error-primary);
+      }
+      .dbmcp-edge-actions {
+        margin-top: 8px;
+        flex-wrap: wrap;
+      }
+      .dbmcp-edge-form {
+        margin-top: 8px;
+        padding: 8px 10px;
+        border: 1px solid var(--dsw-alias-border-l1);
+        border-radius: 8px;
+        background: var(--dsw-alias-bg-base);
+      }
+      .dbmcp-edge-form.is-new {
+        margin: 10px 0 0;
+      }
+      .dbmcp-edge-form .dbmcp-input {
+        margin-bottom: 6px;
+      }
+      .dbmcp-edge-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+      }
+      .dbmcp-edge-record {
+        margin-top: 8px;
+        padding-top: 6px;
+        border-top: 1px solid var(--dsw-alias-border-l1);
+      }
+      .dbmcp-edge-history {
+        list-style: none;
+        margin: 4px 0 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        font-size: 12px;
+        color: var(--dsw-alias-label-secondary);
+      }
+      .dbmcp-edge-history code {
+        font-variant-numeric: tabular-nums;
+      }
+
+      /* Page B — the trace result. A step is the same shape as an edge row so the
+         two pages read alike; the numbered marker is the walk order, which is the
+         one thing the edge row cannot show. */
+      .dbmcp-trace-form {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        margin: 4px 0 8px;
+      }
+      .dbmcp-trace-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 8px;
+        align-items: end;
+      }
+      .dbmcp-trace-summary {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        padding: 6px 0;
+      }
+      .dbmcp-trace-index {
+        font-variant-numeric: tabular-nums;
+        color: var(--dsw-alias-label-secondary);
+      }
+      .dbmcp-trace-step .dbmcp-edge-head {
+        align-items: baseline;
+      }
+      .dbmcp-trace-cut {
+        color: var(--dsw-alias-state-warn-primary);
+        border-color: var(--dsw-alias-state-warn-primary);
+      }
+      .dbmcp-trace-sample {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin: 2px 0;
+      }
+      .dbmcp-trace-cell {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 12px;
+        color: var(--dsw-alias-label-primary);
+        background: var(--dsw-alias-bg-layer-2);
+        border-radius: 4px;
+        padding: 1px 6px;
+      }
+      .dbmcp-trace-judge {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        margin-top: 4px;
+      }
+      .dbmcp-trace-reasons {
+        flex-wrap: wrap;
+        row-gap: 4px;
+      }
+      .dbmcp-trace-aside {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        margin-top: 10px;
+        padding-top: 8px;
+        border-top: 1px solid var(--dsw-alias-border-l1);
+      }
+      .dbmcp-trace-pending {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-wrap: wrap;
+      }
+
       /* Narrow sidebar: two- and three-column rows have no room to sit side by
          side, and before this query they simply ran past the right edge — the
          labels and inputs on the right were cut off with no scrollbar to say
@@ -2734,6 +3166,12 @@ window.__ModuleLoader__.load({
       @container (max-width: 560px) {
         .dbmcp-form-section.is-two,
         .dbmcp-form-section.is-three {
+          grid-template-columns: minmax(0, 1fr);
+        }
+        .dbmcp-edge-grid {
+          grid-template-columns: minmax(0, 1fr);
+        }
+        .dbmcp-trace-grid {
           grid-template-columns: minmax(0, 1fr);
         }
         .dbmcp-form-head {
@@ -4627,6 +5065,27 @@ function groupTables(tables) {
       const [tools, setTools] = React.useState(null)
       const [portDraft, setPortDraft] = React.useState('')
       const [clientBusy, setClientBusy] = React.useState('')
+      /* Page A — the relation graph. One datasource at a time, every edge it
+         knows, and the four verdicts that move an edge between states. */
+      const [graph, setGraph] = React.useState(null)
+      const [graphBusy, setGraphBusy] = React.useState(false)
+      const [graphError, setGraphError] = React.useState(null)
+      const [graphSource, setGraphSource] = React.useState('')
+      const [graphFilter, setGraphFilter] = React.useState('all')
+      const [graphOpen, setGraphOpen] = React.useState('')
+      const [graphForm, setGraphForm] = React.useState(null)
+      const [graphReason, setGraphReason] = React.useState('')
+      const [graphCondition, setGraphCondition] = React.useState(null)
+      const [graphConditionDraft, setGraphConditionDraft] = React.useState('')
+      const [traceValue, setTraceValue] = React.useState('')
+      const [traceTable, setTraceTable] = React.useState('')
+      const [traceColumn, setTraceColumn] = React.useState('')
+      const [traceDirection, setTraceDirection] = React.useState('both')
+      const [traceSource, setTraceSource] = React.useState('')
+      const [trace, setTrace] = React.useState(null)
+      const [traceBusy, setTraceBusy] = React.useState(false)
+      const [traceError, setTraceError] = React.useState(null)
+      const [traceOpen, setTraceOpen] = React.useState('')
 
       const load = React.useCallback(async () => {
         setBusy(true)
@@ -4950,6 +5409,188 @@ function groupTables(tables) {
 
       /** Publish or withdraw one tool for the agent. */
       const [limitDraft, setLimitDraft] = React.useState({})
+
+      /* ------------------------------------------------------- relation graph
+         Page A reads one datasource's graph and nothing else. The panel has no
+         SQL box on purpose: every action here is one of the six graph tools, so
+         a page that only ever moves edges cannot become a query console. */
+
+      /** The datasource the graph page is showing: the pick, else the default. */
+      const graphTarget = React.useMemo(() => {
+        if (graphSource && sources.some((item) => item.id === graphSource)) return graphSource
+        const fallback = sources.find((item) => item.isDefault === true) || sources[0]
+        return fallback ? fallback.id : ''
+      }, [graphSource, sources])
+
+      const loadGraph = React.useCallback(async () => {
+        if (!graphTarget) {
+          setGraph({ edges: [], counts: null, total: 0, truncated: false })
+          setGraphError(null)
+          return
+        }
+        setGraphBusy(true)
+        try {
+          const payload = await apiGet(`/relations?datasource=${encodeURIComponent(graphTarget)}`)
+          if (payload.ok === false) {
+            const failure = payload.error || {}
+            setGraphError(failure.hint ? `${failure.message || 'list_edges failed'} — ${failure.hint}` : failure.message || 'list_edges failed')
+            setGraph({ edges: [], counts: null, total: 0, truncated: false })
+            return
+          }
+          setGraphError(null)
+          setGraph({
+            edges: payload.edges || [],
+            counts: payload.counts || null,
+            total: payload.total || 0,
+            truncated: payload.truncated === true,
+          })
+        } catch (error) {
+          const body = (error && error.payload) || {}
+          setGraphError(String(body.message || (error && error.message) || error))
+          setGraph({ edges: [], counts: null, total: 0, truncated: false })
+        } finally {
+          setGraphBusy(false)
+        }
+      }, [graphTarget])
+
+      React.useEffect(() => {
+        if (tab !== 'graph') return
+        void loadGraph()
+      }, [tab, loadGraph])
+
+      /** Run one graph write and fold its outcome back into the notice line. */
+      const graphAction = async (path, body, message) => {
+        setGraphBusy(true)
+        setNotice(null)
+        try {
+          const payload = await apiPost(path, { ...body, datasource: graphTarget })
+          if (payload && payload.ok === false) {
+            const failure = payload.error || {}
+            const hint = failure.hint ? ` — ${failure.hint}` : ''
+            setNotice({ message: `${failure.message || payload.message || 'the tool reported an error'}${hint}`, isError: true })
+            return null
+          }
+          if (message) setNotice({ message, isError: false })
+          await loadGraph()
+          return payload
+        } catch (error) {
+          const body2 = (error && error.payload) || {}
+          const failure = body2.error || {}
+          const message2 = failure.message || body2.message || String((error && error.message) || error)
+          const hint = failure.hint ? ` — ${failure.hint}` : ''
+          setNotice({ message: `${message2}${hint}`, isError: true })
+          return null
+        } finally {
+          setGraphBusy(false)
+        }
+      }
+
+      const discoverEdges = () => graphAction('/relations/discover', {}, t('notice.discovered'))
+
+      const mineEdges = () => graphAction('/relations/mine', {}, t('notice.mined'))
+
+      const sendFeedback = (edge, verdict, reason) =>
+        graphAction(
+          '/relations/feedback',
+          { edge_id: edge.id, verdict, reason: reason || undefined },
+          fmt(t('notice.verdict'), { verdict }),
+        )
+
+      const saveCondition = (edge, condition) =>
+        graphAction(
+          '/relations/condition',
+          { edge_id: edge.id, condition },
+          condition ? t('notice.conditionSet') : t('notice.conditionCleared'),
+        )
+
+      const removeEdge = (edge) => graphAction('/relations/delete', { edge_id: edge.id }, t('notice.edgeDeleted'))
+
+      const proposeEdge = async () => {
+        const draft = graphForm || {}
+        const payload = await graphAction('/relations/propose', {
+          from_table: draft.from_table || '',
+          from_column: draft.from_column || '',
+          to_table: draft.to_table || '',
+          to_column: draft.to_column || '',
+          condition: draft.condition || undefined,
+          note: draft.note || undefined,
+        }, t('notice.edgeProposed'))
+        if (payload) {
+          setGraphForm(null)
+          setGraphOpen('')
+        }
+      }
+
+      /** The datasource the trace page walks: the pick, else the default. */
+      const traceTarget = React.useMemo(() => {
+        if (traceSource && sources.some((item) => item.id === traceSource)) return traceSource
+        const fallback = sources.find((item) => item.isDefault === true) || sources[0]
+        return fallback ? fallback.id : ''
+      }, [traceSource, sources])
+
+      /** Follow one value; the panel never sends a statement, only a value. */
+      const runTrace = async () => {
+        const value = String(traceValue || '').trim()
+        if (!value) {
+          setTraceError(t('trace.needValue'))
+          return
+        }
+        setTraceBusy(true)
+        setTraceError(null)
+        setTraceOpen('')
+        try {
+          const payload = await apiPost('/trace', {
+            value,
+            datasource: traceTarget,
+            entry_table: traceTable.trim() || undefined,
+            entry_column: traceColumn.trim() || undefined,
+            direction: traceDirection,
+          })
+          if (payload && payload.ok === false) {
+            const failure = payload.error || {}
+            const hint = failure.hint ? ` — ${failure.hint}` : ''
+            setTraceError(`${failure.message || payload.message || 'trace_by_key failed'}${hint}`)
+            setTrace(null)
+            return
+          }
+          setTrace(payload || null)
+        } catch (error) {
+          const body = (error && error.payload) || {}
+          const failure = body.error || {}
+          const hint = failure.hint ? ` — ${failure.hint}` : ''
+          setTraceError(`${failure.message || body.message || String((error && error.message) || error)}${hint}`)
+          setTrace(null)
+        } finally {
+          setTraceBusy(false)
+        }
+      }
+
+      /** Judge one step of the walk; the edge it travelled is the thing judged. */
+      const judgeStep = async (edgeId, verdict, reason) => {
+        setNotice(null)
+        try {
+          const payload = await apiPost('/relations/feedback', {
+            datasource: traceTarget,
+            edge_id: edgeId,
+            verdict,
+            reason: reason || undefined,
+          })
+          if (payload && payload.ok === false) {
+            const failure = payload.error || {}
+            const hint = failure.hint ? ` — ${failure.hint}` : ''
+            setNotice({ message: `${failure.message || 'feedback failed'}${hint}`, isError: true })
+            return
+          }
+          setNotice({ message: fmt(t('notice.verdict'), { verdict }), isError: false })
+          setTraceOpen('')
+          await runTrace()
+        } catch (error) {
+          const body = (error && error.payload) || {}
+          const failure = body.error || {}
+          const hint = failure.hint ? ` — ${failure.hint}` : ''
+          setNotice({ message: `${failure.message || String((error && error.message) || error)}${hint}`, isError: true })
+        }
+      }
 
       /** Drafted value of the long-text policy while the select is open. */
       const [textPolicyDraft, setTextPolicyDraft] = React.useState(undefined)
@@ -6021,6 +6662,636 @@ function groupTables(tables) {
         )
       }
 
+      /* Page A — the relation graph.
+         An edge reads as a join path, not as a row of foreign-key metadata: the
+         left side is where the value lives, the right side is what it points
+         at. The status chip is the only thing that decides which buttons the
+         row offers, because a pending edge and a trusted edge are not the same
+         kind of claim. */
+      const edgeStatusClass = (status) => `dbmcp-pill dbmcp-edge-chip is-${status || 'pending'}`
+
+      const edgeStatusLabel = (status) =>
+        status === 'confirmed'
+          ? t('graph.statusConfirmed')
+          : status === 'trusted'
+            ? t('graph.statusTrusted')
+            : status === 'rejected'
+              ? t('graph.statusRejected')
+              : status === 'stale'
+                ? t('graph.statusStale')
+                : t('graph.statusPending')
+
+      const edgeSourceLabel = (source) =>
+        source === 'fk'
+          ? t('graph.sourceFk')
+          : source === 'inferred'
+            ? t('graph.sourceInferred')
+            : source === 'audit_mined'
+              ? t('graph.sourceMined')
+              : t('graph.sourceManual')
+
+      const edgeFanout = (edge) => {
+        const value = edge.stats && edge.stats.avgFanout
+        return typeof value === 'number' ? value.toFixed(1) : '—'
+      }
+
+      const edgeMeta = (edge) => {
+        const parts = [edgeSourceLabel(edge.source)]
+        const confirmed = (edge.stats && edge.stats.confirmCount) || 0
+        if (confirmed) parts.push(fmt(t('graph.confirmedTimes'), { n: confirmed }))
+        const rejected = (edge.stats && edge.stats.rejectCount) || 0
+        if (rejected) parts.push(fmt(t('graph.rejectedTimes'), { n: rejected }))
+        parts.push(fmt(t('graph.fanout'), { value: edgeFanout(edge) }))
+        return parts.join(' · ')
+      }
+
+      /** The line under the join path: why it stopped being trusted, if it did. */
+      const edgeReason = (edge) => {
+        const failure = edge.stats && edge.stats.lastFailure
+        if (!failure) return null
+        const verdict = failure.verdict === 'too_many' ? t('graph.verdictTooMany') : failure.verdict === 'missing' ? t('graph.verdictMissing') : failure.verdict
+        const reason = failure.reason
+          ? failure.reason === 'wrong_column'
+            ? t('graph.reasonWrongColumn')
+            : failure.reason === 'needs_condition'
+              ? t('graph.reasonNeedsCondition')
+              : failure.reason === 'not_unique'
+                ? t('graph.reasonNotUnique')
+                : failure.reason
+          : ''
+        const when = failure.at ? ` ${fmt(t('graph.when'), { at: localClock(failure.at) })}` : ''
+        return h(
+          'p',
+          { className: 'dbmcp-hint dbmcp-edge-why' },
+          reason ? fmt(t('graph.failedBecause'), { verdict, reason }) : verdict,
+          when,
+        )
+      }
+
+      /** The confirmation record: who moved this edge and when. */
+      const edgeHistory = (edge) => {
+        const history = (edge.history || []).slice(-6).reverse()
+        if (history.length === 0) return h('p', { className: 'dbmcp-hint' }, t('graph.noHistory'))
+        return h(
+          'ul',
+          { className: 'dbmcp-edge-history' },
+          history.map((entry, index) =>
+            h(
+              'li',
+              { key: `${entry.at}:${index}` },
+              h('code', null, localClock(entry.at)),
+              ' ',
+              h('span', null, entry.action || '—'),
+              entry.note ? h('span', { className: 'dbmcp-hint' }, ` — ${entry.note}`) : null,
+            ),
+          ),
+        )
+      }
+
+      /** Inline editor for the free-form SQL predicate an edge may carry. */
+      const edgeConditionEditor = (edge) => {
+        const open = graphCondition === edge.id
+        if (!open) return null
+        const value = edge.condition || ''
+        return h(
+          'div',
+          { className: 'dbmcp-edge-form' },
+          h('p', { className: 'dbmcp-hint' }, t('graph.conditionHint')),
+          h('input', {
+            className: 'dbmcp-input dbmcp-mono',
+            defaultValue: value,
+            placeholder: t('graph.conditionPlaceholder'),
+            onChange: (event) => setGraphConditionDraft(event.target.value),
+          }),
+          h(
+            'div',
+            { className: 'dbmcp-inline' },
+            h(
+              'button',
+              {
+                type: 'button',
+                className: 'dbmcp-btn is-small is-primary',
+                disabled: graphBusy,
+                onClick: () => {
+                  void saveCondition(edge, graphConditionDraft)
+                  setGraphCondition('')
+                  setGraphConditionDraft('')
+                },
+              },
+              t('graph.saveCondition'),
+            ),
+            h(
+              'button',
+              {
+                type: 'button',
+                className: 'dbmcp-btn is-small',
+                onClick: () => {
+                  setGraphCondition('')
+                  setGraphConditionDraft('')
+                },
+              },
+              t('graph.cancel'),
+            ),
+          ),
+        )
+      }
+
+      /** The reject buttons, one per reason; picking one is the whole answer. */
+      const edgeRejectMenu = (edge) => {
+        const open = graphReason === edge.id
+        if (!open) return null
+        const pick = (reason) => {
+          setGraphReason('')
+          void sendFeedback(edge, 'too_many', reason)
+        }
+        return h(
+          'div',
+          { className: 'dbmcp-edge-form' },
+          h('p', { className: 'dbmcp-hint' }, t('graph.rejectHint')),
+          h(
+            'div',
+            { className: 'dbmcp-inline' },
+            h('button', { type: 'button', className: 'dbmcp-btn is-small', disabled: graphBusy, onClick: () => pick('wrong_column') }, t('graph.reasonWrongColumn')),
+            h('button', { type: 'button', className: 'dbmcp-btn is-small', disabled: graphBusy, onClick: () => pick('needs_condition') }, t('graph.reasonNeedsCondition')),
+            h('button', { type: 'button', className: 'dbmcp-btn is-small', disabled: graphBusy, onClick: () => pick('not_unique') }, t('graph.reasonNotUnique')),
+            h('button', { type: 'button', className: 'dbmcp-btn is-small is-plain', onClick: () => setGraphReason('') }, t('graph.cancel')),
+          ),
+        )
+      }
+
+      /** The row actions each status offers — the state machine, made visible. */
+      const edgeActions = (edge) => {
+        const status = edge.status || 'pending'
+        const buttons = []
+        if (status === 'pending') {
+          buttons.push(
+            h('button', { key: 'ok', type: 'button', className: 'dbmcp-btn is-small is-primary', disabled: graphBusy, onClick: () => void sendFeedback(edge, 'ok') }, t('graph.confirm')),
+            h('button', { key: 'no', type: 'button', className: 'dbmcp-btn is-small is-danger', disabled: graphBusy, onClick: () => setGraphReason(edge.id) }, t('graph.reject')),
+            h('button', { key: 'when', type: 'button', className: 'dbmcp-btn is-small', disabled: graphBusy, onClick: () => { setGraphCondition(edge.id); setGraphConditionDraft(edge.condition || '') } }, t('graph.addCondition')),
+          )
+        } else if (status === 'stale') {
+          buttons.push(
+            h('button', { key: 'ok', type: 'button', className: 'dbmcp-btn is-small is-primary', disabled: graphBusy, onClick: () => void sendFeedback(edge, 'ok') }, t('graph.confirm')),
+            h('button', { key: 'when', type: 'button', className: 'dbmcp-btn is-small', disabled: graphBusy, onClick: () => { setGraphCondition(edge.id); setGraphConditionDraft(edge.condition || '') } }, t('graph.addCondition')),
+            h('button', { key: 'gone', type: 'button', className: 'dbmcp-btn is-small is-danger', disabled: graphBusy, onClick: () => void removeEdge(edge) }, t('graph.remove')),
+          )
+        } else if (status === 'rejected') {
+          buttons.push(
+            h('button', { key: 'ok', type: 'button', className: 'dbmcp-btn is-small', disabled: graphBusy, onClick: () => void sendFeedback(edge, 'ok') }, t('graph.reopen')),
+            h('button', { key: 'gone', type: 'button', className: 'dbmcp-btn is-small is-danger', disabled: graphBusy, onClick: () => void removeEdge(edge) }, t('graph.remove')),
+          )
+        }
+        /* confirmed and trusted rows carry no buttons: they are the answer, and
+           the only way to change one is to open its record and withdraw it. */
+        if (status === 'confirmed' || status === 'trusted') {
+          const open = graphOpen === edge.id
+          buttons.push(
+            h(
+              'button',
+              {
+                key: 'record',
+                type: 'button',
+                className: 'dbmcp-btn is-small is-plain',
+                onClick: () => setGraphOpen(open ? '' : edge.id),
+              },
+              open ? t('graph.hideRecord') : t('graph.record'),
+            ),
+          )
+        }
+        return buttons.length === 0 ? null : h('div', { className: 'dbmcp-inline dbmcp-edge-actions' }, buttons)
+      }
+
+      const renderEdge = (edge) => {
+        const status = edge.status || 'pending'
+        const open = graphOpen === edge.id
+        return h(
+          'div',
+          { key: edge.id, className: `dbmcp-edge is-${status}` },
+          h(
+            'div',
+            { className: 'dbmcp-edge-head' },
+            h(
+              'code',
+              { className: 'dbmcp-edge-path' },
+              h('span', null, `${edge.from.table}.${edge.from.column}`),
+              h('span', { className: 'dbmcp-edge-arrow' }, ' → '),
+              h('span', null, `${edge.to.table}.${edge.to.column}`),
+            ),
+            h('span', { className: edgeStatusClass(status) }, edgeStatusLabel(status)),
+          ),
+          h('p', { className: 'dbmcp-hint dbmcp-edge-meta' }, edgeMeta(edge)),
+          edge.condition ? h('p', { className: 'dbmcp-hint dbmcp-edge-when' }, `${t('graph.whenClause')} ${edge.condition}`) : null,
+          status === 'stale' || status === 'rejected' ? edgeReason(edge) : null,
+          edgeActions(edge),
+          edgeRejectMenu(edge),
+          edgeConditionEditor(edge),
+          open ? h('div', { className: 'dbmcp-edge-record' }, h('p', { className: 'dbmcp-hint' }, t('graph.recordHint')), edgeHistory(edge)) : null,
+        )
+      }
+
+      /** The form that adds a join the catalog does not declare. */
+      const renderEdgeForm = () => {
+        const draft = graphForm || {}
+        const field = (key, label, placeholder) =>
+          h(
+            'label',
+            { className: 'dbmcp-cell' },
+            h('span', { className: 'dbmcp-label' }, label),
+            h('input', {
+              className: 'dbmcp-input dbmcp-mono',
+              defaultValue: draft[key] || '',
+              placeholder,
+              onChange: (event) => setGraphForm({ ...draft, [key]: event.target.value }),
+            }),
+          )
+        return h(
+          'div',
+          { className: 'dbmcp-edge-form is-new' },
+          h('p', { className: 'dbmcp-hint' }, t('graph.addHint')),
+          h(
+            'div',
+            { className: 'dbmcp-edge-grid' },
+            field('from_table', t('graph.fromTable'), 'T_TRANS'),
+            field('from_column', t('graph.fromColumn'), 'ORDER_ID'),
+            field('to_table', t('graph.toTable'), 'T_ORDER'),
+            field('to_column', t('graph.toColumn'), 'ID'),
+          ),
+          h(
+            'label',
+            { className: 'dbmcp-cell' },
+            h('span', { className: 'dbmcp-label' }, t('graph.condition')),
+            h('input', {
+              className: 'dbmcp-input dbmcp-mono',
+              defaultValue: draft.condition || '',
+              placeholder: t('graph.conditionPlaceholder'),
+              onChange: (event) => setGraphForm({ ...draft, condition: event.target.value }),
+            }),
+          ),
+          h(
+            'div',
+            { className: 'dbmcp-inline' },
+            h('button', { type: 'button', className: 'dbmcp-btn is-small is-primary', disabled: graphBusy, onClick: () => void proposeEdge() }, t('graph.save')),
+            h('button', { type: 'button', className: 'dbmcp-btn is-small', onClick: () => setGraphForm(null) }, t('graph.cancel')),
+          ),
+        )
+      }
+
+      const renderGraph = () => {
+        const list = (graph && graph.edges) || []
+        const counts = (graph && graph.counts) || null
+        const total = (graph && graph.total) || 0
+        const pending = counts ? counts.pending : 0
+        const confirmed = counts ? counts.confirmed + counts.trusted : 0
+        const broken = counts ? counts.stale + counts.rejected : 0
+        const filters = [
+          { id: 'all', label: t('graph.filterAll'), count: total },
+          { id: 'pending', label: t('graph.filterPending'), count: pending },
+          { id: 'confirmed', label: t('graph.filterConfirmed'), count: confirmed },
+          { id: 'broken', label: t('graph.filterBroken'), count: broken },
+        ]
+        const matches = (edge) => {
+          if (graphFilter === 'all') return true
+          if (graphFilter === 'confirmed') return edge.status === 'confirmed' || edge.status === 'trusted'
+          if (graphFilter === 'broken') return edge.status === 'stale' || edge.status === 'rejected'
+          return (edge.status || 'pending') === graphFilter
+        }
+        const visible = list.filter(matches)
+        const sourcePick = sources.length
+          ? h(
+              'select',
+              {
+                className: 'dbmcp-input dbmcp-select',
+                value: graphTarget,
+                onChange: (event) => {
+                  setGraphSource(event.target.value)
+                  setGraphOpen('')
+                  setGraphCondition('')
+                  setGraphReason('')
+                },
+              },
+              sources.map((item) => h('option', { key: item.id, value: item.id }, item.name || item.id)),
+            )
+          : null
+        return h(
+          Card,
+          {
+            title: t('graph.title'),
+            aside: graphBusy ? h('span', { className: 'dbmcp-pill' }, t('graph.busy')) : h('span', { className: 'dbmcp-pill' }, `${total}`),
+            actions: h(
+              'div',
+              { className: 'dbmcp-inline' },
+              h('button', { type: 'button', className: 'dbmcp-btn is-small', disabled: graphBusy || !graphTarget, onClick: () => void discoverEdges() }, t('graph.discover')),
+              h('button', { type: 'button', className: 'dbmcp-btn is-small', disabled: graphBusy || !graphTarget, onClick: () => void mineEdges() }, t('graph.mine')),
+              h('button', { type: 'button', className: 'dbmcp-btn is-small', disabled: graphBusy || !graphTarget, onClick: () => setGraphForm(graphForm ? null : {}) }, graphForm ? t('graph.cancel') : t('graph.add')),
+            ),
+          },
+          h('p', { className: 'dbmcp-hint' }, t('graph.hint')),
+          sources.length === 0
+            ? h('p', { className: 'dbmcp-hint' }, t('graph.noSources'))
+            : h(
+                'div',
+                { className: 'dbmcp-edge-toolbar' },
+                sourcePick,
+                h(
+                  'div',
+                  { className: 'dbmcp-edge-filters' },
+                  filters.map((filter) =>
+                    h(
+                      'button',
+                      {
+                        key: filter.id,
+                        type: 'button',
+                        className: graphFilter === filter.id ? 'dbmcp-filter is-on' : 'dbmcp-filter',
+                        onClick: () => setGraphFilter(filter.id),
+                      },
+                      `${filter.label} ${filter.count}`,
+                    ),
+                  ),
+                ),
+              ),
+          graphForm ? renderEdgeForm() : null,
+          graphError ? h('p', { className: 'dbmcp-hint dbmcp-edge-error' }, graphError) : null,
+          graphBusy && !graph ? h('p', { className: 'dbmcp-hint' }, t('loading')) : null,
+          sources.length === 0 ? null : visible.length === 0
+            ? h('p', { className: 'dbmcp-hint' }, graphFilter === 'all' ? t('graph.empty') : t('graph.emptyFiltered'))
+            : h('div', { className: 'dbmcp-edges' }, visible.map(renderEdge)),
+          graph && graph.truncated ? h('p', { className: 'dbmcp-hint' }, fmt(t('graph.truncated'), { n: total })) : null,
+        )
+      }
+
+      /* Page B — the trace result.
+         The page takes a value and nothing else that could look like a query: the
+         statements are built server-side from the relation graph, so the panel
+         cannot become a SQL console by degrees. What comes back is a walk, and the
+         walk is what the reader has to judge — so every step carries the feedback
+         buttons for the edge that carried it there. */
+      const traceCondition = (step) => {
+        const condition = step.condition || {}
+        const binds = (condition.binds || []).map((item) => String(item))
+        const shown = binds.length > 3 ? `${binds.slice(0, 3).join(', ')}, …` : binds.join(', ')
+        const column = condition.column ? `${condition.column} in (${shown})` : ''
+        return condition.extra ? `${column} ${t('trace.and')} ${condition.extra}` : column
+      }
+
+      const traceSample = (step) => {
+        const sample = step.sample || {}
+        const columns = sample.columns || []
+        const rows = sample.rows || []
+        if (columns.length === 0 || rows.length === 0) return null
+        const first = rows[0] || []
+        return h(
+          'p',
+          { className: 'dbmcp-hint dbmcp-trace-sample' },
+          columns.map((column, index) =>
+            h('span', { key: `${column}:${index}`, className: 'dbmcp-trace-cell' }, `${column}=${first[index] === null || first[index] === undefined ? '∅' : String(first[index])}`),
+          ),
+        )
+      }
+
+      const traceStepActions = (step) => {
+        const edge = step.edge || null
+        if (!edge) return null
+        const open = traceOpen === `${step.index}`
+        const pick = (verdict, reason) => {
+          void judgeStep(edge.id, verdict, reason)
+        }
+        return h(
+          'div',
+          { className: 'dbmcp-trace-judge' },
+          h(
+            'div',
+            { className: 'dbmcp-inline' },
+            h('button', { type: 'button', className: 'dbmcp-btn is-small', onClick: () => pick('ok') }, t('trace.judgeOk')),
+            h('button', { type: 'button', className: 'dbmcp-btn is-small', onClick: () => setTraceOpen(open ? '' : `${step.index}`) }, open ? t('trace.judgeCancel') : t('trace.judgeWrong')),
+          ),
+          open
+            ? h(
+                'div',
+                { className: 'dbmcp-inline dbmcp-trace-reasons' },
+                h('button', { type: 'button', className: 'dbmcp-btn is-small', onClick: () => pick('too_many', 'not_unique') }, t('graph.reasonNotUnique')),
+                h('button', { type: 'button', className: 'dbmcp-btn is-small', onClick: () => pick('too_many', 'wrong_column') }, t('graph.reasonWrongColumn')),
+                h('button', { type: 'button', className: 'dbmcp-btn is-small', onClick: () => pick('too_many', 'needs_condition') }, t('graph.reasonNeedsCondition')),
+                h('button', { type: 'button', className: 'dbmcp-btn is-small is-plain', onClick: () => pick('missing') }, t('trace.judgeMissing')),
+                h('button', { type: 'button', className: 'dbmcp-btn is-small is-danger', onClick: () => pick('irrelevant') }, t('trace.judgeIrrelevant')),
+              )
+            : null,
+        )
+      }
+
+      const renderTraceStep = (step) => {
+        const status = step.status || 'hit'
+        const edge = step.edge || null
+        return h(
+          'div',
+          { key: `${step.index}:${step.table}:${step.depth}`, className: `dbmcp-edge dbmcp-trace-step is-${status === 'empty' ? 'stale' : status === 'error' ? 'rejected' : 'confirmed'}` },
+          h(
+            'div',
+            { className: 'dbmcp-edge-head' },
+            h(
+              'code',
+              { className: 'dbmcp-edge-path' },
+              h('span', { className: 'dbmcp-trace-index' }, `${step.index}.`),
+              ' ',
+              h('span', null, step.table),
+            ),
+            h(
+              'span',
+              { className: 'dbmcp-inline' },
+              step.truncated ? h('span', { className: 'dbmcp-pill dbmcp-trace-cut' }, t('trace.truncated')) : null,
+              edge ? h('span', { className: edgeStatusClass(edge.status) }, edgeStatusLabel(edge.status)) : null,
+            ),
+          ),
+          h('p', { className: 'dbmcp-hint dbmcp-edge-meta' }, traceCondition(step)),
+          h(
+            'p',
+            { className: 'dbmcp-hint dbmcp-edge-meta' },
+            status === 'empty'
+              ? t('trace.chainBreaks')
+              : status === 'error'
+                ? t('trace.stepFailed')
+                : fmt(t('trace.rows'), { n: step.rows }),
+            edge ? ` · ${edgeSourceLabel(edge.source)}` : '',
+            typeof step.fanout === 'number' ? ` · ${fmt(t('graph.fanout'), { value: step.fanout.toFixed(1) })}` : '',
+          ),
+          traceSample(step),
+          step.note ? h('p', { className: 'dbmcp-hint dbmcp-edge-why' }, step.note) : null,
+          traceStepActions(step),
+        )
+      }
+
+      const renderTrace = () => {
+        const summary = (trace && trace.summary) || null
+        const steps = (trace && trace.steps) || []
+        const pending = (trace && trace.pending) || []
+        const warnings = (trace && trace.warnings) || []
+        const stopped = (trace && trace.stoppedAt) || []
+        const entry = (trace && trace.entry) || null
+        const directions = [
+          { id: 'both', label: t('trace.dirBoth') },
+          { id: 'down', label: t('trace.dirDown') },
+          { id: 'up', label: t('trace.dirUp') },
+        ]
+        const sourcePick = sources.length
+          ? h(
+              'select',
+              {
+                className: 'dbmcp-input dbmcp-select',
+                value: traceTarget,
+                onChange: (event) => {
+                  setTraceSource(event.target.value)
+                  setTrace(null)
+                  setTraceError(null)
+                },
+              },
+              sources.map((item) => h('option', { key: item.id, value: item.id }, item.name || item.id)),
+            )
+          : null
+        return h(
+          Card,
+          {
+            title: t('trace.title'),
+            aside: summary ? h('span', { className: 'dbmcp-pill' }, `${summary.tablesHit} / ${summary.tablesVisited}`) : null,
+          },
+          h('p', { className: 'dbmcp-hint' }, t('trace.hint')),
+          sources.length === 0
+            ? h('p', { className: 'dbmcp-hint' }, t('trace.noSources'))
+            : h(
+                'div',
+                { className: 'dbmcp-trace-form' },
+                h(
+                  'label',
+                  { className: 'dbmcp-cell' },
+                  h('span', { className: 'dbmcp-label' }, t('trace.value')),
+                  h('input', {
+                    className: 'dbmcp-input dbmcp-mono',
+                    value: traceValue,
+                    placeholder: t('trace.valuePlaceholder'),
+                    onChange: (event) => setTraceValue(event.target.value),
+                    onKeyDown: (event) => {
+                      if (event.key === 'Enter') void runTrace()
+                    },
+                  }),
+                ),
+                h(
+                  'div',
+                  { className: 'dbmcp-trace-grid' },
+                  sourcePick,
+                  h(
+                    'label',
+                    { className: 'dbmcp-cell' },
+                    h('span', { className: 'dbmcp-label' }, t('trace.entryTable')),
+                    h('input', {
+                      className: 'dbmcp-input dbmcp-mono',
+                      value: traceTable,
+                      placeholder: t('trace.entryOptional'),
+                      onChange: (event) => setTraceTable(event.target.value),
+                    }),
+                  ),
+                  h(
+                    'label',
+                    { className: 'dbmcp-cell' },
+                    h('span', { className: 'dbmcp-label' }, t('trace.entryColumn')),
+                    h('input', {
+                      className: 'dbmcp-input dbmcp-mono',
+                      value: traceColumn,
+                      placeholder: t('trace.entryOptional'),
+                      onChange: (event) => setTraceColumn(event.target.value),
+                    }),
+                  ),
+                  h(
+                    'label',
+                    { className: 'dbmcp-cell' },
+                    h('span', { className: 'dbmcp-label' }, t('trace.direction')),
+                    h(
+                      'select',
+                      {
+                        className: 'dbmcp-input dbmcp-select',
+                        value: traceDirection,
+                        onChange: (event) => setTraceDirection(event.target.value),
+                      },
+                      directions.map((item) => h('option', { key: item.id, value: item.id }, item.label)),
+                    ),
+                  ),
+                ),
+                h(
+                  'div',
+                  { className: 'dbmcp-inline' },
+                  h(
+                    'button',
+                    { type: 'button', className: 'dbmcp-btn is-small is-primary', disabled: traceBusy || !traceTarget, onClick: () => void runTrace() },
+                    traceBusy ? t('trace.running') : t('trace.run'),
+                  ),
+                ),
+              ),
+          traceError ? h('p', { className: 'dbmcp-hint dbmcp-edge-error' }, traceError) : null,
+          traceBusy && !trace ? h('p', { className: 'dbmcp-hint' }, t('loading')) : null,
+          trace && steps.length === 0
+            ? h('p', { className: 'dbmcp-hint' }, t('trace.nothing'))
+            : null,
+          trace && summary && steps.length > 0
+            ? h(
+                'div',
+                { className: 'dbmcp-trace-summary' },
+                h(
+                  'p',
+                  { className: 'dbmcp-hint' },
+                  entry
+                    ? fmt(t('trace.summary'), { table: entry.table || '—', column: entry.column || '—', tables: summary.tablesHit, ms: trace.elapsedMs })
+                    : fmt(t('trace.summaryShort'), { tables: summary.tablesHit, ms: trace.elapsedMs }),
+                ),
+                h(
+                  'p',
+                  { className: 'dbmcp-hint' },
+                  fmt(t('trace.counts'), {
+                    steps: summary.steps,
+                    rows: summary.rowsRead,
+                    depth: summary.depthReached,
+                  }),
+                ),
+              )
+            : null,
+          steps.length > 0 ? h('div', { className: 'dbmcp-edges' }, steps.map(renderTraceStep)) : null,
+          stopped.length > 0
+            ? h(
+                'div',
+                { className: 'dbmcp-trace-aside' },
+                h('p', { className: 'dbmcp-label' }, t('trace.stopped')),
+                stopped.map((item, index) =>
+                  h('p', { key: `${item.table}:${index}`, className: 'dbmcp-hint dbmcp-edge-why' }, `${item.table} — ${item.reason}`),
+                ),
+              )
+            : null,
+          pending.length > 0
+            ? h(
+                'div',
+                { className: 'dbmcp-trace-aside' },
+                h('p', { className: 'dbmcp-label' }, t('trace.pendingTitle')),
+                h('p', { className: 'dbmcp-hint' }, t('trace.pendingHint')),
+                pending.map((item, index) =>
+                  h(
+                    'p',
+                    { key: `${item.wouldReach}:${index}`, className: 'dbmcp-hint dbmcp-trace-pending' },
+                    h('span', { className: edgeStatusClass('pending') }, edgeStatusLabel('pending')),
+                    ' ',
+                    item.edge ? `${item.edge.from.table}.${item.edge.from.column} → ${item.edge.to.table}.${item.edge.to.column}` : '',
+                    item.wouldReach ? ` → ${item.wouldReach}` : '',
+                  ),
+                ),
+              )
+            : null,
+          warnings.length > 0
+            ? h(
+                'div',
+                { className: 'dbmcp-trace-aside' },
+                h('p', { className: 'dbmcp-label' }, t('trace.warnings')),
+                warnings.map((item, index) =>
+                  h('p', { key: `${item.code}:${index}`, className: 'dbmcp-hint dbmcp-edge-why' }, `[${item.code}] ${item.message}`),
+                ),
+              )
+            : null,
+        )
+      }
+
       let body
       if (state.status === 'loading') {
         body = h('div', { className: 'dbmcp-empty' }, t('loading'))
@@ -6197,6 +7468,8 @@ function groupTables(tables) {
               h(Row, { label: t('diag.uptime') }, formatUptime(data.host && data.host.uptimeMs)),
             ),
           ),
+          tab !== 'graph' ? null : renderGraph(),
+          tab !== 'trace' ? null : renderTrace(),
           tab !== 'clients' ? null : renderClients(),
           tab !== 'tools' ? null : renderTools(),
           tab !== 'tools' ? null : renderResults(),

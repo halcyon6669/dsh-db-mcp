@@ -123,8 +123,15 @@ for real before you commit the source.
 | ---- | ------- |
 | `mcp__db__list_datasources` | registered sources: id, kind, target, read-only |
 | `mcp__db__list_tables` | tables and views of a source |
-| `mcp__db__describe_table` | columns, types, nullability, primary key, plus keys, indexes, comments and a size estimate |
-| `mcp__db__list_relations` | every foreign key in a schema — the join paths, in one call |
+| `mcp__db__describe_table` | columns, types, nullability, primary key, plus indexes, comments and a size estimate |
+| `mcp__db__list_edges` | the relation graph: what joins what, with each edge's status and counts |
+| `mcp__db__propose_relation` | record a join the catalog does not declare |
+| `mcp__db__discover_relations` | import the declared foreign keys into the graph |
+| `mcp__db__mine_relations` | mine joins out of the statements already in the audit log |
+| `mcp__db__trace_by_key` | find where a value lives and which confirmed joins carry it across tables |
+| `mcp__db__feedback_relation` | confirm, reject or retire a join after a trace step |
+| `mcp__db__set_relation_condition` | attach the extra predicate a join needs to be true |
+| `mcp__db__delete_edge` | remove one edge from the graph for good |
 | `mcp__db__sample_rows` | a few rows of a table |
 | `mcp__db__execute_sql` | execute one statement — a query, or a write when that is allowed |
 | `mcp__db__explain_query` | query plan |
@@ -140,6 +147,31 @@ smaller tool list in the model's context. The same tab picks how long text cells
 are rendered into the model: `Auto` keeps a head/tail fragment of cells longer than
 200 characters, `Full` returns them untouched. Rows are never discarded, only the
 text the model sees is bounded.
+
+## The relation graph
+
+The catalog knows the foreign keys someone declared. Real databases often do not
+declare them, or declare them somewhere a login cannot read — so "what joins what"
+is kept as a graph you can correct. `discover_relations` imports the declared keys;
+`mine_relations` mines the joins out of statements the audit log already holds, for
+the schemas that declare nothing; `propose_relation` adds a join by hand. Every edge
+carries a status, and `trace_by_key` only walks the ones you have confirmed, so a
+guess never silently becomes a fact.
+
+The **Relations** tab shows that graph per data source: the join path, a status chip,
+where the edge came from, and how many times it was confirmed. Pending edges can be
+confirmed, rejected with a reason, or given a condition; a stale edge shows what
+failed and offers a re-check; a rejected edge can be re-opened. Confirmed and trusted
+edges keep their confirmation record, so nothing is a black box. Two buttons fill
+the graph: **Import foreign keys** reads the catalog, **Mine the log** reads the
+statements already audited.
+
+The **Trace** tab takes one value and shows the walk: each step's table, condition,
+row count, a few sample cells, and the edge that carried it there. Steps where the
+chain broke, was capped, or produced a warning are marked as such, and every step can
+be judged right / too many (with a reason) / missing / unrelated — which feeds the
+edge behind it. Neither page accepts SQL; the statements come from the graph and are
+bound server-side.
 
 ## Safety
 
