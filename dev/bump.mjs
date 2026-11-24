@@ -32,7 +32,9 @@ writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`, 'utf8')
 
 const hostPath = join(root, 'src', 'host.js')
 const host = readFileSync(hostPath, 'utf8')
-const next = host.replace(/const PLUGIN_VERSION = '[^']*'/, `const PLUGIN_VERSION = '${version}'`)
+// Accept either quote style: the file is formatted by whatever tool the tree uses,
+// and a bump must not be the thing that reformats it.
+const next = host.replace(/const PLUGIN_VERSION = (['"])[^'"]*\1/, (_all, quote) => `const PLUGIN_VERSION = ${quote}${version}${quote}`)
 if (next === host) {
   console.error('src/host.js does not declare PLUGIN_VERSION')
   process.exit(1)

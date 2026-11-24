@@ -21,6 +21,8 @@ report of each version in more detail.
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-25
+
 ### Added
 
 - **The relation graph answers what joins what.** The catalog used to answer that
@@ -707,7 +709,8 @@ it shipped as a single unreleased tree.
 - Read-only by default; a source becomes writable only when you say so.
 - Publishing through npm trusted publishing, so no token lives in the repository.
 
-[Unreleased]: https://github.com/halcyon6669/dsh-db-mcp/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/halcyon6669/dsh-db-mcp/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/halcyon6669/dsh-db-mcp/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/halcyon6669/dsh-db-mcp/compare/v0.9.10...v1.0.0
 [0.9.10]: https://github.com/halcyon6669/dsh-db-mcp/compare/v0.9.9...v0.9.10
 [0.9.9]: https://github.com/halcyon6669/dsh-db-mcp/compare/v0.9.8...v0.9.9
