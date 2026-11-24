@@ -29,26 +29,30 @@ using writes, and stop the endpoint from that tab when no outside client is conn
 The read-only flag and the DDL switch still apply to everything that arrives
 this way, because both are enforced in the Python server.
 
-One click writes the entry into each client's own configuration file:
+Each client row has two buttons — **Write stdio** and **Write HTTP** — so you
+choose the transport instead of the panel guessing from the client's shape:
 
-| Client | File | What is written |
+| Client | File | Section |
 | --- | --- | --- |
-| Visual Studio Code | `%APPDATA%\Code\User\mcp.json` (Windows), `~/Library/Application Support/Code/User/mcp.json` (macOS), `~/.config/Code/User/mcp.json` (Linux) | HTTP entry under `servers` |
-| VS Code Insiders | the same path with `Code - Insiders` | HTTP entry under `servers` |
-| Cursor | `~/.cursor/mcp.json` | HTTP entry under `mcpServers` |
-| JetBrains Air | `~/.jetbrains/mcp/mcp.json` | HTTP entry under `mcpServers` |
-| Claude Code | `~/.claude.json` | HTTP entry under `mcpServers` |
-| Claude Desktop | `%APPDATA%\Claude\claude_desktop_config.json` | stdio entry (python + `server/main.py`) |
-| Codex CLI | `~/.codex/config.toml` | `[mcp_servers.dsh-db-mcp]` stdio entry |
+| Visual Studio Code | `%APPDATA%\Code\User\mcp.json` (Windows), `~/Library/Application Support/Code/User/mcp.json` (macOS), `~/.config/Code/User/mcp.json` (Linux) | `servers` |
+| VS Code Insiders | the same path with `Code - Insiders` | `servers` |
+| Cursor | `~/.cursor/mcp.json` | `mcpServers` |
+| JetBrains Air | `~/.jetbrains/mcp/mcp.json` | `mcpServers` |
+| Claude Code | `~/.claude.json` | `mcpServers` |
+| Claude Desktop | `%APPDATA%\Claude\claude_desktop_config.json` | `mcpServers` |
+| Codex CLI | `~/.codex/config.toml` | `[mcp_servers.dsh-db-mcp]` |
+
+**Write stdio** writes a `command` / `args` / `env` entry (python + `server/main.py`)
+that launches this server as a child process, so no listening port is needed and it
+works even with the HTTP endpoint stopped. **Write HTTP** writes the shared
+endpoint URL and needs that endpoint running — the button reports an error and a
+hint if it is not. Writing one form replaces the other in the same file, and the
+configured pill shows which form is currently in place. Every client reads the
+same `datasources.json` and `secrets.json`, so a source added in the panel shows up
+everywhere without a restart of the client — only of the MCP server itself.
 
 The panel only lists a client when this platform has a configuration file for it,
 so on Linux Claude Desktop is absent and VS Code resolves under `~/.config`.
-
-Claude Desktop and Codex get a stdio entry instead of a URL because that form needs no
-listening port; the rest take the HTTP address so they always see the same
-process the panel manages. Every client reads the same `datasources.json` and
-`secrets.json`, so a source added in the panel shows up everywhere without a restart
-of the client — only of the MCP server itself.
 
 One rule is DSH-only and is **not** available to those clients: the per-conversation
 limit (it keys off the DSH conversation id). The audit log used to be in that group and

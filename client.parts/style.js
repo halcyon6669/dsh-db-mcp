@@ -812,6 +812,12 @@
         text-overflow: ellipsis;
         white-space: nowrap;
       }
+      .dbmcp-client-actions {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex: 0 0 auto;
+      }
       .dbmcp-tools-head {
         display: flex;
         align-items: baseline;

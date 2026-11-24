@@ -19,9 +19,9 @@ are `GET`; every mutation is `POST` (the same-origin check compares `Origin` wit
 | `GET /mcp/status` | Python server phase, tool list, last error, stderr tail |
 | `GET /http/status` | streamable-HTTP endpoint state: running, host, port, `url` (`http://host:port/dsh-db-mcp`), `sseUrl`, stderr tail |
 | `POST /http/start` · `POST /http/stop` | start (optional `{ port }`) or stop the HTTP endpoint |
-| `GET /clients` | the endpoint URL plus every supported outside client: config file, detected, configured |
+| `GET /clients` | the endpoint URL plus every supported outside client: config file, detected, configured, and the configured `transport` (`stdio` or `http`) |
 | `GET /tools` | every tool the Python server offers, with its `enabled` state and row-limit metadata, plus the current `limits` and `textPolicy`, so the panel can switch them |
-| `POST /clients/configure` | write this server into one client's config (`{ client }`) |
+| `POST /clients/configure` | write this server into one client's config (`{ client, transport? }`); `transport` is `stdio` (command/args/env, no endpoint needed) or `http` (shared endpoint, must be running). Omitting it keeps the old per-client default; writing one form replaces the other |
 | `GET /settings` · `POST /settings` | global write switch, audit switch, row limits and the long-text setting |
 | `GET /scopes` · `POST /scopes` | per-conversation data-source limits (`{ session, datasources }`; an empty list lifts the limit). `GET` returns `{ sessions, archived }`, each row `{ session, ids, updatedAt, title }` — `title` is the conversation's folded title when the host can read it, else `null`; `archived` holds the limits parked by archiving |
 | `POST /scopes/delete` · `POST /scopes/clear` | drop one conversation's limit (`{ session }`) or every limit at once; both return what they removed. Deleting also drops the parked copy, so unarchiving cannot resurrect it |

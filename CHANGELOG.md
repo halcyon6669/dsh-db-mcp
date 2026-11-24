@@ -30,6 +30,16 @@ report of each version in more detail.
   shown. `GET /audit` now returns a `total` alongside the page so the panel knows
   when to stop.
 
+- **Every outside client can be configured for stdio or HTTP.** The client card
+  used to decide the transport itself: Claude Desktop and Codex always got a
+  stdio entry, while VS Code, Cursor, JetBrains Air and Claude Code had to have
+  the HTTP endpoint running before they could be configured. Each client row now
+  has two buttons — **Write stdio** and **Write HTTP** — so any of them can run
+  this server as a child process with no port open, or use the shared endpoint.
+  Writing one form replaces the other, and the configured pill shows which form
+  is in place. `POST /clients/configure` takes an optional `transport`; omitting
+  it keeps the old per-client default.
+
 ## [1.0.0] - 2026-11-19
 
 ### Added

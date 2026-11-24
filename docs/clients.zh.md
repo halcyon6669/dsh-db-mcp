@@ -14,21 +14,21 @@ Python 服务是标准 MCP stdio 服务，DSH 只是它的一个客户端。面�
 
 **它只监听回环地址，而且没有鉴权。** 绑定地址写死为 `127.0.0.1`——启动动作只接受端口，不接受 host——所以别的机器连不上。但在本机上，任何能开 TCP 连接的进程都能调用 Python 服务发布的所有工具，包括 `execute_sql`。这就是本设计假定的信任边界，也正因如此，面板自己的请求才不需要 token。因此：不写数据时把全局写入开关关着，没有外部客户端连着时就在该标签里把端点停掉。只读标记与 DDL 开关对从这里进来的调用照样生效，因为两者都在 Python 服务里强制执行。
 
-点一次「自动配置」，就会写入对应的配置文件：
+每个客户端一行有两个按钮——**写入 stdio** 和 **写入 HTTP**——由你选择传输方式，面板不再替你猜：
 
-| 客户端 | 文件 | 写入内容 |
+| 客户端 | 文件 | 配置段 |
 | --- | --- | --- |
-| Visual Studio Code | Windows `%APPDATA%\Code\User\mcp.json`、macOS `~/Library/Application Support/Code/User/mcp.json`、Linux `~/.config/Code/User/mcp.json` | `servers` 下的 HTTP 条目 |
-| VS Code Insiders | 同上，目录换成 `Code - Insiders` | `servers` 下的 HTTP 条目 |
-| Cursor | `~/.cursor/mcp.json` | `mcpServers` 下的 HTTP 条目 |
-| JetBrains Air | `~/.jetbrains/mcp/mcp.json` | `mcpServers` 下的 HTTP 条目 |
-| Claude Code | `~/.claude.json` | `mcpServers` 下的 HTTP 条目 |
-| Claude Desktop | `%APPDATA%\Claude\claude_desktop_config.json` | stdio 条目（python + `server/main.py`） |
-| Codex CLI | `~/.codex/config.toml` | `[mcp_servers.dsh-db-mcp]` stdio 条目 |
+| Visual Studio Code | Windows `%APPDATA%\Code\User\mcp.json`、macOS `~/Library/Application Support/Code/User/mcp.json`、Linux `~/.config/Code/User/mcp.json` | `servers` |
+| VS Code Insiders | 同上，目录换成 `Code - Insiders` | `servers` |
+| Cursor | `~/.cursor/mcp.json` | `mcpServers` |
+| JetBrains Air | `~/.jetbrains/mcp/mcp.json` | `mcpServers` |
+| Claude Code | `~/.claude.json` | `mcpServers` |
+| Claude Desktop | `%APPDATA%\Claude\claude_desktop_config.json` | `mcpServers` |
+| Codex CLI | `~/.codex/config.toml` | `[mcp_servers.dsh-db-mcp]` |
+
+**写入 stdio** 写入 `command` / `args` / `env` 条目（python + `server/main.py`），把本服务作为子进程启动，不需要监听端口，HTTP 端点停掉也能用。**写入 HTTP** 写入共享端点地址，需要先启动该端点——没启动时会报错并给出提示。两种方式写进同一个文件时会互相替换，已配置标签会显示当前是哪一种（`stdio` 按缩写惯例保持小写，`HTTP` 大写）。所有客户端读同一份 `datasources.json` 与 `secrets.json`，在面板里加的数据源不用在客户端里重填（但要让 MCP 服务重启一次才会读到）。
 
 面板只列出「这个平台上确实有配置文件」的客户端，所以在 Linux 上不会出现 Claude Desktop，VS Code 的路径落在 `~/.config` 下。
-
-Claude Desktop 与 Codex 写的是 stdio 条目，不需要监听端口；其余几个用 HTTP 地址，看到的就是面板管理的同一个进程。所有客户端读同一份 `datasources.json` 与 `secrets.json`，在面板里加的数据源不用在客户端里重填（但要让 MCP 服务重启一次才会读到）。
 
 只有一样东西是 DSH 专属、这些客户端拿不到：会话级访问限制（它依赖 DSH 的会话 id）。审计日志曾经也在这一列，现在不是了：HTTP 子进程自己记录调用，所以外部客户端的工具调用同样落在面板读的那份 `logs/audit.jsonl` 里。只读限制照旧生效，因为它写在 Python 里。
 

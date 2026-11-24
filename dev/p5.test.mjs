@@ -25,7 +25,21 @@ function check(name, condition, detail = '') {
 const dir = await mkdtemp(join(tmpdir(), 'dbmcp-p5-'))
 await mkdir(join(dir, 'logs'), { recursive: true })
 
-const host = await createHost({ dir, config: {}, log: () => {} })
+// Throwaway client targets: tests write stdio/HTTP entries into these files
+// instead of the real editor configs on this machine.
+const clientFiles = {
+  cursor: join(dir, 'clients', 'cursor.json'),
+  codex: join(dir, 'clients', 'codex.toml'),
+}
+const host = await createHost({
+  dir,
+  config: {},
+  log: () => {},
+  clientTargets: () => [
+    { id: 'cursor', label: 'Cursor', shape: 'mcpServers', file: clientFiles.cursor },
+    { id: 'codex', label: 'Codex CLI', shape: 'toml', file: clientFiles.codex },
+  ],
+})
 const server = createServer((request, response) => host.handle(request, response))
 await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
 const base = `http://127.0.0.1:${server.address().port}`
@@ -291,32 +305,80 @@ try {
 
   const clients = await get('/clients')
   const ids = (clients.body?.clients || []).map((item) => item.id)
-  // Only the clients this platform can actually write are listed.
-  const portable = ['cursor', 'jetbrains-air', 'claude-code', 'codex']
-  const expected =
-    process.platform === 'win32' || process.platform === 'darwin'
-      ? ['vscode', 'vscode-insiders', ...portable.slice(0, 3), 'claude-desktop', portable[3]]
-      : ['vscode', 'vscode-insiders', ...portable]
+  // This host runs with injected throwaway targets (cursor + codex). The
+  // platform-dependent real list is exercised by the panel, not here.
   check(
-    'the client list covers the supported agents',
-    clients.status === 200 && expected.every((id) => ids.includes(id)),
+    'the client list reports the injected targets',
+    clients.status === 200 && ids.includes('cursor') && ids.includes('codex') && ids.length === 2,
     ids.join(','),
   )
   check(
-    'Claude Code and Codex are both offered',
-    ids.includes('claude-code') && ids.includes('codex'),
-    ids.join(','),
+    'each client knows its config file and shape',
+    (clients.body?.clients || []).every((item) => typeof item.file === 'string' && item.file.length > 0 && typeof item.shape === 'string'),
   )
-  const air = (clients.body?.clients || []).find((item) => item.id === 'jetbrains-air')
+
+  /* ---- stdio / HTTP one-click configuration, on a JSON client and a TOML one ---- */
+  // stdio needs no HTTP endpoint; the endpoint was stopped above.
+  const cursorStdio = await post('/clients/configure', { client: 'cursor', transport: 'stdio' })
   check(
-    'JetBrains Air is offered and points at its own mcp.json',
-    Boolean(air) && air.file.endsWith(join('.jetbrains', 'mcp', 'mcp.json')) && air.shape === 'mcpServers',
-    JSON.stringify(air),
+    'a JSON client can be configured for stdio with no endpoint running',
+    cursorStdio.status === 200 && cursorStdio.body?.transport === 'stdio',
+    JSON.stringify(cursorStdio.body),
   )
+  const cursorCfg = JSON.parse(await readFile(clientFiles.cursor, 'utf8'))
   check(
-    'each client knows its config file',
-    (clients.body?.clients || []).every((item) => typeof item.file === 'string' && item.file.length > 0),
+    'the stdio entry carries command, args and env',
+    Boolean(cursorCfg.mcpServers?.['dsh-db-mcp']?.command) &&
+      Array.isArray(cursorCfg.mcpServers?.['dsh-db-mcp']?.args) &&
+      Boolean(cursorCfg.mcpServers?.['dsh-db-mcp']?.env?.DB_MCP_RUNTIME),
+    JSON.stringify(cursorCfg.mcpServers?.['dsh-db-mcp']),
   )
+  const codexStdio = await post('/clients/configure', { client: 'codex', transport: 'stdio' })
+  const codexText = await readFile(clientFiles.codex, 'utf8')
+  check(
+    'a TOML client can be configured for stdio too',
+    codexStdio.status === 200 && /\[mcp_servers\.dsh-db-mcp\]/.test(codexText) && /command\s*=/.test(codexText),
+    JSON.stringify(codexStdio.body),
+  )
+  const afterStdio = await get('/clients')
+  check(
+    'configured clients report the stdio transport',
+    (afterStdio.body?.clients || []).every((item) => item.transport === 'stdio'),
+    JSON.stringify(afterStdio.body?.clients?.map((c) => [c.id, c.transport])),
+  )
+
+  // HTTP still refuses when the endpoint is down. Disable auto-start first,
+  // otherwise the bridge brings the child back after each stop.
+  await post('/settings', { httpEnabled: false })
+  await post('/http/stop', {})
+  const httpDown = await post('/clients/configure', { client: 'cursor', transport: 'http' })
+  check(
+    'HTTP configuration is refused while the endpoint is stopped',
+    httpDown.status === 409 && /not running/.test(String(httpDown.body?.error || '')),
+    JSON.stringify(httpDown.body),
+  )
+  await post('/settings', { httpEnabled: true })
+  await post('/http/start', {})
+  const cursorHttp = await post('/clients/configure', { client: 'cursor', transport: 'http' })
+  check(
+    'a JSON client can be switched to the HTTP endpoint',
+    cursorHttp.status === 200 && cursorHttp.body?.transport === 'http' && String(cursorHttp.body?.url || '').endsWith('/dsh-db-mcp'),
+    JSON.stringify(cursorHttp.body),
+  )
+  const httpCfg = JSON.parse(await readFile(clientFiles.cursor, 'utf8'))
+  check(
+    'the HTTP entry replaces the stdio one',
+    httpCfg.mcpServers?.['dsh-db-mcp']?.type === 'http' && !httpCfg.mcpServers?.['dsh-db-mcp']?.command,
+    JSON.stringify(httpCfg.mcpServers?.['dsh-db-mcp']),
+  )
+  const codexHttp = await post('/clients/configure', { client: 'codex', transport: 'http' })
+  const codexHttpText = await readFile(clientFiles.codex, 'utf8')
+  check(
+    'a TOML client can be switched to the HTTP endpoint',
+    codexHttp.status === 200 && /url\s*=/.test(codexHttpText) && !/command\s*=/.test(codexHttpText),
+    codexHttpText.slice(0, 160),
+  )
+  await post('/http/stop', {})
 
   const limits = await get('/tools')
   check(

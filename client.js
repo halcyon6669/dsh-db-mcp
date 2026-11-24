@@ -115,12 +115,13 @@ window.__ModuleLoader__.load({
         'clients.port': 'Port',
         'clients.start': 'Start',
         'clients.stop': 'Stop',
-        'clients.configure': 'Write config',
+        'clients.writeStdio': 'Write stdio',
+        'clients.writeHttp': 'Write HTTP',
         'clients.working': 'Writing…',
         'clients.configured': 'configured',
         'clients.notConfigured': 'not configured yet',
         'clients.noFile': 'not detected',
-        'clients.stdioNote': 'Claude Desktop and Codex get a stdio entry (python + this server), so they keep working even when the HTTP endpoint is stopped.',
+        'clients.stdioNote': 'Every client can take either form: stdio runs this server as a child process (no port needed), HTTP uses the shared endpoint above and needs it running.',
         'tools.title': 'Tools the agent sees',
         'tools.hint': 'Switch a tool off to take it away from the agent; the change applies on the next restart of the MCP server.',
         'tools.dshOnly': 'This list is DSH only. A client connected to the HTTP endpoint still sees every tool — the Python server publishes all of them, and the filter lives in the plugin.',
@@ -398,12 +399,13 @@ window.__ModuleLoader__.load({
         'clients.port': '端口',
         'clients.start': '启动',
         'clients.stop': '停止',
-        'clients.configure': '写入配置',
+        'clients.writeStdio': '写入 stdio',
+        'clients.writeHttp': '写入 HTTP',
         'clients.working': '写入中…',
         'clients.configured': '已配置',
         'clients.notConfigured': '尚未配置',
         'clients.noFile': '未检测到',
-        'clients.stdioNote': 'Claude Desktop 与 Codex 写入的是 stdio 配置（python + 本服务），所以即使 HTTP 端点停掉它们也能用。',
+        'clients.stdioNote': '每个客户端都可任选一种：stdio 把本服务作为子进程启动（不需要端口）；HTTP 复用上面的共享端点，需要先启动它。',
         'tools.title': 'AI 可用的工具',
         'tools.hint': '把工具关掉就从智能体看到的工具列表里摘掉它，下次重启 MCP 服务后生效。',
         'tools.dshOnly': '这份清单只对 DSH 生效。接入 HTTP 端点的客户端仍然能看到全部工具 —— Python 服务照旧发布它们，过滤发生在插件这一侧。',
@@ -1450,6 +1452,12 @@ window.__ModuleLoader__.load({
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+      }
+      .dbmcp-client-actions {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex: 0 0 auto;
       }
       .dbmcp-tools-head {
         display: flex;
@@ -4920,13 +4928,14 @@ function groupTables(tables) {
       }
 
       /** Write this server into one client's own configuration file. */
-      const configureClient = async (client) => {
-        setClientBusy(client.id)
+      const configureClient = async (client, transport) => {
+        const busyKey = `${client.id}:${transport}`
+        setClientBusy(busyKey)
         setNotice(null)
         try {
-          const payload = await apiPost('/clients/configure', { client: client.id })
+          const payload = await apiPost('/clients/configure', { client: client.id, transport })
           setNotice({
-            message: fmt(t('notice.clientReady'), { name: client.label, transport: payload.transport || 'http' }),
+            message: fmt(t('notice.clientReady'), { name: client.label, transport: payload.transport || transport }),
             isError: false,
           })
           await load()
@@ -5619,7 +5628,7 @@ function groupTables(tables) {
           setQuery,
         })
 
-      /** One row per supported outside client: detected, configured, one click away. */
+      /** One row per outside client: detected, configured, one click away. */
       const renderClientRow = (client) =>
         h(
           'div',
@@ -5631,17 +5640,31 @@ function groupTables(tables) {
             h('span', { className: 'dbmcp-hint dbmcp-mono' }, client.file || ''),
           ),
           client.configured
-            ? h('span', { className: 'dbmcp-pill is-open' }, t('clients.configured'))
+            ? h('span', { className: 'dbmcp-pill is-open' }, `${t('clients.configured')}${client.transport ? ` · ${client.transport.toUpperCase()}` : ''}`)
             : h('span', { className: 'dbmcp-hint' }, client.exists ? t('clients.notConfigured') : t('clients.noFile')),
           h(
-            'button',
-            {
-              type: 'button',
-              className: 'dbmcp-btn is-small',
-              disabled: clientBusy === client.id,
-              onClick: () => configureClient(client),
-            },
-            clientBusy === client.id ? t('clients.working') : t('clients.configure'),
+            'div',
+            { className: 'dbmcp-client-actions' },
+            h(
+              'button',
+              {
+                type: 'button',
+                className: 'dbmcp-btn is-small',
+                disabled: clientBusy === `${client.id}:stdio`,
+                onClick: () => configureClient(client, 'stdio'),
+              },
+              clientBusy === `${client.id}:stdio` ? t('clients.working') : t('clients.writeStdio'),
+            ),
+            h(
+              'button',
+              {
+                type: 'button',
+                className: 'dbmcp-btn is-small',
+                disabled: clientBusy === `${client.id}:http`,
+                onClick: () => configureClient(client, 'http'),
+              },
+              clientBusy === `${client.id}:http` ? t('clients.working') : t('clients.writeHttp'),
+            ),
           ),
         )
 

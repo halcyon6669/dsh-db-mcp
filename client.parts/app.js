@@ -2184,13 +2184,14 @@ function groupTables(tables) {
       }
 
       /** Write this server into one client's own configuration file. */
-      const configureClient = async (client) => {
-        setClientBusy(client.id)
+      const configureClient = async (client, transport) => {
+        const busyKey = `${client.id}:${transport}`
+        setClientBusy(busyKey)
         setNotice(null)
         try {
-          const payload = await apiPost('/clients/configure', { client: client.id })
+          const payload = await apiPost('/clients/configure', { client: client.id, transport })
           setNotice({
-            message: fmt(t('notice.clientReady'), { name: client.label, transport: payload.transport || 'http' }),
+            message: fmt(t('notice.clientReady'), { name: client.label, transport: payload.transport || transport }),
             isError: false,
           })
           await load()
@@ -2883,7 +2884,7 @@ function groupTables(tables) {
           setQuery,
         })
 
-      /** One row per supported outside client: detected, configured, one click away. */
+      /** One row per outside client: detected, configured, one click away. */
       const renderClientRow = (client) =>
         h(
           'div',
@@ -2895,17 +2896,31 @@ function groupTables(tables) {
             h('span', { className: 'dbmcp-hint dbmcp-mono' }, client.file || ''),
           ),
           client.configured
-            ? h('span', { className: 'dbmcp-pill is-open' }, t('clients.configured'))
+            ? h('span', { className: 'dbmcp-pill is-open' }, `${t('clients.configured')}${client.transport ? ` · ${client.transport.toUpperCase()}` : ''}`)
             : h('span', { className: 'dbmcp-hint' }, client.exists ? t('clients.notConfigured') : t('clients.noFile')),
           h(
-            'button',
-            {
-              type: 'button',
-              className: 'dbmcp-btn is-small',
-              disabled: clientBusy === client.id,
-              onClick: () => configureClient(client),
-            },
-            clientBusy === client.id ? t('clients.working') : t('clients.configure'),
+            'div',
+            { className: 'dbmcp-client-actions' },
+            h(
+              'button',
+              {
+                type: 'button',
+                className: 'dbmcp-btn is-small',
+                disabled: clientBusy === `${client.id}:stdio`,
+                onClick: () => configureClient(client, 'stdio'),
+              },
+              clientBusy === `${client.id}:stdio` ? t('clients.working') : t('clients.writeStdio'),
+            ),
+            h(
+              'button',
+              {
+                type: 'button',
+                className: 'dbmcp-btn is-small',
+                disabled: clientBusy === `${client.id}:http`,
+                onClick: () => configureClient(client, 'http'),
+              },
+              clientBusy === `${client.id}:http` ? t('clients.working') : t('clients.writeHttp'),
+            ),
           ),
         )
 

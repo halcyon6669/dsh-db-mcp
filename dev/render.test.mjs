@@ -457,6 +457,15 @@ check('audit paging: the button hides once every entry is shown', /audit\.entrie
 check('audit paging: a page is fetched with a bounded limit', /const AUDIT_PAGE = 12/.test(source) && /Math\.min\(200, audit\.entries\.length \+ AUDIT_PAGE\)/.test(source))
 check('audit paging: the button reports a busy state', /auditBusy \? t\('audit\.loadingMore'\) : t\('audit\.loadMore'\)/.test(source))
 
+// Every outside client can be wired up either way: one button writes a stdio
+// command entry, the other writes the shared HTTP endpoint. The chosen form is
+// sent explicitly so the Host does not have to guess from the client's shape.
+const clientsCard = source.slice(source.indexOf('const renderClientRow ='), source.indexOf('const renderTools = ()'))
+check('clients: each row offers both a stdio and an HTTP button', /onClick: \(\) => configureClient\(client, 'stdio'\)/.test(clientsCard) && /onClick: \(\) => configureClient\(client, 'http'\)/.test(clientsCard))
+check('clients: the chosen transport is sent to the Host', /apiPost\('\/clients\/configure', \{ client: client\.id, transport \}\)/.test(source))
+check('clients: the busy state is per client and transport', /clientBusy === `\$\{client\.id\}:stdio`/.test(clientsCard) && /clientBusy === `\$\{client\.id\}:http`/.test(clientsCard))
+check('clients: a configured row shows which transport it uses', /client\.transport\.toUpperCase\(\)/.test(clientsCard))
+
 // The tools card used to answer with a checkbox while every other on/off in the
 // panel was a track switch. Same control now, so "on" looks the same everywhere;
 // the checkbox class is gone rather than left behind unused.

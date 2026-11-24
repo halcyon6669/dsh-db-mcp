@@ -1165,6 +1165,9 @@ export function createHost(options = {}) {
     join(process.env.DSH_HOME || join(homedir(), ".dsh"), "db-mcp");
   const startedAt = Date.now();
   const pythonCache = { at: 0, value: null };
+  // Tests inject throwaway targets so they never rewrite the real editor or
+  // agent config files on this machine.
+  const targetsOf = options.clientTargets || clientTargets;
   const registryFile = join(dir, REGISTRY_FILE);
   const secretsFile = join(dir, SECRETS_FILE);
 
@@ -1969,10 +1972,11 @@ export function createHost(options = {}) {
     const settings = await readSettings();
     const url = httpUrlOf(settings);
     const clients = [];
-    for (const target of clientTargets()) {
+    for (const target of targetsOf()) {
       const exists = existsSync(target.file);
       let configured = false;
       let current = null;
+      let transport = null;
       if (target.shape === "toml") {
         const text = exists
           ? await readFile(target.file, "utf8").catch(() => "")
@@ -1983,6 +1987,12 @@ export function createHost(options = {}) {
         const found =
           /\[mcp_servers\.dsh-db-mcp\][\s\S]*?url\s*=\s*"([^"]+)"/.exec(text);
         current = found ? found[1] : null;
+        if (configured)
+          transport = current
+            ? "http"
+            : /\[mcp_servers\.dsh-db-mcp\][\s\S]*?command\s*=/.test(text)
+              ? "stdio"
+              : null;
       } else {
         const parsed = exists ? await readLoose(target.file) : null;
         const section =
@@ -1992,6 +2002,7 @@ export function createHost(options = {}) {
         const entry = section && section[CLIENT_ENTRY];
         configured = Boolean(entry);
         current = (entry && (entry.url || entry.serverUrl)) || null;
+        if (entry) transport = entry.command ? "stdio" : current ? "http" : null;
       }
       clients.push({
         id: target.id,
@@ -2001,18 +2012,20 @@ export function createHost(options = {}) {
         exists,
         configured,
         current,
+        transport,
       });
     }
     return { ok: true, url, settings, clients };
   }
 
   /**
-   * Write one client's config entry. JSON clients get the HTTP endpoint; Claude
-   * Desktop and Codex get a stdio entry so no port has to stay open for them.
+   * Write one client's config entry. Every client can take either form: stdio
+   * (command/args/env, no port needed) or HTTP (the shared endpoint). The caller
+   * chooses; omitting transport keeps the old per-client default for API users.
    */
   async function configureClient(payload) {
     const id = trimmed(payload.client);
-    const target = clientTargets().find((item) => item.id === id);
+    const target = targetsOf().find((item) => item.id === id);
     if (!target)
       return {
         status: 404,
@@ -2021,26 +2034,57 @@ export function createHost(options = {}) {
     const settings = await readSettings();
     const live = bridge.httpStatus();
     const url = httpUrlOf(settings);
+    const wanted = trimmed(payload.transport);
+    const transport =
+      wanted === "stdio" || wanted === "http"
+        ? wanted
+        : target.shape === "toml" || target.id === "claude-desktop"
+          ? "stdio"
+          : "http";
+    const sectionName = target.shape === "vscode" ? "servers" : "mcpServers";
 
-    if (target.shape === "toml") {
+    // stdio: command + args + env. TOML clients take a table, JSON clients an
+    // entry under their own section.
+    if (transport === "stdio") {
       const stdio = await stdioEntry();
-      const block = [
-        `[mcp_servers.${CLIENT_ENTRY}]`,
-        `command = ${JSON.stringify(stdio.command)}`,
-        `args = [${stdio.args.map((item) => JSON.stringify(item)).join(", ")}]`,
-        "",
-        `[mcp_servers.${CLIENT_ENTRY}.env]`,
-        ...Object.entries(stdio.env).map(
-          ([key, value]) => `${key} = ${JSON.stringify(value)}`,
-        ),
-      ].join("\n");
-      const existing = existsSync(target.file)
-        ? await readFile(target.file, "utf8").catch(() => "")
-        : "";
-      const cleaned = dropTomlTable(existing, `mcp_servers.${CLIENT_ENTRY}`);
-      const next = `${cleaned ? `${cleaned}\n\n` : ""}${block}\n`;
-      await mkdir(dirname(target.file), { recursive: true }).catch(() => {});
-      await writeFile(target.file, next, "utf8");
+      if (target.shape === "toml") {
+        const block = [
+          `[mcp_servers.${CLIENT_ENTRY}]`,
+          `command = ${JSON.stringify(stdio.command)}`,
+          `args = [${stdio.args.map((item) => JSON.stringify(item)).join(", ")}]`,
+          "",
+          `[mcp_servers.${CLIENT_ENTRY}.env]`,
+          ...Object.entries(stdio.env).map(
+            ([key, value]) => `${key} = ${JSON.stringify(value)}`,
+          ),
+        ].join("\n");
+        const existing = existsSync(target.file)
+          ? await readFile(target.file, "utf8").catch(() => "")
+          : "";
+        const cleaned = dropTomlTable(existing, `mcp_servers.${CLIENT_ENTRY}`);
+        const next = `${cleaned ? `${cleaned}\n\n` : ""}${block}\n`;
+        await mkdir(dirname(target.file), { recursive: true }).catch(() => {});
+        await writeFile(target.file, next, "utf8");
+      } else {
+        const parsed = (await readLoose(target.file)) || {};
+        const section =
+          parsed[sectionName] && typeof parsed[sectionName] === "object"
+            ? parsed[sectionName]
+            : {};
+        const entry = {
+          command: stdio.command,
+          args: stdio.args,
+          env: stdio.env,
+        };
+        section[CLIENT_ENTRY] = entry;
+        parsed[sectionName] = section;
+        await mkdir(dirname(target.file), { recursive: true }).catch(() => {});
+        await writeFile(
+          target.file,
+          `${JSON.stringify(parsed, null, 2)}\n`,
+          "utf8",
+        );
+      }
       return {
         status: 200,
         body: {
@@ -2054,38 +2098,7 @@ export function createHost(options = {}) {
       };
     }
 
-    if (target.id === "claude-desktop") {
-      const stdio = await stdioEntry();
-      const parsed = (await readLoose(target.file)) || {};
-      const section =
-        parsed.mcpServers && typeof parsed.mcpServers === "object"
-          ? parsed.mcpServers
-          : {};
-      section[CLIENT_ENTRY] = {
-        command: stdio.command,
-        args: stdio.args,
-        env: stdio.env,
-      };
-      parsed.mcpServers = section;
-      await mkdir(dirname(target.file), { recursive: true }).catch(() => {});
-      await writeFile(
-        target.file,
-        `${JSON.stringify(parsed, null, 2)}\n`,
-        "utf8",
-      );
-      return {
-        status: 200,
-        body: {
-          ok: true,
-          client: target.id,
-          label: target.label,
-          file: target.file,
-          transport: "stdio",
-          command: stdio.command,
-        },
-      };
-    }
-
+    // HTTP: every client can use the shared endpoint, but it must be running.
     if (!live.running) {
       return {
         status: 409,
@@ -2096,20 +2109,36 @@ export function createHost(options = {}) {
         },
       };
     }
-    const parsed = (await readLoose(target.file)) || {};
-    const sectionName = target.shape === "vscode" ? "servers" : "mcpServers";
-    const section =
-      parsed[sectionName] && typeof parsed[sectionName] === "object"
-        ? parsed[sectionName]
-        : {};
-    section[CLIENT_ENTRY] = { type: "http", url };
-    parsed[sectionName] = section;
-    await mkdir(dirname(target.file), { recursive: true }).catch(() => {});
-    await writeFile(
-      target.file,
-      `${JSON.stringify(parsed, null, 2)}\n`,
-      "utf8",
-    );
+    let entry;
+    if (target.shape === "toml") {
+      entry = { url };
+      const block = [
+        `[mcp_servers.${CLIENT_ENTRY}]`,
+        `url = ${JSON.stringify(url)}`,
+      ].join("\n");
+      const existing = existsSync(target.file)
+        ? await readFile(target.file, "utf8").catch(() => "")
+        : "";
+      const cleaned = dropTomlTable(existing, `mcp_servers.${CLIENT_ENTRY}`);
+      const next = `${cleaned ? `${cleaned}\n\n` : ""}${block}\n`;
+      await mkdir(dirname(target.file), { recursive: true }).catch(() => {});
+      await writeFile(target.file, next, "utf8");
+    } else {
+      const parsed = (await readLoose(target.file)) || {};
+      const section =
+        parsed[sectionName] && typeof parsed[sectionName] === "object"
+          ? parsed[sectionName]
+          : {};
+      entry = { type: "http", url };
+      section[CLIENT_ENTRY] = entry;
+      parsed[sectionName] = section;
+      await mkdir(dirname(target.file), { recursive: true }).catch(() => {});
+      await writeFile(
+        target.file,
+        `${JSON.stringify(parsed, null, 2)}\n`,
+        "utf8",
+      );
+    }
     return {
       status: 200,
       body: {
@@ -2119,7 +2148,7 @@ export function createHost(options = {}) {
         file: target.file,
         transport: "http",
         url,
-        entry: section[CLIENT_ENTRY],
+        entry,
       },
     };
   }
