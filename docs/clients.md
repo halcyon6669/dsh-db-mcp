@@ -34,25 +34,36 @@ choose the transport instead of the panel guessing from the client's shape:
 
 | Client | File | Section |
 | --- | --- | --- |
-| Visual Studio Code | `%APPDATA%\Code\User\mcp.json` (Windows), `~/Library/Application Support/Code/User/mcp.json` (macOS), `~/.config/Code/User/mcp.json` (Linux) | `servers` |
-| VS Code Insiders | the same path with `Code - Insiders` | `servers` |
+| Visual Studio Code | `%USERPROFILE%\.copilot\mcp-config.json` (or `$COPILOT_HOME`) | `mcpServers` |
 | Cursor | `~/.cursor/mcp.json` | `mcpServers` |
 | JetBrains Air | `~/.jetbrains/mcp/mcp.json` | `mcpServers` |
 | Claude Code | `~/.claude.json` | `mcpServers` |
 | Claude Desktop | `%APPDATA%\Claude\claude_desktop_config.json` | `mcpServers` |
 | Codex CLI | `~/.codex/config.toml` | `[mcp_servers.dsh-db-mcp]` |
 
+VS Code 1.147 and newer hand MCP configuration to the Copilot harness, which reads
+the Copilot CLI file above directly; both VS Code channels share it, so there is one
+row for them. The older per-profile `mcp.json` is a deprecated destination: entries
+left there still work through editor forwarding, but VS Code shows a **Migrate MCP
+Server** banner on them, which is why this plugin no longer writes it — and writing
+the Copilot file also removes any `dsh-db-mcp` entry left in those older files, so the
+server is not registered twice. Other entries in them are left alone.
+
 **Write stdio** writes a `command` / `args` / `env` entry (python + `server/main.py`)
 that launches this server as a child process, so no listening port is needed and it
 works even with the HTTP endpoint stopped. **Write HTTP** writes the shared
 endpoint URL and needs that endpoint running — the button reports an error and a
 hint if it is not. Writing one form replaces the other in the same file, and the
-configured pill shows which form is currently in place. Every client reads the
+configured pill shows which form is currently in place (`stdio` stays lowercase,
+`HTTP` is capitalised). Every client reads the
 same `datasources.json` and `secrets.json`, so a source added in the panel shows up
 everywhere without a restart of the client — only of the MCP server itself.
 
+The Copilot entry carries `type` and `tools: ["*"]` because that file takes the
+portable shape; the other JSON clients get the bare `command`/`url` entry.
+
 The panel only lists a client when this platform has a configuration file for it,
-so on Linux Claude Desktop is absent and VS Code resolves under `~/.config`.
+so on Linux Claude Desktop is absent.
 
 One rule is DSH-only and is **not** available to those clients: the per-conversation
 limit (it keys off the DSH conversation id). The audit log used to be in that group and

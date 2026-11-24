@@ -40,6 +40,20 @@ report of each version in more detail.
   is in place. `POST /clients/configure` takes an optional `transport`; omitting
   it keeps the old per-client default.
 
+### Changed
+
+- **VS Code is configured through the Copilot harness file.** VS Code 1.147 and
+  newer read MCP servers from `$COPILOT_HOME/mcp-config.json` (the Copilot CLI
+  file, `~/.copilot/mcp-config.json` by default) and treat the per-profile
+  `mcp.json` as a deprecated destination — entries there keep working through
+  editor forwarding, but VS Code puts a **Migrate MCP Server** banner on them.
+  The VS Code row now writes the Copilot file with the portable entry shape
+  (`type` plus `tools: ["*"]`), and the separate VS Code Insiders row is gone
+  because both channels share that one file. Writing it also removes a stale
+  `dsh-db-mcp` entry from the deprecated profile files (other entries are left
+  alone), so the server is not registered twice and the banner has nothing to
+  point at.
+
 ## [1.0.0] - 2026-11-19
 
 ### Added

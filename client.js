@@ -5628,7 +5628,11 @@ function groupTables(tables) {
           setQuery,
         })
 
-      /** One row per outside client: detected, configured, one click away. */
+      /** `stdio` stays lowercase (it is an abbreviation of standard I/O); HTTP is an acronym. */
+      const transportLabel = (transport) =>
+        transport === 'stdio' ? 'stdio' : String(transport || '').toUpperCase()
+
+      /** One row per outside client: detected, configured, stdio or HTTP in one click. */
       const renderClientRow = (client) =>
         h(
           'div',
@@ -5640,7 +5644,7 @@ function groupTables(tables) {
             h('span', { className: 'dbmcp-hint dbmcp-mono' }, client.file || ''),
           ),
           client.configured
-            ? h('span', { className: 'dbmcp-pill is-open' }, `${t('clients.configured')}${client.transport ? ` · ${client.transport.toUpperCase()}` : ''}`)
+            ? h('span', { className: 'dbmcp-pill is-open' }, `${t('clients.configured')}${client.transport ? ` · ${transportLabel(client.transport)}` : ''}`)
             : h('span', { className: 'dbmcp-hint' }, client.exists ? t('clients.notConfigured') : t('clients.noFile')),
           h(
             'div',

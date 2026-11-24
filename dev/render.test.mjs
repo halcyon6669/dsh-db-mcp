@@ -464,7 +464,7 @@ const clientsCard = source.slice(source.indexOf('const renderClientRow ='), sour
 check('clients: each row offers both a stdio and an HTTP button', /onClick: \(\) => configureClient\(client, 'stdio'\)/.test(clientsCard) && /onClick: \(\) => configureClient\(client, 'http'\)/.test(clientsCard))
 check('clients: the chosen transport is sent to the Host', /apiPost\('\/clients\/configure', \{ client: client\.id, transport \}\)/.test(source))
 check('clients: the busy state is per client and transport', /clientBusy === `\$\{client\.id\}:stdio`/.test(clientsCard) && /clientBusy === `\$\{client\.id\}:http`/.test(clientsCard))
-check('clients: a configured row shows which transport it uses', /client\.transport\.toUpperCase\(\)/.test(clientsCard))
+check('clients: a configured row shows which transport it uses', /transportLabel\(client\.transport\)/.test(clientsCard) && /const transportLabel = \(transport\) =>\s*\n\s*transport === 'stdio' \? 'stdio' : String\(transport \|\| ''\)\.toUpperCase\(\)/.test(source))
 
 // The tools card used to answer with a checkbox while every other on/off in the
 // panel was a track switch. Same control now, so "on" looks the same everywhere;

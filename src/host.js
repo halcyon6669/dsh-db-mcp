@@ -1168,6 +1168,7 @@ export function createHost(options = {}) {
   // Tests inject throwaway targets so they never rewrite the real editor or
   // agent config files on this machine.
   const targetsOf = options.clientTargets || clientTargets;
+  const legacyFilesOf = options.legacyVscodeFiles || legacyVscodeFiles;
   const registryFile = join(dir, REGISTRY_FILE);
   const secretsFile = join(dir, SECRETS_FILE);
 
@@ -1840,27 +1841,19 @@ export function createHost(options = {}) {
     const home = homedir();
     const list = [];
 
-    // VS Code keeps its user config under a per-platform root.
-    let editorRoot = "";
-    if (process.platform === "win32") editorRoot = process.env.APPDATA || "";
-    else if (process.platform === "darwin")
-      editorRoot = join(home, "Library", "Application Support");
-    else editorRoot = process.env.XDG_CONFIG_HOME || join(home, ".config");
-
-    if (editorRoot) {
-      list.push({
-        id: "vscode",
-        label: "Visual Studio Code",
-        shape: "vscode",
-        file: join(editorRoot, "Code", "User", "mcp.json"),
-      });
-      list.push({
-        id: "vscode-insiders",
-        label: "VS Code Insiders",
-        shape: "vscode",
-        file: join(editorRoot, "Code - Insiders", "User", "mcp.json"),
-      });
-    }
+    // VS Code 1.147+ hands MCP configuration to the Copilot harness, which reads
+    // $COPILOT_HOME/mcp-config.json directly. The old per-profile mcp.json still
+    // works through editor forwarding but is deprecated, and VS Code flags every
+    // entry in it with a "needs to be migrated" banner. Both VS Code channels
+    // share this one file, so there is a single row for them.
+    const copilotRoot =
+      trimmed(process.env.COPILOT_HOME) || join(home, ".copilot");
+    list.push({
+      id: "vscode",
+      label: "Visual Studio Code",
+      shape: "copilot",
+      file: join(copilotRoot, "mcp-config.json"),
+    });
 
     list.push({
       id: "cursor",
@@ -1919,6 +1912,46 @@ export function createHost(options = {}) {
   function httpUrlOf(settings) {
     const live = bridge.httpStatus();
     return live.url || `http://127.0.0.1:${settings.httpPort}/mcp`;
+  }
+
+  /**
+   * The per-profile VS Code files this plugin used to write. They are deprecated
+   * destinations now: VS Code forwards their entries to the Copilot harness and
+   * marks each one with a migration banner, so an entry left behind both warns
+   * and registers the server twice.
+   */
+  function legacyVscodeFiles() {
+    const home = homedir();
+    const root =
+      process.platform === "win32"
+        ? process.env.APPDATA || ""
+        : process.platform === "darwin"
+          ? join(home, "Library", "Application Support")
+          : process.env.XDG_CONFIG_HOME || join(home, ".config");
+    if (!root) return [];
+    return [
+      join(root, "Code", "User", "mcp.json"),
+      join(root, "Code - Insiders", "User", "mcp.json"),
+    ];
+  }
+
+  /** Remove this server from the deprecated profile files; returns what it cleaned. */
+  async function dropLegacyVscodeEntries() {
+    const cleaned = [];
+    for (const file of legacyFilesOf()) {
+      if (!existsSync(file)) continue;
+      const parsed = await readLoose(file);
+      if (!parsed || typeof parsed !== "object") continue;
+      const section =
+        parsed.servers && typeof parsed.servers === "object"
+          ? parsed.servers
+          : null;
+      if (!section || !(CLIENT_ENTRY in section)) continue;
+      delete section[CLIENT_ENTRY];
+      await writeFile(file, `${JSON.stringify(parsed, null, 2)}\n`, "utf8");
+      cleaned.push(file);
+    }
+    return cleaned;
   }
 
   /** Claude Desktop and Codex are happiest with a plain stdio entry. */
@@ -2002,7 +2035,14 @@ export function createHost(options = {}) {
         const entry = section && section[CLIENT_ENTRY];
         configured = Boolean(entry);
         current = (entry && (entry.url || entry.serverUrl)) || null;
-        if (entry) transport = entry.command ? "stdio" : current ? "http" : null;
+        // The Copilot harness also accepts the legacy `local` type for stdio.
+        if (entry)
+          transport =
+            entry.command || entry.type === "local"
+              ? "stdio"
+              : current
+                ? "http"
+                : null;
       }
       clients.push({
         id: target.id,
@@ -2041,7 +2081,12 @@ export function createHost(options = {}) {
         : target.shape === "toml" || target.id === "claude-desktop"
           ? "stdio"
           : "http";
+    // Both JSON layouts keep their servers under a named section: the deprecated
+    // VS Code profile file used "servers", everything current uses "mcpServers".
     const sectionName = target.shape === "vscode" ? "servers" : "mcpServers";
+    // The Copilot harness reads a portable entry, which spells out `type` and the
+    // tool selection; the older per-client files take the bare entry.
+    const portable = target.shape === "copilot";
 
     // stdio: command + args + env. TOML clients take a table, JSON clients an
     // entry under their own section.
@@ -2071,11 +2116,15 @@ export function createHost(options = {}) {
           parsed[sectionName] && typeof parsed[sectionName] === "object"
             ? parsed[sectionName]
             : {};
-        const entry = {
-          command: stdio.command,
-          args: stdio.args,
-          env: stdio.env,
-        };
+        const entry = portable
+          ? {
+              type: "stdio",
+              command: stdio.command,
+              args: stdio.args,
+              env: stdio.env,
+              tools: ["*"],
+            }
+          : { command: stdio.command, args: stdio.args, env: stdio.env };
         section[CLIENT_ENTRY] = entry;
         parsed[sectionName] = section;
         await mkdir(dirname(target.file), { recursive: true }).catch(() => {});
@@ -2094,6 +2143,7 @@ export function createHost(options = {}) {
           file: target.file,
           transport: "stdio",
           command: stdio.command,
+          cleaned: portable ? await dropLegacyVscodeEntries() : [],
         },
       };
     }
@@ -2129,7 +2179,9 @@ export function createHost(options = {}) {
         parsed[sectionName] && typeof parsed[sectionName] === "object"
           ? parsed[sectionName]
           : {};
-      entry = { type: "http", url };
+      entry = portable
+        ? { type: "http", url, tools: ["*"] }
+        : { type: "http", url };
       section[CLIENT_ENTRY] = entry;
       parsed[sectionName] = section;
       await mkdir(dirname(target.file), { recursive: true }).catch(() => {});
@@ -2149,6 +2201,7 @@ export function createHost(options = {}) {
         transport: "http",
         url,
         entry,
+        cleaned: portable ? await dropLegacyVscodeEntries() : [],
       },
     };
   }

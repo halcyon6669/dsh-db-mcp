@@ -5,7 +5,7 @@
 import { createServer } from 'node:http'
 import { mkdtemp, rm, readFile, writeFile, mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, dirname } from 'node:path'
 
 import { createHost } from '../src/host.js'
 
@@ -30,6 +30,8 @@ await mkdir(join(dir, 'logs'), { recursive: true })
 const clientFiles = {
   cursor: join(dir, 'clients', 'cursor.json'),
   codex: join(dir, 'clients', 'codex.toml'),
+  copilot: join(dir, 'clients', 'mcp-config.json'),
+  legacy: join(dir, 'clients', 'Code', 'User', 'mcp.json'),
 }
 const host = await createHost({
   dir,
@@ -38,7 +40,9 @@ const host = await createHost({
   clientTargets: () => [
     { id: 'cursor', label: 'Cursor', shape: 'mcpServers', file: clientFiles.cursor },
     { id: 'codex', label: 'Codex CLI', shape: 'toml', file: clientFiles.codex },
+    { id: 'vscode', label: 'Visual Studio Code', shape: 'copilot', file: clientFiles.copilot },
   ],
+  legacyVscodeFiles: () => [clientFiles.legacy],
 })
 const server = createServer((request, response) => host.handle(request, response))
 await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
@@ -305,11 +309,12 @@ try {
 
   const clients = await get('/clients')
   const ids = (clients.body?.clients || []).map((item) => item.id)
-  // This host runs with injected throwaway targets (cursor + codex). The
-  // platform-dependent real list is exercised by the panel, not here.
+  // This host runs with injected throwaway targets (cursor + codex + the Copilot
+  // file VS Code reads). The platform-dependent real list is exercised by the
+  // panel, not here.
   check(
     'the client list reports the injected targets',
-    clients.status === 200 && ids.includes('cursor') && ids.includes('codex') && ids.length === 2,
+    clients.status === 200 && ids.includes('cursor') && ids.includes('codex') && ids.includes('vscode') && ids.length === 3,
     ids.join(','),
   )
   check(
@@ -339,6 +344,43 @@ try {
     'a TOML client can be configured for stdio too',
     codexStdio.status === 200 && /\[mcp_servers\.dsh-db-mcp\]/.test(codexText) && /command\s*=/.test(codexText),
     JSON.stringify(codexStdio.body),
+  )
+  /* VS Code reads the Copilot harness file, which takes a portable entry: the
+     transport is spelled out and the tool selection is explicit. Writing it also
+     clears the deprecated profile file, whose entries would otherwise register
+     the server twice and carry a migration banner. */
+  await mkdir(dirname(clientFiles.legacy), { recursive: true })
+  await writeFile(
+    clientFiles.legacy,
+    JSON.stringify({ inputs: [], servers: { 'dsh-db-mcp': { command: 'python', args: ['main.py'] }, other: { command: 'npx' } } }, null, 2),
+    'utf8',
+  )
+  const vscodeStdio = await post('/clients/configure', { client: 'vscode', transport: 'stdio' })
+  const vscodeCfg = JSON.parse(await readFile(clientFiles.copilot, 'utf8'))
+  const vscodeEntry = vscodeCfg.mcpServers?.['dsh-db-mcp']
+  check(
+    'VS Code is written to the Copilot harness file, not the editor profile',
+    vscodeStdio.status === 200 && vscodeStdio.body?.file === clientFiles.copilot,
+    JSON.stringify(vscodeStdio.body),
+  )
+  check(
+    'the Copilot entry is portable: explicit type, tools and mcpServers section',
+    vscodeEntry?.type === 'stdio' &&
+      Boolean(vscodeEntry?.command) &&
+      JSON.stringify(vscodeEntry?.tools) === '["*"]' &&
+      !('servers' in vscodeCfg),
+    JSON.stringify(vscodeCfg),
+  )
+  const legacyCfg = JSON.parse(await readFile(clientFiles.legacy, 'utf8'))
+  check(
+    'the deprecated profile file loses this server but keeps its other entries',
+    !('dsh-db-mcp' in legacyCfg.servers) && Boolean(legacyCfg.servers.other),
+    JSON.stringify(legacyCfg.servers),
+  )
+  check(
+    'the response names the file it cleaned',
+    Array.isArray(vscodeStdio.body?.cleaned) && vscodeStdio.body.cleaned.includes(clientFiles.legacy),
+    JSON.stringify(vscodeStdio.body?.cleaned),
   )
   const afterStdio = await get('/clients')
   check(
@@ -377,6 +419,18 @@ try {
     'a TOML client can be switched to the HTTP endpoint',
     codexHttp.status === 200 && /url\s*=/.test(codexHttpText) && !/command\s*=/.test(codexHttpText),
     codexHttpText.slice(0, 160),
+  )
+  const vscodeHttp = await post('/clients/configure', { client: 'vscode', transport: 'http' })
+  const vscodeHttpCfg = JSON.parse(await readFile(clientFiles.copilot, 'utf8'))
+  const vscodeHttpEntry = vscodeHttpCfg.mcpServers?.['dsh-db-mcp']
+  check(
+    'the Copilot HTTP entry replaces stdio and keeps the portable shape',
+    vscodeHttp.status === 200 &&
+      vscodeHttpEntry?.type === 'http' &&
+      String(vscodeHttpEntry?.url || '').endsWith('/dsh-db-mcp') &&
+      JSON.stringify(vscodeHttpEntry?.tools) === '["*"]' &&
+      !vscodeHttpEntry?.command,
+    JSON.stringify(vscodeHttpEntry),
   )
   await post('/http/stop', {})
 

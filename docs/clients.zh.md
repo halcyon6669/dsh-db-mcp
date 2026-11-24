@@ -18,17 +18,20 @@ Python 服务是标准 MCP stdio 服务，DSH 只是它的一个客户端。面�
 
 | 客户端 | 文件 | 配置段 |
 | --- | --- | --- |
-| Visual Studio Code | Windows `%APPDATA%\Code\User\mcp.json`、macOS `~/Library/Application Support/Code/User/mcp.json`、Linux `~/.config/Code/User/mcp.json` | `servers` |
-| VS Code Insiders | 同上，目录换成 `Code - Insiders` | `servers` |
+| Visual Studio Code | `%USERPROFILE%\.copilot\mcp-config.json`（或 `$COPILOT_HOME`） | `mcpServers` |
 | Cursor | `~/.cursor/mcp.json` | `mcpServers` |
 | JetBrains Air | `~/.jetbrains/mcp/mcp.json` | `mcpServers` |
 | Claude Code | `~/.claude.json` | `mcpServers` |
 | Claude Desktop | `%APPDATA%\Claude\claude_desktop_config.json` | `mcpServers` |
 | Codex CLI | `~/.codex/config.toml` | `[mcp_servers.dsh-db-mcp]` |
 
+VS Code 1.147 起把 MCP 配置交给 Copilot harness，它直接读上面那个 Copilot CLI 的文件；VS Code 的两个渠道共用这一份，所以只保留一行。旧的按 profile 存放的 `mcp.json` 是已弃用的目的地：写在那里的条目仍能通过编辑器转发工作，但 VS Code 会给它挂一条 **Migrate MCP Server** 横幅，所以本插件不再写它——并且写 Copilot 文件时会顺手删掉那些旧文件里残留的 `dsh-db-mcp` 条目，避免同一个服务被注册两次。旧文件里的其它条目保持不动。
+
 **写入 stdio** 写入 `command` / `args` / `env` 条目（python + `server/main.py`），把本服务作为子进程启动，不需要监听端口，HTTP 端点停掉也能用。**写入 HTTP** 写入共享端点地址，需要先启动该端点——没启动时会报错并给出提示。两种方式写进同一个文件时会互相替换，已配置标签会显示当前是哪一种（`stdio` 按缩写惯例保持小写，`HTTP` 大写）。所有客户端读同一份 `datasources.json` 与 `secrets.json`，在面板里加的数据源不用在客户端里重填（但要让 MCP 服务重启一次才会读到）。
 
-面板只列出「这个平台上确实有配置文件」的客户端，所以在 Linux 上不会出现 Claude Desktop，VS Code 的路径落在 `~/.config` 下。
+Copilot 那份文件收的是 portable 形状，所以条目会带 `type` 与 `tools: ["*"]`；其它 JSON 客户端写的是不带这两项的裸条目。
+
+面板只列出「这个平台上确实有配置文件」的客户端，所以在 Linux 上不会出现 Claude Desktop。
 
 只有一样东西是 DSH 专属、这些客户端拿不到：会话级访问限制（它依赖 DSH 的会话 id）。审计日志曾经也在这一列，现在不是了：HTTP 子进程自己记录调用，所以外部客户端的工具调用同样落在面板读的那份 `logs/audit.jsonl` 里。只读限制照旧生效，因为它写在 Python 里。
 
