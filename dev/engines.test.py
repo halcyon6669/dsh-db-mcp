@@ -991,6 +991,61 @@ class SqlShapes(unittest.TestCase):
         self.assertEqual(engines._oracle_catalog_name(cursor, "TEST", "lower_t"), "lower_t")
         self.assertEqual([len(binds) for binds in cursor.binds], [4])
 
+
+class TableSchemaLookup(unittest.TestCase):
+    """Where a bare table name lives, when the datasource does not pin a schema.
+
+    openGauss carries `dbe_perf` and `db4ai` next to the user's own work, and the
+    relation graph stores a bare name. Without this lookup every read of a table
+    outside `public` went to `search_path` and came back as "does not exist".
+    """
+
+    def unpinned(self, kind: str) -> dict:
+        source = profile(kind)
+        source["config"].pop("schema", None)
+        return source
+
+    def test_a_table_in_one_other_schema_is_resolved(self):
+        cursor = RoutingCursor({"information_schema.tables": [("sales",)]})
+        found = engines.table_schema(self.unpinned("postgres"), FakeConnection(cursor), "customer")
+        self.assertEqual(found, "sales")
+        self.assertIn("information_schema.tables", cursor.executed[0])
+
+    def test_a_name_in_two_schemas_stays_unresolved(self):
+        # Guessing between two candidates would read the wrong table quietly.
+        cursor = RoutingCursor({"information_schema.tables": [("sales",), ("archive",)]})
+        self.assertIsNone(
+            engines.table_schema(self.unpinned("postgres"), FakeConnection(cursor), "customer")
+        )
+
+    def test_a_pinned_schema_is_never_asked(self):
+        cursor = RoutingCursor({"information_schema.tables": [("sales",)]})
+        self.assertIsNone(engines.table_schema(profile("postgres"), FakeConnection(cursor), "customer"))
+        self.assertEqual(cursor.executed, [], "a pinned profile must not query the catalogue")
+
+    def test_a_catalogue_that_cannot_answer_falls_back(self):
+        cursor = RoutingCursor({}, fail=("information_schema.tables",))
+        self.assertIsNone(
+            engines.table_schema(self.unpinned("postgres"), FakeConnection(cursor), "customer")
+        )
+
+    def test_qualified_carries_the_schema_it_was_given(self):
+        source = self.unpinned("postgres")
+        self.assertEqual(engines.qualified(source, "customer"), '"customer"')
+        self.assertEqual(
+            engines.qualified(source, "customer", schema="sales"), '"sales"."customer"'
+        )
+
+    def test_other_dialects_keep_their_own_answer(self):
+        # MySQL calls its schema a database and SQLite has only one, so neither
+        # should start querying information_schema for a table name.
+        mysql = self.unpinned("mysql")
+        self.assertEqual(engines.table_schema(mysql, FakeConnection(RoutingCursor({})), "orders"), "testdb")
+        sqlite = profile("sqlite")
+        cursor = RoutingCursor({})
+        self.assertIsNone(engines.table_schema(sqlite, FakeConnection(cursor), "orders"))
+        self.assertEqual(cursor.executed, [])
+
     def test_a_session_setting_does_not_get_a_server_side_cursor(self):
         # psycopg rewrites a named cursor as `DECLARE … CURSOR FOR <sql>`, and a
         # `SET` is not legal there: it came back as a syntax error.

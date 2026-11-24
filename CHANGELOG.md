@@ -21,6 +21,16 @@ report of each version in more detail.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A table outside `public` is found by name.** A datasource that does not pin a
+  schema used to send every single-table read to `search_path`, so on openGauss a
+  table in `sales` came back as "does not exist" while the relation graph insisted
+  it was there — which also made `feedback_relation` report `indexed: null` and
+  `trace_by_key` fail its entry probe. The name is now resolved against the
+  catalogue when exactly one schema holds it; an ambiguous name keeps the old
+  behaviour rather than reading the wrong table.
+
 ## [1.1.0] - 2026-11-25
 
 ### Added

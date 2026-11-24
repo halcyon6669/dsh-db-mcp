@@ -400,15 +400,52 @@ def _quote_exact(kind: str, name: str) -> str:
     return '"' + text.replace('"', '""') + '"'
 
 
-def qualified(profile: dict, table: str, exact: bool = False) -> str:
+def qualified(profile: dict, table: str, exact: bool = False, schema: str | None = None) -> str:
     kind = profile.get("kind")
-    schema = (profile.get("config") or {}).get("schema") or None
+    owner = schema or (profile.get("config") or {}).get("schema") or None
     if kind == "oracle":
-        schema = (schema or (profile.get("config") or {}).get("user") or "").upper() or None
+        owner = (owner or (profile.get("config") or {}).get("user") or "").upper() or None
     quote = _quote_exact if exact else _quote
-    if schema and kind in ("postgres", "gauss", "oracle", "mysql"):
-        return f"{_quote(kind, schema)}.{quote(kind, table)}"
+    if owner and kind in ("postgres", "gauss", "oracle", "mysql"):
+        return f"{_quote(kind, owner)}.{quote(kind, table)}"
     return quote(kind, table)
+
+
+def table_schema(profile: dict, connection, table: str) -> str | None:
+    """Which schema holds `table`, when the profile does not say.
+
+    A datasource pointed at a whole server can hold the same table name in
+    several schemas: openGauss ships `dbe_perf` and `db4ai` next to the user's
+    own work. The relation graph stores a bare table name, so every read of one
+    table has to ask the catalogue where it lives — otherwise the statement goes
+    to `search_path`, which is `public` for a fresh session, and a table in
+    `sales` comes back as "table not found" while the graph insists it exists.
+
+    An ambiguous name (same table in two schemas) stays unresolved and the
+    caller falls back to the profile's schema, which is the old behaviour.
+    """
+    config = profile.get("config") or {}
+    if config.get("schema"):
+        return None  # the profile already pins the schema
+    kind = profile.get("kind")
+    if kind == "mysql":
+        database = config.get("database")
+        return str(database) if database else None
+    if kind not in PG_LIKE:
+        return None
+    cursor = connection.cursor()
+    try:
+        cursor.execute(
+            "select distinct table_schema from information_schema.tables "
+            "where table_name = %s and table_schema not in ('pg_catalog','information_schema')",
+            (str(table),),
+        )
+        owners = [row[0] for row in cursor.fetchall() if row and row[0]]
+    except Exception:  # noqa: BLE001 - a catalogue that cannot answer
+        return None
+    finally:
+        cursor.close()
+    return str(owners[0]) if len(owners) == 1 else None
 
 
 def _limit_clause(kind: str, limit: int) -> str:
@@ -1418,6 +1455,10 @@ def describe_table(profile: dict, connection, table: str, schema: str | None) ->
     kind = profile.get("kind")
     config = profile.get("config") or {}
     effective = schema or config.get("schema") or None
+    if effective is None and kind in PG_LIKE:
+        # A server-level source can hold the same table in several schemas; ask
+        # the catalogue rather than relying on search_path (see `table_schema`).
+        effective = table_schema(profile, connection, table)
     columns: list[dict] = []
     primary: list[str] = []
     owner: str | None = None
@@ -1853,7 +1894,11 @@ def fetch_matching(
     if extra_condition:
         where = f"({where}) and ({extra_condition})"
     cap = max(1, int(limit)) + 1
-    sql = f"select * from {qualified(profile, table, exact=True)} where {where}{_limit_clause(kind, cap)}"
+    owner = schema
+    if owner is None and kind in PG_LIKE:
+        owner = table_schema(profile, connection, table)
+    target = qualified(profile, table, exact=True, schema=owner)
+    sql = f"select * from {target} where {where}{_limit_clause(kind, cap)}"
     if kind == "sqlite":
         _arm_sqlite_timeout(connection)
     cursor = connection.cursor()
@@ -2049,6 +2094,7 @@ def connection_autocommit(kind: str) -> bool:
 
 def sample_rows(profile: dict, connection, table: str, limit: int, schema: str | None) -> dict:
     kind = profile.get("kind")
+    owner = schema
     if kind == "oracle":
         # Resolve the spelling the catalog stores before quoting: `_quote` folds
         # to upper case, which misses a table created with a quoted lower-case name.
@@ -2058,10 +2104,14 @@ def sample_rows(profile: dict, connection, table: str, limit: int, schema: str |
             table = _oracle_catalog_name(cursor, owner, table)
         finally:
             cursor.close()
-    sql = f"SELECT * FROM {qualified(profile, table, exact=True)}{_limit_clause(kind, limit)}"
+    elif owner is None and kind in PG_LIKE:
+        # A server-level source may hold the table in a schema other than the
+        # session's search_path; the bare name would look in `public` only.
+        owner = table_schema(profile, connection, table)
+    sql = f"SELECT * FROM {qualified(profile, table, exact=True, schema=owner)}{_limit_clause(kind, limit)}"
     result = execute_sql(profile, connection, sql, limit)
     result["table"] = table
-    result["schema"] = schema or (profile.get("config") or {}).get("schema") or None
+    result["schema"] = owner or (profile.get("config") or {}).get("schema") or None
     return result
 
 
