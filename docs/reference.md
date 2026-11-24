@@ -335,6 +335,8 @@ is cheaper than asking and weaker than the catalog.
 The statement says the two columns are equal; it does not say which side is the
 parent. That comes from the catalog: the side whose column is a primary key or a
 single-column unique index is the parent (`to`), the other is the child (`from`).
+A column of a **composite** key does not count — in `ledger(account_no, seq)` the
+`account_no` repeats once per `seq`, so it cannot be the one side on its own.
 A pair where neither side looks unique, or where both do, is reported under
 `ambiguous` and **not** imported — the walker follows every confirmed edge, so a
 wrong one is worse than a missing one. Call `propose_relation` for those: it records

@@ -467,7 +467,15 @@ def mine_relations(
                         except Exception:  # noqa: BLE001 - an unreadable table is just unknown
                             unique_cache[key] = set()
                         else:
-                            covered = {name for name in (info.get("primaryKey") or []) if name}
+                            # Only a single-column key makes its column unique on
+                            # its own. `ledger(account_no, seq)` has account_no
+                            # repeating across seq, so taking every key column
+                            # would call it unique and leave the mined join
+                            # ambiguous against the account it clearly points at.
+                            covered: set[str] = set()
+                            primary = [name for name in (info.get("primaryKey") or []) if name]
+                            if len(primary) == 1:
+                                covered.add(primary[0])
                             for index in info.get("indexes") or []:
                                 columns = [name for name in index.get("columns") or [] if name]
                                 if bool(index.get("unique")) and len(columns) == 1:

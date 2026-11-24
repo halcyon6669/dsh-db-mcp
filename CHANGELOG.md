@@ -34,6 +34,10 @@ report of each version in more detail.
   `if/elif`, so a table appearing on both sides of its own edge (`parent_id ->
   ticket.id`) only reported the `from` half: every parent/child hierarchy could be
   climbed or descended, never both. Both halves are reported now.
+- **A column of a composite key is not unique on its own.** `mine_relations` read
+  every key column as a candidate parent, so `ledger(account_no, seq)` looked
+  unique on `account_no` and a clear ledger→account join was dropped as "both
+  unique". Only a single-column key counts.
 
 ## [1.1.0] - 2026-11-25
 

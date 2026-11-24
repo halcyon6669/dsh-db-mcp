@@ -245,6 +245,9 @@ class MiningTheAuditLog(unittest.TestCase):
                 "create table t_order (id integer primary key, code text);"
                 "create table t_trans (id integer primary key, order_id integer references t_order(id));"
                 "create table t_note (id integer primary key, trans_id integer);"
+                "create table t_account (id integer primary key, account_no text not null);"
+                "create unique index t_account_no on t_account(account_no);"
+                "create table t_ledger (account_no text not null, seq integer not null, primary key(account_no, seq));"
             )
             seed.commit()
         finally:
@@ -317,6 +320,19 @@ class MiningTheAuditLog(unittest.TestCase):
         self.assertEqual(again["imported"], 0)
         self.assertEqual(again["skipped"], 1)
         self.assertEqual(len(main.list_edges()["edges"]), 1)
+
+    def test_a_composite_key_column_is_not_unique_on_its_own(self):
+        # `t_ledger` is keyed by (account_no, seq), so account_no repeats once per
+        # seq and cannot be the parent side. Reading every key column as unique
+        # made this pair look like "both unique" and dropped a join that is
+        # plainly a ledger pointing at an account.
+        self._write_log("select * from t_ledger l join t_account a on a.account_no = l.account_no")
+        payload = main.mine_relations()
+        self.assertTrue(payload["ok"], payload)
+        self.assertEqual(payload["ambiguous"], [], "one side is unique, so this is decidable")
+        self.assertEqual(payload["imported"], 1)
+        self.assertEqual(payload["edges"][0]["from"], {"table": "t_ledger", "column": "account_no"})
+        self.assertEqual(payload["edges"][0]["to"], {"table": "t_account", "column": "account_no"})
 
     def test_a_hand_proposal_is_not_downgraded_by_a_mined_join(self):
         edge = main.propose_relation("t_trans", "order_id", "t_order", "id")["edge"]
