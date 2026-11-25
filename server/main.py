@@ -25,6 +25,7 @@ import audit
 import engines
 import mining
 import relations
+import sources
 import tracing
 import writes
 import store
@@ -533,6 +534,94 @@ def mine_relations(
         return {
             "ok": True,
             "datasource": _source(profile),
+            "mined": len(mined),
+            "ambiguous": ambiguous,
+            **result,
+        }
+    except Exception as error:  # noqa: BLE001
+        return _error(error)
+
+
+@mcp.tool()
+@_audited
+def scan_code_relations(
+    root: str,
+    datasource: Optional[str] = None,
+    schema: Optional[str] = None,
+    limit: int = 20,
+) -> dict:
+    """Import joins written in a Spring Boot project, read from its source tree.
+
+    `mine_relations` reads statements that were executed; this reads the ones that
+    were committed. Three places hold them, and only those are read:
+
+    * MyBatis mapper XML — the bodies of `select`/`insert`/`update`/`delete`/`sql`,
+      including whatever sits inside `<if>`/`<foreach>`/`<where>`;
+    * MyBatis annotations — `@Select`, `@Insert`, `@Update`, `@Delete`;
+    * MyBatis-Plus fragments — `.apply(...)`, `.last(...)`, `.inSql(...)`,
+      `.exists(...)`, `.notExists(...)`, `.having(...)`.
+
+    Every other string literal in a `.java` file is skipped on purpose: a log
+    message or a regex read as SQL would invent tables and joins, and a scanner
+    that guesses is worse than one that finds nothing. `build`, `target`, `.git`
+    and friends are skipped too, so generated copies do not count twice.
+
+    `root` is the project directory. `datasource` is the graph the joins are
+    imported into — the direction cannot be decided without a catalog to ask, so a
+    source must be registered and reachable. Edges arrive as `pending` with source
+    `audit_mined`, like every other guess, and nothing is executed: the files are
+    read, never run.
+
+    A pair whose parent side cannot be decided from the catalog (neither column is
+    unique on its own, or both are) is reported under `ambiguous` instead of being
+    guessed into the graph. `limit` caps how many pairs are considered, highest
+    occurrence count first.
+    """
+    try:
+        profile, _secrets = store.resolve(datasource)
+        found_files = sources.statements(root, limit=2000)
+        statements = [item["sql"] for item in found_files]
+        mined = mining.statements_candidates(statements, limit=limit)
+        # Where each pair was seen, so the report points at the file to fix rather
+        # than at a statement nobody can locate again.
+        places: dict[tuple[str, str, str, str], list[str]] = {}
+        for item in found_files:
+            for left, right in mining._joins(item["sql"]):
+                key = mining._key(left, right)
+                spot = f"{item['file']}:{item['line']}"
+                bucket = places.setdefault(key, [])
+                if spot not in bucket and len(bucket) < 5:
+                    bucket.append(spot)
+        for item in mined:
+            left = item["left"]
+            right = item["right"]
+            key = (
+                min(
+                    (left["table"].casefold(), left["column"].casefold()),
+                    (right["table"].casefold(), right["column"].casefold()),
+                )
+                + max(
+                    (left["table"].casefold(), left["column"].casefold()),
+                    (right["table"].casefold(), right["column"].casefold()),
+                )
+            )
+            seen_at = places.get(key) or []
+            item["name"] = f"read from {seen_at[0]}" if seen_at else "read from the source tree"
+            item["places"] = seen_at
+        ambiguous: list[dict] = []
+        found: list[dict] = []
+        if mined:
+            _profile, (connection, close) = _open(datasource)
+            try:
+                found, ambiguous = _orient(profile, connection, schema, mined)
+            finally:
+                close()
+        result = relations.import_edges(profile, found, source="audit_mined")
+        return {
+            "ok": True,
+            "datasource": _source(profile),
+            "root": str(root),
+            "scanned": len(found_files),
             "mined": len(mined),
             "ambiguous": ambiguous,
             **result,

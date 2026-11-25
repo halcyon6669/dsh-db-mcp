@@ -235,15 +235,16 @@
 | FR-MCP-7e | 面板「关系图」页 | 数据源级边列表：状态角标、来源、确认次数与扇出；筛选 全部/待确认/已确认/已失效；按状态给出确认、带原因拒绝、加条件、重新打开、删除；已确认/自动信任的边可展开看确认记录。面板只调关系图工具，不接受 SQL | P1 |
 | FR-MCP-7f | 面板「追踪」页 | 只收一个**值**（可选入口表/列与方向），SQL 由服务端按关系图拼装并参数绑定；逐步展示序号、表、条件与绑定值、命中行数、关键列样例、边状态与扇出；断链/截断/警告/中断位置单独列出；每步可做四选一反馈（对 / 多了+原因 / 漏了 / 无关）并回写对应边。未跟随的 pending 边单列并指回关系图页 | P1 |
 | FR-MCP-7g | `mine_relations` | 从审计日志挖掘 join：只读 `execute_sql`/`explain_query` 的语句，解析 `on` 等值对；父子方向由目录定（唯一/主键侧为父），判不出方向的进 `ambiguous` 不入图；导入为 `pending` + `audit_mined`，来源强弱 `fk > manual > audit_mined > inferred` 只升不降 | P1 |
+| FR-MCP-7h | `scan_code_relations` | 从 Spring Boot 源码树挖掘 join：只读 mapper XML 的 `select/insert/update/delete/sql`、`@Select/@Insert/@Update/@Delete`、MyBatis-Plus 的 `apply/last/inSql/exists/notExists/having` 片段，其余字符串字面量一律不读；跳过 `build`/`target`/`.git` 等目录；方向与 ambiguous 规则同上；每条边记 `file:line`；只读文件、不执行任何语句 | P1 |
 | FR-MCP-8 | `test_connection` | 用保存的源或内联连接串做一次真实登录探测 | P0 |
 | FR-MCP-9 | `session_scope` | **Host 侧原生工具**（非 MCP），限制本会话可见的数据源（0.9.0） | P1 |
 | FR-MCP-10 | instructions | 服务端说明：先看结构再查数、不要拼接用户输入、结果截断含义 | P1 |
 | FR-MCP-11 | 超时 | MCP 行 `toolCallTimeoutMs=60000`；Python 内 `timeout_ms` 上限 120s | P0 |
 | FR-MCP-12 | 并发 | 进程内串行；不同数据源不共享连接；单源连接池上限 4 | P0 |
 
-> 前十六项是 Python 服务发布的工具（`server/main.py` 的 `@mcp.tool()`），`session_scope`
+> 前十七项是 Python 服务发布的工具（`server/main.py` 的 `@mcp.tool()`），`session_scope`
 > 由 `src/tools.js` 注册在 Host 上 —— 它改的是 Host 的 `sessions.json`，Python 看不到，
-> 因此也只对 DSH 智能体生效。工具页可以逐个关掉前十六项，`session_scope` 故意不可关。
+> 因此也只对 DSH 智能体生效。工具页可以逐个关掉前十七项，`session_scope` 故意不可关。
 
 **方言要点（实现约束）**
 

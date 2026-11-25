@@ -3459,6 +3459,17 @@ export function createHost(options = {}) {
         });
         return sendJson(response, result.status, result.body);
       }
+      if (route === "/relations/scan") {
+        const root = trimmed(payload.root);
+        if (!root) return sendJson(response, 400, { ok: false, error: "root is required" });
+        const result = await callTool("scan_code_relations", {
+          root,
+          datasource: trimmed(payload.datasource) || undefined,
+          schema: trimmed(payload.schema) || undefined,
+          limit: Number.isFinite(Number(payload.limit)) ? Number(payload.limit) : undefined,
+        });
+        return sendJson(response, result.status, result.body);
+      }
       if (route === "/mcp/start" || route === "/mcp/restart") {
         const state =
           route === "/mcp/start"

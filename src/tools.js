@@ -176,6 +176,31 @@ export function renderResult(value) {
     if (value.changed === false) changes.push('nothing changed')
     return [headline, ...changes].join('\n')
   }
+  if (typeof value.scanned === 'number' && typeof value.mined === 'number' && Array.isArray(value.ambiguous)) {
+    const imported = value.imported || 0
+    const skipped = value.skipped || 0
+    const lines = [
+      `scanned ${value.scanned} statement(s) under ${value.root} — mined ${value.mined} join(s), ${imported} new, ${skipped} already known`,
+    ]
+    if (!value.mined) {
+      lines.push('no mapper XML, @Select/@Update annotation or MyBatis-Plus fragment joined two tables here')
+      lines.push('a project that only uses BaseMapper and single-table wrappers has no join to read — that is not a failure')
+      return lines.join('\n')
+    }
+    const tally = ['pending', 'confirmed', 'trusted', 'stale', 'rejected']
+      .filter((status) => value.counts && value.counts[status])
+      .map((status) => `${value.counts[status]} ${status}`)
+    if (tally.length) lines.push(`graph now: ${tally.join(', ')}`)
+    if (value.ambiguous.length) {
+      lines.push('could not tell which side is the parent:')
+      for (const item of value.ambiguous.slice(0, 10)) {
+        lines.push(`  ${item.left.table}.${item.left.column} = ${item.right.table}.${item.right.column}  (${item.reason})`)
+      }
+      if (value.ambiguous.length > 10) lines.push(`  … ${value.ambiguous.length - 10} more`)
+      lines.push('propose_relation records the direction you know')
+    }
+    return lines.join('\n')
+  }
   if (typeof value.mined === 'number' && Array.isArray(value.ambiguous)) {
     const imported = value.imported || 0
     const skipped = value.skipped || 0

@@ -117,6 +117,23 @@ report of each version in more detail.
   or downgrade a hand proposal. The Relations page gained a **Mine the log** button
   beside **Import foreign keys**.
 
+- **Joins can be mined out of a project's source tree too.** The log miner only sees
+  statements that already ran, which is nothing on the day a schema is first
+  explored — but a Spring Boot project has written its joins down. `scan_code_relations`
+  reads a project directory and takes SQL from exactly three places: mapper XML
+  (`select`/`insert`/`update`/`delete`/`sql`, with `<if>`/`<foreach>`/`<where>`
+  flattened the way MyBatis builds them), `@Select`/`@Insert`/`@Update`/`@Delete`
+  annotations, and MyBatis-Plus fragments (`.apply`, `.last`, `.inSql`, `.exists`,
+  `.notExists`, `.having`). Every other string literal is skipped on purpose: a log
+  message or a regex read as SQL would invent tables, and a scanner that guesses is
+  worse than one that finds nothing. `build`, `target` and `.git` are skipped so
+  generated copies do not count twice, and each edge records the `file:line` it came
+  from. Direction and ambiguity work exactly as in the log miner — the catalog decides
+  the parent side, and an undecidable pair is reported rather than guessed — and the
+  edges arrive `pending` with source `audit_mined`. Nothing is executed: the files are
+  read, never run. A project that only uses `BaseMapper` and single-table wrappers
+  reports zero, which is the correct answer for it.
+
 - **The audit log loads more as you scroll.** The panel used to show only the
   newest 12 calls with no way to reach the older ones. A **Load more** button now
   sits at the bottom of the audit card while entries remain, fetching the next

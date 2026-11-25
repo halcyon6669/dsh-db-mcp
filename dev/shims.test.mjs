@@ -110,8 +110,8 @@ const ok =
   health2.plugin.version === health.plugin.version &&
   scan.ok === true &&
   manifest.ok === true &&
-  (registered.length === 17 || startBody.phase === 'failed')
+  (registered.length === 18 || startBody.phase === 'failed')
 console.log('manifest:', manifest.message)
 console.log(ok ? 'shims: ok' : 'shims: FAILED')
 server.close()
-process.exit(ok && (registered.length === 17 || startBody.phase === 'failed') ? 0 : 1)
+process.exit(ok && (registered.length === 18 || startBody.phase === 'failed') ? 0 : 1)

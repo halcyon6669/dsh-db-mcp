@@ -92,6 +92,7 @@ dsh plugin --profile web add dsh-db-mcp       # Web 端
 | `mcp__db__propose_relation` | 记下目录里没有声明的 join |
 | `mcp__db__discover_relations` | 把声明的外键导入关系图 |
 | `mcp__db__mine_relations` | 从审计日志里已有的语句挖掘 join |
+| `mcp__db__scan_code_relations` | 从项目的 mapper XML、`@Select` 注解与 MyBatis-Plus 片段里挖掘 join |
 | `mcp__db__trace_by_key` | 查一个值落在哪里，以及它沿已确认的 join 跨表走到哪 |
 | `mcp__db__feedback_relation` | 追踪一步之后确认、否定或作废一条 join |
 | `mcp__db__set_relation_condition` | 给一条 join 加上它成立所需的条件 |
@@ -107,7 +108,7 @@ dsh plugin --profile web add dsh-db-mcp       # Web 端
 
 ## 关系图
 
-目录里记的是有人声明过的外键。真实数据库常常没声明，或者声明在登录看不到的地方——所以「什么连什么」存成一张你可以修正的图：`discover_relations` 导入声明的键，`mine_relations` 从审计日志里已有的语句挖出 join（给那些什么都没声明的库），`propose_relation` 手工补一条。每条边带状态，`trace_by_key` 只沿你确认过的边走，猜测不会悄悄变成事实。
+目录里记的是有人声明过的外键。真实数据库常常没声明，或者声明在登录看不到的地方——所以「什么连什么」存成一张你可以修正的图：`discover_relations` 导入声明的键，`mine_relations` 从审计日志里已有的语句挖出 join，`scan_code_relations` 读 Spring Boot 项目里已经写下的 join（mapper XML、`@Select` 注解、MyBatis-Plus 片段），`propose_relation` 手工补一条。每条边带状态，`trace_by_key` 只沿你确认过的边走，猜测不会悄悄变成事实。
 
 **关系图**标签按数据源展示这张图：join 路径、状态角标、边的来源、被确认过几次。待确认的边可以确认、带原因否定，或加条件；已失效的边会显示上次失败的原因并给出重检入口；被拒绝的边可以重新打开。已确认与自动信任的边保留确认记录，没有黑箱。图上方的两个按钮负责把图填起来：**导入外键**读目录，**从日志挖掘**读已经审计过的语句。
 

@@ -105,11 +105,20 @@ class ToolSurface(unittest.TestCase):
             "propose_relation",
             "discover_relations",
             "mine_relations",
+            "scan_code_relations",
             "feedback_relation",
             "set_relation_condition",
             "delete_edge",
         ):
             self.assertTrue(callable(getattr(main, name, None)), name)
+
+    def test_the_scanner_tool_explains_what_it_skips(self):
+        text = main.scan_code_relations.__doc__ or ""
+        self.assertIn("mapper XML", text)
+        self.assertIn("@Select", text)
+        self.assertIn("pending", text)
+        self.assertIn("ambiguous", text)
+        self.assertIn("never run", text, "the docstring must say nothing is executed")
 
     def test_the_mining_tool_explains_where_it_reads(self):
         text = main.mine_relations.__doc__ or ""
@@ -340,6 +349,148 @@ class MiningTheAuditLog(unittest.TestCase):
         self._write_log("select * from t_trans t join t_order o on o.id = t.order_id")
         payload = main.mine_relations()
         self.assertEqual(payload["edges"][0]["source"], "manual", "the catalog is not the only thing a person knows")
+
+
+@unittest.skipUnless(HAVE_MAIN, "the MCP SDK is not installed for this interpreter")
+class ScanningTheSourceTree(unittest.TestCase):
+    """`scan_code_relations` turns committed SQL into pending edges.
+
+    Same contract as `mine_relations` — the catalog decides the direction and an
+    undecidable pair is reported rather than guessed — but the statements come
+    from mapper XML and MyBatis annotations instead of the audit log.
+    """
+
+    def setUp(self):
+        import json
+        import os
+        import sqlite3
+        import tempfile
+
+        self.tmp = tempfile.TemporaryDirectory()
+        self.saved = os.environ.get("DB_MCP_RUNTIME")
+        os.environ["DB_MCP_RUNTIME"] = self.tmp.name
+        path = Path(self.tmp.name) / "shop.db"
+        seed = sqlite3.connect(str(path))
+        try:
+            seed.executescript(
+                "create table t_order (id integer primary key, code text);"
+                "create table t_trans (id integer primary key, order_id integer);"
+                "create table t_user (id integer primary key, name text);"
+            )
+            seed.commit()
+        finally:
+            seed.close()
+        registry = {
+            "schemaVersion": 1,
+            "datasources": [
+                {
+                    "id": "shop",
+                    "name": "shop",
+                    "kind": "sqlite",
+                    "config": {"file": str(path)},
+                    "readOnly": True,
+                    "isDefault": True,
+                }
+            ],
+        }
+        (Path(self.tmp.name) / "datasources.json").write_text(json.dumps(registry), encoding="utf-8")
+        self.project = Path(self.tmp.name) / "project"
+
+    def tearDown(self):
+        import os
+
+        if self.saved is None:
+            os.environ.pop("DB_MCP_RUNTIME", None)
+        else:
+            os.environ["DB_MCP_RUNTIME"] = self.saved
+        self.tmp.cleanup()
+
+    def _write(self, relative: str, body: str) -> None:
+        path = self.project / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body, encoding="utf-8")
+
+    def _scan(self, **kwargs):
+        return main.scan_code_relations(str(self.project), **kwargs)
+
+    def test_a_mapper_join_becomes_a_pending_edge(self):
+        self._write(
+            "src/main/resources/mapper/TransMapper.xml",
+            """<mapper namespace="demo.TransMapper">
+  <select id="find">
+    select * from t_trans t join t_order o on o.id = t.order_id
+  </select>
+</mapper>""",
+        )
+        payload = self._scan()
+        self.assertTrue(payload["ok"], payload)
+        self.assertEqual(payload["scanned"], 1)
+        self.assertEqual(payload["mined"], 1)
+        self.assertEqual(payload["imported"], 1)
+        self.assertEqual(payload["edges"][0]["source"], "audit_mined")
+        self.assertEqual(payload["edges"][0]["status"], "pending")
+        self.assertEqual(payload["edges"][0]["from"], {"table": "t_trans", "column": "order_id"})
+        self.assertEqual(payload["edges"][0]["to"], {"table": "t_order", "column": "id"})
+
+    def test_an_annotation_join_is_read(self):
+        self._write(
+            "src/main/java/demo/UserMapper.java",
+            'package demo;\ninterface UserMapper {\n'
+            '  @Select("select * from t_trans t join t_user u on u.id = t.order_id")\n'
+            "  Object rows();\n}\n",
+        )
+        payload = self._scan()
+        self.assertEqual(payload["mined"], 1, payload)
+        self.assertEqual(payload["edges"][0]["from"], {"table": "t_trans", "column": "order_id"})
+        self.assertEqual(payload["edges"][0]["to"], {"table": "t_user", "column": "id"})
+
+    def test_a_project_without_joins_reports_zero_and_imports_nothing(self):
+        self._write(
+            "src/main/java/demo/Repo.java",
+            'package demo;\nclass Repo { void go() { wrapper.apply("username = {0}"); } }',
+        )
+        payload = self._scan()
+        self.assertTrue(payload["ok"], payload)
+        self.assertEqual(payload["scanned"], 1)
+        self.assertEqual(payload["mined"], 0)
+        self.assertEqual(payload["edges"], [])
+
+    def test_the_edge_notes_the_file_it_came_from(self):
+        self._write(
+            "src/main/resources/mapper/TransMapper.xml",
+            '<mapper namespace="x"><select id="a">select * from t_trans t join t_order o on o.id = t.order_id</select></mapper>',
+        )
+        payload = self._scan()
+        self.assertEqual(payload["edges"][0]["note"], "read from src/main/resources/mapper/TransMapper.xml:1")
+
+    def test_an_undecidable_pair_is_reported(self):
+        # Both sides are primary keys, so nothing says which one owns the other.
+        self._write(
+            "src/main/resources/mapper/TransMapper.xml",
+            '<mapper namespace="x"><select id="a">select * from t_trans t join t_order o on o.id = t.id</select></mapper>',
+        )
+        payload = self._scan()
+        self.assertEqual(payload["imported"], 0)
+        self.assertEqual(len(payload["ambiguous"]), 1)
+        self.assertEqual(payload["ambiguous"][0]["reason"], "both unique")
+
+    def test_scanning_twice_does_not_duplicate_an_edge(self):
+        self._write(
+            "src/main/resources/mapper/TransMapper.xml",
+            '<mapper namespace="x"><select id="a">select * from t_trans t join t_order o on o.id = t.order_id</select></mapper>',
+        )
+        self._scan()
+        again = self._scan()
+        self.assertEqual(again["imported"], 0)
+        self.assertEqual(again["skipped"], 1)
+        self.assertEqual(len(main.list_edges()["edges"]), 1)
+
+    def test_a_missing_root_comes_back_as_an_error(self):
+        payload = main.scan_code_relations(str(self.project / "nope"))
+        # A directory that is not there yields nothing to import; it is not a crash.
+        self.assertTrue(payload["ok"], payload)
+        self.assertEqual(payload["scanned"], 0)
+        self.assertEqual(payload["edges"], [])
 
 
 @unittest.skipUnless(HAVE_MAIN, "the MCP SDK is not installed for this interpreter")

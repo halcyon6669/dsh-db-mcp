@@ -43,6 +43,7 @@ are `GET`; every mutation is `POST` (the same-origin check compares `Origin` wit
 | `POST /relations/condition` | attach or clear the extra predicate a join needs (`{ edge_id, condition, datasource? }`; an empty condition clears it) |
 | `POST /relations/delete` | remove one edge (`{ edge_id, datasource? }`) |
 | `POST /relations/mine` | mine joins out of the audit log (`{ datasource?, schema?, limit? }`) |
+| `POST /relations/scan` | mine joins out of a project's source tree (`{ root, datasource?, schema?, limit? }`) |
 | `POST /trace` | follow one value across tables (`{ value, datasource?, entry_table?, entry_column?, max_depth?, max_rows_per_table?, direction? }`) — a read-only walk, never a SQL entry point |
 | `POST /mcp/call` | dev helper: call one MCP tool through the panel |
 | `POST /reload` | dev helper: re-import `src/host.js` without restarting DSH |
@@ -110,6 +111,7 @@ memory before `max_rows` trims it; writes keep the ordinary cursor.
 | `propose_relation` | `from_table`, `from_column`, `to_table`, `to_column`, `datasource?`, `condition?`, `note?` | `{ edge, created, reopened }` — the edge starts as `pending` |
 | `discover_relations` | `datasource?`, `schema?` | `{ imported, updated, skipped, edges, counts }` — imports the declared foreign keys into the graph |
 | `mine_relations` | `datasource?`, `schema?`, `limit=20` | `{ mined, ambiguous, imported, updated, skipped, edges, counts }` — mines joins out of the audit log; see below |
+| `scan_code_relations` | `root`, `datasource?`, `schema?`, `limit=20` | `{ root, scanned, mined, ambiguous, imported, updated, skipped, edges, counts }` — mines joins out of a project's mapper XML, `@Select`-style annotations and MyBatis-Plus fragments; see below |
 | `feedback_relation` | `edge_id`, `verdict`, `reason?`, `note?`, `datasource?`, `fanout?` | `{ edge, previousStatus, indexed, unique }` — `verdict` is `ok`, `too_many`, `missing` or `irrelevant`; see below |
 | `set_relation_condition` | `edge_id`, `condition?`, `datasource?` | `{ edge, changed }` — an empty `condition` clears it |
 | `delete_edge` | `edge_id`, `datasource?` | `{ deleted, counts }` |
@@ -121,7 +123,7 @@ memory before `max_rows` trims it; writes keep the ordinary cursor.
 | `test_connection` | `datasource?` or `kind`+`config`+`password?`, `read_only?` | `{ ok, latencyMs, message, detail: { stage, server, database, user, schema } }` |
 | `session_scope` | `datasources?`, `all?` | the limit saved for this conversation; `all: true` or an empty list lifts it |
 
-`session_scope` is not an MCP tool: the Host registers it next to the sixteen bridged
+`session_scope` is not an MCP tool: the Host registers it next to the seventeen bridged
 ones so a conversation can narrow itself. While a limit is saved for the calling
 conversation, `list_datasources` only returns the allowed rows, a call that names
 another source fails with `user_error`, and a call that omits `datasource` either
@@ -351,6 +353,38 @@ Only statements attributed to this data source are read, plus the lines that nam
 none when this source is the default one — those ran against whatever the registry
 calls the default, and attributing them to another graph would invent joins across
 databases.
+
+### Mining joins out of the source tree
+
+A Spring Boot project writes its joins down before it ever runs them. The log
+miner above only sees what has already been executed, which is nothing on the day
+a schema is first explored — so `scan_code_relations` reads the repository
+instead. `root` is the project directory; three places are read and nothing else:
+
+- MyBatis mapper XML — the bodies of `select` / `insert` / `update` / `delete` /
+  `sql`, with `<if>` / `<foreach>` / `<where>` children flattened the way MyBatis
+  builds them;
+- MyBatis annotations — `@Select`, `@Insert`, `@Update`, `@Delete`;
+- MyBatis-Plus fragments — `.apply(...)`, `.last(...)`, `.inSql(...)`,
+  `.exists(...)`, `.notExists(...)`, `.having(...)`.
+
+Every other string literal in a `.java` file is skipped on purpose. A log message
+or a regex read as SQL would invent tables, and a scanner that guesses is worse
+than one that finds nothing — the same reason the parser refuses an unqualified
+column when a statement names more than one table. `build`, `target`, `out`,
+`.git`, `node_modules` and friends are skipped so generated copies do not count
+twice, and each statement carries `file:line` so the report points at the source.
+
+Direction works exactly as it does for the log miner: the statement says the two
+columns are equal, the catalog says which side is the parent, and a pair where
+that cannot be decided is reported under `ambiguous` instead of imported. Edges
+arrive `pending` with source `audit_mined` — a committed statement is evidence,
+not proof — and nothing is executed: the files are read, never run. A source that
+is not reachable therefore fails the call, because without a catalog there is no
+way to orient anything.
+
+A project that only uses `BaseMapper` and single-table wrappers has no join to
+find, and reporting zero is the correct answer for it, not a failure.
 
 ### The panel pages
 

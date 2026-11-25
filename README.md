@@ -128,6 +128,7 @@ for real before you commit the source.
 | `mcp__db__propose_relation` | record a join the catalog does not declare |
 | `mcp__db__discover_relations` | import the declared foreign keys into the graph |
 | `mcp__db__mine_relations` | mine joins out of the statements already in the audit log |
+| `mcp__db__scan_code_relations` | mine joins out of a project's mapper XML, `@Select` annotations and MyBatis-Plus fragments |
 | `mcp__db__trace_by_key` | find where a value lives and which confirmed joins carry it across tables |
 | `mcp__db__feedback_relation` | confirm, reject or retire a join after a trace step |
 | `mcp__db__set_relation_condition` | attach the extra predicate a join needs to be true |
@@ -153,8 +154,10 @@ text the model sees is bounded.
 The catalog knows the foreign keys someone declared. Real databases often do not
 declare them, or declare them somewhere a login cannot read — so "what joins what"
 is kept as a graph you can correct. `discover_relations` imports the declared keys;
-`mine_relations` mines the joins out of statements the audit log already holds, for
-the schemas that declare nothing; `propose_relation` adds a join by hand. Every edge
+`mine_relations` mines the joins out of statements the audit log already holds, and
+`scan_code_relations` reads the ones a Spring Boot project has committed — mapper XML,
+`@Select`-style annotations, MyBatis-Plus fragments — for the schemas that declare
+nothing; `propose_relation` adds a join by hand. Every edge
 carries a status, and `trace_by_key` only walks the ones you have confirmed, so a
 guess never silently becomes a fact.
 

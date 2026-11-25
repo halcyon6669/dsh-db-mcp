@@ -478,6 +478,7 @@ try {
     ['POST', '/relations/condition'],
     ['POST', '/relations/delete'],
     ['POST', '/relations/mine'],
+    ['POST', '/relations/scan'],
     ['POST', '/trace'],
   ]
   for (const [method, path] of graphRoutes) {
@@ -511,6 +512,23 @@ try {
     'the trace route has no SQL argument at all',
     traceArgs.status !== 404 && !/sql|statement/.test(JSON.stringify(traceArgs.body?.error || '')),
     JSON.stringify(traceArgs.body).slice(0, 160),
+  )
+
+  /* `/relations/scan` reads files, so the path is the one argument it cannot
+     invent: an empty root must be refused before any tool call, and the route
+     must not accept SQL either — it imports joins, it does not run them. */
+  const scanNoRoot = await post('/relations/scan', { datasource: 'alpha' })
+  check('the scan route refuses an empty root', scanNoRoot.status === 400, JSON.stringify(scanNoRoot.body).slice(0, 160))
+  const scanArgs = await post('/relations/scan', {
+    root: 'C:/nope',
+    datasource: 'alpha',
+    sql: 'select 1',
+    statement: 'select 1',
+  })
+  check(
+    'the scan route takes a root and no SQL',
+    scanArgs.status !== 404 && !/sql|statement/.test(JSON.stringify(scanArgs.body?.error || '')),
+    JSON.stringify(scanArgs.body).slice(0, 160),
   )
 } finally {
   await new Promise((resolve) => server.close(resolve))

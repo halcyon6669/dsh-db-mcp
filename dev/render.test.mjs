@@ -703,6 +703,57 @@ check('renderer: an ambiguous pair points at the way to decide it', minedAmbiguo
 const minedEmpty = renderResult({ ok: true, mined: 0, ambiguous: [], imported: 0, updated: 0, skipped: 0, edges: [], counts: {} })
 check('renderer: an empty log says so instead of pretending', minedEmpty.includes('holds no statement that joined two tables'), minedEmpty)
 
+const scannedClean = renderResult({
+  ok: true,
+  root: 'E:/project/backend/Record',
+  scanned: 12,
+  mined: 2,
+  ambiguous: [],
+  imported: 1,
+  updated: 0,
+  skipped: 1,
+  edges: [],
+  counts: { pending: 1, confirmed: 0, trusted: 0, stale: 0, rejected: 0 },
+})
+check('renderer: a scanned project says how much it read', scannedClean.includes('scanned 12 statement(s) under E:/project/backend/Record'), scannedClean)
+check('renderer: scanning reports what was new and what was already known', scannedClean.includes('mined 2 join(s), 1 new, 1 already known'), scannedClean)
+check('renderer: scanning shows the graph it left behind', scannedClean.includes('graph now: 1 pending'), scannedClean)
+
+const scannedAmbiguous = renderResult({
+  ok: true,
+  root: 'E:/project/backend/Record',
+  scanned: 3,
+  mined: 1,
+  imported: 0,
+  updated: 0,
+  skipped: 0,
+  edges: [],
+  counts: { pending: 0, confirmed: 0, trusted: 0, stale: 0, rejected: 0 },
+  ambiguous: [
+    { left: { table: 'account', column: 'id' }, right: { table: 'warehouse', column: 'id' }, hits: 1, reason: 'both unique' },
+  ],
+})
+check(
+  'renderer: a scanned undecidable direction names both columns and why',
+  scannedAmbiguous.includes('account.id = warehouse.id  (both unique)'),
+  scannedAmbiguous,
+)
+
+const scannedEmpty = renderResult({
+  ok: true,
+  root: 'E:/project/backend/Record',
+  scanned: 1,
+  mined: 0,
+  ambiguous: [],
+  imported: 0,
+  updated: 0,
+  skipped: 0,
+  edges: [],
+  counts: {},
+})
+check('renderer: a project with no join says so instead of pretending', scannedEmpty.includes('no mapper XML, @Select/@Update annotation'), scannedEmpty)
+check('renderer: a BaseMapper-only project is not reported as a failure', scannedEmpty.includes('that is not a failure'), scannedEmpty)
+
 const walked = renderResult({
   ok: true,
   value: 'A001',

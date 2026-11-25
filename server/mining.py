@@ -169,6 +169,24 @@ def _rank(seen: dict[tuple[str, str, str, str], int], limit: int) -> list[dict]:
     return mined
 
 
+def statements_candidates(statements, limit: int = 500) -> list[dict]:
+    """Candidate column pairs mined from statements that were never run.
+
+    The source-tree scanner feeds this: a mapper XML or an `@Select` holds SQL
+    nobody has executed yet, but it is still a person's statement that the join
+    exists. Everything else is the same as `candidates` — pairs are counted and
+    returned in a canonical order, because the child side is the catalog's call.
+    """
+    seen: dict[tuple[str, str, str, str], int] = {}
+    for sql in statements:
+        if not isinstance(sql, str) or not JOIN_WORDS.search(sql):
+            continue
+        for left, right in _joins(sql):
+            key = _key(left, right)
+            seen[key] = seen.get(key, 0) + 1
+    return _rank(seen, limit)
+
+
 def candidates(rows, datasources=(), include_anonymous: bool = False, limit: int = 500) -> list[dict]:
     """Candidate column pairs mined from audit lines.
 

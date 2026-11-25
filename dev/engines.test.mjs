@@ -27,6 +27,7 @@ const testFiles = [
   join(packageDir, 'dev', 'relations.test.py'),
   join(packageDir, 'dev', 'trace.test.py'),
   join(packageDir, 'dev', 'mining.test.py'),
+  join(packageDir, 'dev', 'sources.test.py'),
   join(packageDir, 'dev', 'secretbox.test.py'),
   join(packageDir, 'dev', 'audit.test.py'),
   join(packageDir, 'dev', 'main.test.py'),
