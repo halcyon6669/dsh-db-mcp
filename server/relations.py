@@ -61,6 +61,27 @@ TRUST_SAMPLES = 3
 # avoid.
 BIG_TABLE_ROWS = 1_000_000
 
+# The four numbers above are only the defaults. The panel edits them, and the
+# values live in `settings.json` under "cost" — the same file `auditLog` comes
+# from. `cost_settings()` re-reads it on every use, so a change applies to the
+# next trace without restarting the process.
+COST_DEFAULTS = {
+    "slowMs": SLOW_MS,
+    "timingWindow": TIMING_WINDOW,
+    "trustSamples": TRUST_SAMPLES,
+    "bigTableRows": BIG_TABLE_ROWS,
+}
+
+# Each cap keeps the setting in a range where the rule still says something: a
+# window of zero keeps no history, and a "slow" step of one millisecond would call
+# every edge slow.
+COST_CAPS = {
+    "slowMs": (10, 60_000),
+    "timingWindow": (1, 20),
+    "trustSamples": (1, 20),
+    "bigTableRows": (1_000, 1_000_000_000),
+}
+
 VERDICTS = ("ok", "too_many", "missing", "irrelevant")
 TOO_MANY_REASONS = ("wrong_column", "needs_condition", "not_unique")
 
@@ -68,6 +89,42 @@ TOO_MANY_REASONS = ("wrong_column", "needs_condition", "not_unique")
 def _now() -> str:
     stamp = datetime.now(timezone.utc)
     return stamp.strftime("%Y-%m-%dT%H:%M:%S.") + f"{stamp.microsecond // 1000:03d}Z"
+
+
+def _clamp_cost(key: str, value) -> int:
+    """One cost setting, forced into the range where its rule still applies."""
+    low, high = COST_CAPS[key]
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return COST_DEFAULTS[key]
+    number = int(value)
+    if number < low:
+        return low
+    if number > high:
+        return high
+    return number
+
+
+def cost_settings() -> dict:
+    """The four cost thresholds, read fresh from `settings.json` on every call.
+
+    Re-reading rather than caching at import matters: the panel writes the file
+    and the next trace should already use the new numbers, without restarting the
+    MCP process. A missing or broken settings file falls back to the defaults, the
+    same way `audit.py` treats `auditLog`.
+    """
+    values = dict(COST_DEFAULTS)
+    try:
+        with (store.runtime_dir() / "settings.json").open("r", encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, ValueError):
+        return values
+    cost = data.get("cost") if isinstance(data, dict) else None
+    if not isinstance(cost, dict):
+        return values
+    for key in COST_DEFAULTS:
+        if key in cost:
+            values[key] = _clamp_cost(key, cost[key])
+    return values
 
 
 def _source_key(profile: dict) -> str:
@@ -497,16 +554,17 @@ def _stats_of(edge: dict) -> dict:
     return stats
 
 
-def _timed(stats: dict, ms) -> None:
+def _timed(stats: dict, ms, window: int | None = None) -> None:
     """Record one measured step duration and refresh the running figures.
 
-    Only the last `TIMING_WINDOW` samples are kept: an edge is as expensive as it
+    Only the last `timingWindow` samples are kept: an edge is as expensive as it
     is now, and an average dragged down by a year of fast traces would hide the
     query that started doing a full scan yesterday.
     """
     if not isinstance(ms, (int, float)) or isinstance(ms, bool):
         return
-    window = TIMING_WINDOW
+    if window is None:
+        window = cost_settings()["timingWindow"]
     value = max(0, int(round(float(ms))))
     timings = stats.get("timings")
     if not isinstance(timings, list):
@@ -534,15 +592,16 @@ def _earns_trust(stats: dict) -> bool:
     The index and the row estimate are recorded and shown; they inform the
     operator, they do not decide the badge.
     """
+    cost = cost_settings()
     fanout = stats.get("avgFanout")
     if not (stats.get("confirmCount", 0) >= TRUST_CONFIRMS and stats.get("rejectCount", 0) == 0):
         return False
     if not isinstance(fanout, (int, float)) or float(fanout) > TRUST_FANOUT:
         return False
     timings = stats.get("timings")
-    if not isinstance(timings, list) or len(timings) < TRUST_SAMPLES:
+    if not isinstance(timings, list) or len(timings) < cost["trustSamples"]:
         return False
-    return all(isinstance(sample, (int, float)) and float(sample) < SLOW_MS for sample in timings)
+    return all(isinstance(sample, (int, float)) and float(sample) < cost["slowMs"] for sample in timings)
 
 
 def needs_confirm(stats: dict) -> bool:
@@ -556,7 +615,7 @@ def needs_confirm(stats: dict) -> bool:
     row_estimate = stats.get("rowEstimate")
     if not isinstance(row_estimate, (int, float)):
         return False
-    if float(row_estimate) < BIG_TABLE_ROWS:
+    if float(row_estimate) < cost_settings()["bigTableRows"]:
         return False
     return stats.get("indexed") is False
 

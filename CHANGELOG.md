@@ -37,6 +37,12 @@ report of each version in more detail.
   An unknown row estimate or an unknown index never blocks a trace.
 - `feedback_relation` takes `ms`, so a confirmation made outside a trace still
   carries its measurement.
+- **The cost thresholds are yours to set.** What used to be four constants in
+  `server/relations.py` — the slow-step cut-off (200ms), the timing window (5 steps),
+  the samples trust needs (3) and the large-table cut-off (a million rows) — now lives
+  in `settings.json` under `cost` and has a **Cost thresholds** card on the Relations
+  tab. The Python server re-reads them on every decision, so a change applies to the
+  next trace without a restart. The fanout cap stays a constant.
 
 ### Changed
 

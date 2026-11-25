@@ -1463,6 +1463,36 @@ export function createHost(options = {}) {
     return TEXT_POLICIES.includes(value) ? value : "auto";
   }
 
+  /* What a step may cost before a trace refuses to run it: the same four numbers
+     `server/relations.py` reads out of this file. They live here so the panel can
+     show and edit them; the Python side re-reads the file on every use. */
+  const COST_DEFAULTS = {
+    slowMs: 200,
+    timingWindow: 5,
+    trustSamples: 3,
+    bigTableRows: 1000000,
+  };
+  const COST_CAPS = {
+    slowMs: [10, 60000],
+    timingWindow: [1, 20],
+    trustSamples: [1, 20],
+    bigTableRows: [1000, 1000000000],
+  };
+
+  function costSettings(value) {
+    const source = cleanRecord(value);
+    const cost = {};
+    for (const key of Object.keys(COST_DEFAULTS)) {
+      const raw = Number(source[key]);
+      const [low, high] = COST_CAPS[key];
+      cost[key] =
+        Number.isInteger(raw) && raw >= low && raw <= high
+          ? raw
+          : COST_DEFAULTS[key];
+    }
+    return cost;
+  }
+
   async function readSettings() {
     const read = await readJson(settingsFile);
     const value = cleanRecord(read.value);
@@ -1487,6 +1517,7 @@ export function createHost(options = {}) {
         : [],
       limits: rowLimits(value.limits),
       textPolicy: textPolicy(value.textPolicy),
+      cost: costSettings(value.cost),
       httpPort:
         Number.isInteger(port) && port >= HTTP_PORT_MIN && port <= HTTP_PORT_MAX
           ? port
@@ -1536,6 +1567,14 @@ export function createHost(options = {}) {
       ),
       textPolicy: textPolicy(
         patch.textPolicy === undefined ? current.textPolicy : patch.textPolicy,
+      ),
+      /* A partial cost patch keeps the thresholds it does not mention: the panel
+         saves one field at a time, and resetting the other three to their
+         defaults on every keystroke would be a trap. */
+      cost: costSettings(
+        patch.cost === undefined
+          ? current.cost
+          : { ...current.cost, ...cleanRecord(patch.cost) },
       ),
       httpPort: port,
       updatedAt: isoNow(),
@@ -3188,6 +3227,7 @@ export function createHost(options = {}) {
             disabled: settingsNow.disabledTools || [],
             limits: settingsNow.limits,
             textPolicy: settingsNow.textPolicy,
+            cost: settingsNow.cost,
             tools: listing.tools,
             scopeTool: listing.scopeTool,
           });
@@ -3314,6 +3354,7 @@ export function createHost(options = {}) {
           disabledTools: payload.disabledTools,
           limits: payload.limits,
           textPolicy: payload.textPolicy,
+          cost: payload.cost,
           httpEnabled: payload.httpEnabled,
           httpPort: payload.httpPort,
         });

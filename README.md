@@ -168,7 +168,10 @@ confirmed, rejected with a reason, or given a condition; a stale edge shows what
 failed and offers a re-check; a rejected edge can be re-opened. Confirmed and trusted
 edges keep their confirmation record, so nothing is a black box. Two buttons fill
 the graph: **Import foreign keys** reads the catalog, **Mine the log** reads the
-statements already audited.
+statements already audited. A **Cost thresholds** card under the graph sets what a
+step may cost — the slow-step cut-off, how many timings the window keeps, how many
+samples trust needs, and what counts as a large table — so the rules that award trust
+are yours to tune instead of constants you have to read in the source.
 
 The **Trace** tab takes one value and shows the walk: each step's table, condition,
 row count, how long it took, a few sample cells, and the edge that carried it there.

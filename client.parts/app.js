@@ -2228,6 +2228,61 @@ function groupTables(tables) {
       /** Publish or withdraw one tool for the agent. */
       const [limitDraft, setLimitDraft] = React.useState({})
 
+      /* The four numbers that decide what a step may cost. They live in
+         settings.json like the row limits do, so the panel edits them and the
+         Python side re-reads the file on the next trace. */
+      const [costDraft, setCostDraft] = React.useState({})
+
+      /* Same defaults and caps as `COST_DEFAULTS` / `COST_CAPS` in
+         server/relations.py and src/host.js: the three layers have to agree or an
+         input the panel accepts would be silently changed underneath. */
+      const COST_RULES = [
+        { key: 'slowMs', min: 10, max: 60000, fallback: 200 },
+        { key: 'timingWindow', min: 1, max: 20, fallback: 5 },
+        { key: 'trustSamples', min: 1, max: 20, fallback: 3 },
+        { key: 'bigTableRows', min: 1000, max: 1000000000, fallback: 1000000 },
+      ]
+
+      /* Named one by one rather than built from the key string: the i18n check
+         reads the source for literal translate calls, so a template literal here
+         would hide the lookup and leave the keys unreachable. */
+      const costName = (rule) =>
+        rule.key === 'slowMs'
+          ? t('cost.slowMs')
+          : rule.key === 'timingWindow'
+            ? t('cost.timingWindow')
+            : rule.key === 'trustSamples'
+              ? t('cost.trustSamples')
+              : t('cost.bigTableRows')
+
+      const costUnit = (rule) =>
+        rule.key === 'slowMs'
+          ? t('cost.slowMsUnit')
+          : rule.key === 'timingWindow'
+            ? t('cost.timingWindowUnit')
+            : rule.key === 'trustSamples'
+              ? t('cost.trustSamplesUnit')
+              : t('cost.bigTableRowsUnit')
+
+      const costHint = (rule) =>
+        rule.key === 'slowMs'
+          ? t('cost.slowMsHint')
+          : rule.key === 'timingWindow'
+            ? t('cost.timingWindowHint')
+            : rule.key === 'trustSamples'
+              ? t('cost.trustSamplesHint')
+              : t('cost.bigTableRowsHint')
+
+      const costValues = React.useMemo(() => {
+        const stored = (tools && tools.cost) || {}
+        const values = {}
+        for (const rule of COST_RULES) {
+          const raw = Number(stored[rule.key])
+          values[rule.key] = Number.isInteger(raw) ? raw : rule.fallback
+        }
+        return values
+      }, [tools])
+
       /* ------------------------------------------------------- relation graph
          Page A reads one datasource's graph and nothing else. The panel has no
          SQL box on purpose: every action here is one of the six graph tools, so
@@ -2448,6 +2503,27 @@ function groupTables(tables) {
           await load()
         } catch (error) {
           setLimitDraft({ ...limitDraft, [limit.key]: String(limit.value) })
+          setNotice({ message: String((error && error.message) || error), isError: true })
+        }
+      }
+
+      /** Save one cost threshold; the server clamps it to the same range. */
+      const commitCost = async (rule) => {
+        const raw = Number(costDraft[rule.key])
+        if (!Number.isInteger(raw) || raw < rule.min || raw > rule.max) {
+          const fallback = costValues[rule.key]
+          setCostDraft({ ...costDraft, [rule.key]: fallback === undefined ? undefined : String(fallback) })
+          return
+        }
+        if (raw === costValues[rule.key]) return
+        const next = { ...costValues, [rule.key]: raw }
+        try {
+          await apiPost('/settings', { cost: next })
+          setCostDraft({ ...costDraft, [rule.key]: undefined })
+          setNotice({ message: t('cost.saved'), isError: false })
+          await load()
+        } catch (error) {
+          setCostDraft({ ...costDraft, [rule.key]: String(costValues[rule.key]) })
           setNotice({ message: String((error && error.message) || error), isError: true })
         }
       }
@@ -3340,6 +3416,57 @@ function groupTables(tables) {
                 ),
               ),
               h('p', { className: 'dbmcp-render-hint' }, t('render.textHint')),
+            ),
+          ),
+        )
+
+      /* The cost thresholds answer one question the graph cannot: is walking this
+         edge cheap? They set what counts as slow, how many measurements are kept,
+         how many are needed before an edge is trusted, and how large a table has
+         to be before an unindexed column means a full scan worth asking about. */
+      const renderCost = () =>
+        h(
+          Card,
+          { title: t('cost.title') },
+          h('p', { className: 'dbmcp-hint' }, t('cost.hint')),
+          h(
+            'div',
+            { className: 'dbmcp-render-fields' },
+            COST_RULES.map((rule) =>
+              h(
+                'div',
+                { key: rule.key, className: 'dbmcp-render-field' },
+                h(
+                  'label',
+                  { className: 'dbmcp-render-head' },
+                  h('span', { className: 'dbmcp-render-label' }, costName(rule)),
+                  h(
+                    'span',
+                    { className: 'dbmcp-render-input' },
+                    h('input', {
+                      type: 'number',
+                      className: 'dbmcp-input dbmcp-limit',
+                      min: rule.min,
+                      max: rule.max,
+                      step: 1,
+                      value: costDraft[rule.key] !== undefined ? costDraft[rule.key] : costValues[rule.key],
+                      'aria-label': costName(rule),
+                      disabled: busy,
+                      onClick: (event) => event.stopPropagation(),
+                      onChange: (event) => setCostDraft({ ...costDraft, [rule.key]: event.target.value }),
+                      onBlur: () => commitCost(rule),
+                      onKeyDown: (event) => {
+                        if (event.key === 'Enter') {
+                          event.preventDefault()
+                          event.currentTarget.blur()
+                        }
+                      },
+                    }),
+                    h('span', { className: 'dbmcp-limit-unit' }, costUnit(rule)),
+                  ),
+                ),
+                h('p', { className: 'dbmcp-render-hint' }, costHint(rule)),
+              ),
             ),
           ),
         )
@@ -4329,6 +4456,7 @@ function groupTables(tables) {
             ),
           ),
           tab !== 'graph' ? null : renderGraph(),
+          tab !== 'graph' ? null : renderCost(),
           tab !== 'trace' ? null : renderTrace(),
           tab !== 'clients' ? null : renderClients(),
           tab !== 'tools' ? null : renderTools(),

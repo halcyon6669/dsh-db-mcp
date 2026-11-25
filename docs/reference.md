@@ -20,9 +20,9 @@ are `GET`; every mutation is `POST` (the same-origin check compares `Origin` wit
 | `GET /http/status` | streamable-HTTP endpoint state: running, host, port, `url` (`http://host:port/dsh-db-mcp`), `sseUrl`, stderr tail |
 | `POST /http/start` · `POST /http/stop` | start (optional `{ port }`) or stop the HTTP endpoint |
 | `GET /clients` | the endpoint URL plus every supported outside client: config file, detected, configured, and the configured `transport` (`stdio` or `http`) |
-| `GET /tools` | every tool the Python server offers, with its `enabled` state and row-limit metadata, plus the current `limits` and `textPolicy`, so the panel can switch them |
+| `GET /tools` | every tool the Python server offers, with its `enabled` state and row-limit metadata, plus the current `limits`, `textPolicy` and `cost` thresholds, so the panel can switch them |
 | `POST /clients/configure` | write this server into one client's config (`{ client, transport? }`); `transport` is `stdio` (command/args/env, no endpoint needed) or `http` (shared endpoint, must be running). Omitting it keeps the old per-client default; writing one form replaces the other. VS Code is written to the Copilot harness file (`$COPILOT_HOME/mcp-config.json`) with the portable entry shape (`type`, `tools`) |
-| `GET /settings` · `POST /settings` | global write switch, audit switch, row limits and the long-text setting |
+| `GET /settings` · `POST /settings` | global write switch, audit switch, row limits, the long-text setting and the `cost` thresholds (`{ cost?: { slowMs?, timingWindow?, trustSamples?, bigTableRows? } }`; a partial patch keeps the rest) |
 | `GET /scopes` · `POST /scopes` | per-conversation data-source limits (`{ session, datasources }`; an empty list lifts the limit). `GET` returns `{ sessions, archived }`, each row `{ session, ids, updatedAt, title }` — `title` is the conversation's folded title when the host can read it, else `null`; `archived` holds the limits parked by archiving |
 | `POST /scopes/delete` · `POST /scopes/clear` | drop one conversation's limit (`{ session }`) or every limit at once; both return what they removed. Deleting also drops the parked copy, so unarchiving cannot resurrect it |
 | `GET /audit?limit=N` | tail of the tool-call audit log (default 20, max 200) |
@@ -201,10 +201,15 @@ anything that can read both files as your user can still decrypt them. Delete
 `secret.key` to make every stored password unreadable at once; the panel then asks
 for them again instead of reporting a bogus authentication failure.
 
-`settings.json` holds `{ "allowWrite": false, "auditLog": true, "httpEnabled": true, "httpPort": 8765, "disabledTools": [], "textPolicy": "auto", "updatedAt": "…" }`.
+`settings.json` holds `{ "allowWrite": false, "auditLog": true, "httpEnabled": true, "httpPort": 8765, "disabledTools": [], "textPolicy": "auto", "cost": { … }, "updatedAt": "…" }`.
 `limits` holds `{ "sampleRows": 20, "maxRows": 200 }`: the row counts handed to `sample_rows`
 and `execute_sql` when the model does not name one. Out-of-range values fall back to those
 defaults.
+`cost` holds `{ "slowMs": 200, "timingWindow": 5, "trustSamples": 3, "bigTableRows": 1000000 }`:
+the four thresholds that decide what a traced step may cost. They are set on the relation
+graph page and read by the Python server on every decision, so a change applies to the next
+trace without a restart. Out-of-range values fall back to those defaults; see
+[How an edge earns trust](#how-an-edge-earns-trust).
 `textPolicy` is `auto` (default) or `full`: how a cell longer than 200 characters is
 rendered into the model context. `auto` keeps the first and last 50 characters around a
 `…(N chars)…` marker, `full` returns the value untouched, and blob cells are compressed to a
@@ -279,8 +284,8 @@ object holding the same values: `indexed` (is the target column the leading colu
 of an index or a single-column primary key — `null` when the catalog could not be
 read), `unique`, `rowEstimate` (the engine's own estimate: `pg_class.reltuples` for
 PostgreSQL and openGauss, `information_schema.TABLES.TABLE_ROWS` for MySQL,
-`ALL_TABLES.NUM_ROWS` for Oracle — never a `count(*)`), `timings` (the last five
-measured step durations in milliseconds),
+`ALL_TABLES.NUM_ROWS` for Oracle — never a `count(*)`), `timings` (the last
+`cost.timingWindow` measured step durations in milliseconds, five by default),
 `lastMs`, `avgMs`, and `needsConfirm`.
 `propose_relation` and `feedback_relation` fill `indexed` / `rowEstimate` from the
 catalog; every trace adds the step durations it measured to `timings`.
@@ -318,7 +323,7 @@ connect". It starts at one column, then follows graph edges one hop at a time:
   never blocks — a catalog that cannot be read must not freeze the walk.
 - **Every step is timed.** Each step reports `ms`, and a finished trace writes the
   durations of the steps it actually ran onto their edges, where `lastMs` / `avgMs`
-  keep the last five measured durations.
+  keep the last `cost.timingWindow` (five by default).
 
 ### How an edge earns trust
 
@@ -334,12 +339,18 @@ the verdict decides what happens next:
 
 `trusted` is recomputed on every `ok`, never latched, and needs all four: three
 confirmations, no rejection left standing, an average fanout of 5 or less, and the
-last few measured steps all faster than the slow threshold (200ms) — at least three
-of them, so an edge nobody timed cannot be trusted. An index is a bonus, not a
-condition: an unindexed column that is genuinely fast earns trust all the same. An
-edge whose fanout later grows, or whose steps slow down, falls back to `confirmed` —
-which still walks, but stays visible as something a person vouched for rather than
-something measured.
+last few measured steps all faster than the slow threshold (`cost.slowMs`, 200ms by
+default) — at least `cost.trustSamples` (three) of them, so an edge nobody timed
+cannot be trusted. An index is a bonus, not a condition: an unindexed column that is
+genuinely fast earns trust all the same. An edge whose fanout later grows, or whose
+steps slow down, falls back to `confirmed` — which still walks, but stays visible as
+something a person vouched for rather than something measured.
+
+Three of those thresholds are editable on the relation graph page, together with the
+large-table cut-off (`cost.bigTableRows`, a million rows by default); the fanout cap
+stays a constant. They live in `settings.json` under `cost`, and the Python server
+re-reads them each time it decides, so a change applies to the next trace without a
+restart.
 
 A `stale` edge returns to `pending` when it is proposed again or when
 `discover_relations` finds its key in the catalog; the next trace then has to earn

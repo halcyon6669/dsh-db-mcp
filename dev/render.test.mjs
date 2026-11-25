@@ -1093,6 +1093,38 @@ check(
   /graph\.rows/.test(graphCard) && /graph\.avgMs/.test(graphCard) && /cost\.avgMs/.test(graphCard),
 )
 
+/* The four thresholds that decide what a step may cost used to be module
+   constants; they are now a card of their own on the graph page. The card has to
+   be reachable from the graph tab, save one field at a time, and quote the same
+   caps the server clamps to. */
+const costCard = source.slice(source.indexOf('const COST_RULES ='), source.indexOf('const renderScopes ='))
+check(
+  'graph page: the cost thresholds have a card of their own',
+  /tab !== 'graph' \? null : renderCost\(\)/.test(source) && /const renderCost = \(\)/.test(source) && /cost\.title/.test(source),
+)
+check(
+  'graph page: the four thresholds are editable numbers',
+  /key: 'slowMs'/.test(costCard) &&
+    /key: 'timingWindow'/.test(costCard) &&
+    /key: 'trustSamples'/.test(costCard) &&
+    /key: 'bigTableRows'/.test(costCard),
+)
+check(
+  'graph page: a threshold is saved on its own',
+  /apiPost\('\/settings', \{ cost: next \}\)/.test(costCard) && /cost\.saved/.test(source),
+)
+check(
+  'graph page: each threshold names itself and explains what it changes',
+  /cost\.slowMsHint/.test(costCard) &&
+    /cost\.timingWindowHint/.test(costCard) &&
+    /cost\.trustSamplesHint/.test(costCard) &&
+    /cost\.bigTableRowsHint/.test(costCard),
+)
+check(
+  'graph page: the panel caps match the ones the server clamps to',
+  /min: 10, max: 60000/.test(costCard) && /min: 1000, max: 1000000000/.test(costCard),
+)
+
 // Page B — the trace result. The page must take a value and nothing else that
 // could look like a statement, and every step must be judgeable.
 const traceCard = source.slice(source.indexOf('const traceCondition ='), source.indexOf('let body'))

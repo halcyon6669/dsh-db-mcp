@@ -528,5 +528,90 @@ class EdgeCost(unittest.TestCase):
         self.assertFalse(listed["cost"]["needsConfirm"])
 
 
+class CostSettings(unittest.TestCase):
+    """The four cost thresholds are editable, so where they come from now matters.
+
+    A value written by the panel has to reach the very next decision, without a
+    restart — that is the whole point of moving them out of module constants. The
+    other half is that a broken file cannot make the rules meaningless: a window
+    of zero or a "slow" step of one millisecond would flip every edge, so every
+    number is clamped into a range where it still says something.
+    """
+
+    def setUp(self):
+        self.saved = os.environ.get("DB_MCP_RUNTIME")
+        self.tmp = tempfile.TemporaryDirectory()
+        os.environ["DB_MCP_RUNTIME"] = self.tmp.name
+        self.file = Path(self.tmp.name) / "settings.json"
+
+    def tearDown(self):
+        if self.saved is None:
+            os.environ.pop("DB_MCP_RUNTIME", None)
+        else:
+            os.environ["DB_MCP_RUNTIME"] = self.saved
+        self.tmp.cleanup()
+
+    def _write(self, payload) -> None:
+        self.file.write_text(json.dumps(payload), encoding="utf-8")
+
+    def test_the_defaults_apply_without_a_settings_file(self):
+        self.assertEqual(relations.cost_settings(), dict(relations.COST_DEFAULTS))
+
+    def test_a_written_value_reaches_the_next_decision(self):
+        self._write({"cost": {"slowMs": 50, "bigTableRows": 2_000}})
+        cost = relations.cost_settings()
+        self.assertEqual(cost["slowMs"], 50)
+        self.assertEqual(cost["bigTableRows"], 2_000)
+        # 3_000 rows clears the new threshold, so this stats dict now asks.
+        self.assertTrue(relations.needs_confirm({"rowEstimate": 3_000, "indexed": False}))
+
+    def test_a_lowered_large_table_threshold_starts_asking_earlier(self):
+        self.assertFalse(relations.needs_confirm({"rowEstimate": 20_000, "indexed": False}))
+        self._write({"cost": {"bigTableRows": 10_000}})
+        self.assertTrue(relations.needs_confirm({"rowEstimate": 20_000, "indexed": False}))
+
+    def test_a_raised_slow_threshold_lets_a_slow_edge_be_trusted(self):
+        edge = relations.propose(source(), "t_trans", "order_id", "t_order", "id")["edge"]
+        for _ in range(3):
+            relations.feedback(source(), edge["id"], "ok", fanout=1.0, ms=300)
+        stored = next(item for item in relations.list_edges(source())["edges"] if item["id"] == edge["id"])
+        self.assertEqual(stored["status"], "confirmed")
+        self._write({"cost": {"slowMs": 400}})
+        relations.feedback(source(), edge["id"], "ok", fanout=1.0, ms=300)
+        stored = next(item for item in relations.list_edges(source())["edges"] if item["id"] == edge["id"])
+        self.assertEqual(stored["status"], "trusted")
+
+    def test_a_window_of_one_keeps_only_the_newest_sample(self):
+        edge = relations.propose(source(), "t_trans", "order_id", "t_order", "id")["edge"]
+        self._write({"cost": {"timingWindow": 1}})
+        for ms in (10, 20, 30):
+            relations.feedback(source(), edge["id"], "ok", fanout=1.0, ms=ms)
+        stored = next(item for item in relations.list_edges(source())["edges"] if item["id"] == edge["id"])
+        self.assertEqual(stored["stats"]["timings"], [30])
+        self.assertEqual(stored["stats"]["lastMs"], 30)
+        self.assertEqual(stored["stats"]["avgMs"], 30.0)
+
+    def test_out_of_range_and_broken_values_fall_back(self):
+        self._write(
+            {
+                "cost": {
+                    "slowMs": 0,
+                    "timingWindow": 999,
+                    "trustSamples": "fast",
+                    "bigTableRows": True,
+                }
+            }
+        )
+        cost = relations.cost_settings()
+        self.assertEqual(cost["slowMs"], relations.COST_CAPS["slowMs"][0])
+        self.assertEqual(cost["timingWindow"], relations.COST_CAPS["timingWindow"][1])
+        self.assertEqual(cost["trustSamples"], relations.COST_DEFAULTS["trustSamples"])
+        self.assertEqual(cost["bigTableRows"], relations.COST_DEFAULTS["bigTableRows"])
+
+    def test_a_broken_settings_file_falls_back_to_the_defaults(self):
+        self.file.write_text("{ not json", encoding="utf-8")
+        self.assertEqual(relations.cost_settings(), dict(relations.COST_DEFAULTS))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

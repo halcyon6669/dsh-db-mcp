@@ -457,6 +457,54 @@ try {
     JSON.stringify(clamped.body?.limits),
   )
 
+  /* The four cost thresholds are the same kind of setting as the row limits:
+     written by the panel, read by the Python side out of the same file. */
+  const costDefaults = await get('/tools')
+  check(
+    'the tool list carries the four cost thresholds',
+    costDefaults.body?.cost?.slowMs === 200 &&
+      costDefaults.body?.cost?.timingWindow === 5 &&
+      costDefaults.body?.cost?.trustSamples === 3 &&
+      costDefaults.body?.cost?.bigTableRows === 1000000,
+    JSON.stringify(costDefaults.body?.cost),
+  )
+
+  await post('/settings', { cost: { slowMs: 50, timingWindow: 9, trustSamples: 4, bigTableRows: 5000 } })
+  const savedCost = await get('/tools')
+  check(
+    'cost thresholds are saved',
+    savedCost.body?.cost?.slowMs === 50 &&
+      savedCost.body?.cost?.timingWindow === 9 &&
+      savedCost.body?.cost?.trustSamples === 4 &&
+      savedCost.body?.cost?.bigTableRows === 5000,
+    JSON.stringify(savedCost.body?.cost),
+  )
+  const costOnDisk = JSON.parse(await readFile(join(dir, 'settings.json'), 'utf8'))
+  check(
+    'cost thresholds land in the same settings file',
+    costOnDisk?.cost?.slowMs === 50 && costOnDisk?.cost?.bigTableRows === 5000,
+    JSON.stringify(costOnDisk?.cost),
+  )
+
+  await post('/settings', { cost: { slowMs: 0, timingWindow: 999, trustSamples: 'x', bigTableRows: true } })
+  const clampedCost = await get('/tools')
+  check(
+    'out of range cost thresholds fall back to the defaults',
+    clampedCost.body?.cost?.slowMs === 200 &&
+      clampedCost.body?.cost?.timingWindow === 5 &&
+      clampedCost.body?.cost?.trustSamples === 3 &&
+      clampedCost.body?.cost?.bigTableRows === 1000000,
+    JSON.stringify(clampedCost.body?.cost),
+  )
+
+  await post('/settings', { cost: { slowMs: 50 } })
+  const partialCost = await get('/tools')
+  check(
+    'a partial cost patch keeps the other three',
+    partialCost.body?.cost?.slowMs === 50 && partialCost.body?.cost?.timingWindow === 5,
+    JSON.stringify(partialCost.body?.cost),
+  )
+
   const limitTools = (limits.body?.tools || []).filter((tool) => tool.limit)
   check(
     'row-limited tools advertise their range',
