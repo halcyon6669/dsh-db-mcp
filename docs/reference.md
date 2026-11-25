@@ -39,12 +39,12 @@ are `GET`; every mutation is `POST` (the same-origin check compares `Origin` wit
 | `GET /relations?datasource=…[&status=…][&source=…]` | the relation graph of one datasource: every edge with its endpoints, source, status, condition, counters and history, plus `counts` over the whole graph (the filter never shrinks the counters) |
 | `POST /relations/discover` | import the foreign keys the catalog declares (`{ datasource, schema? }`) |
 | `POST /relations/propose` | record a join the catalog does not declare (`{ from_table, from_column, to_table, to_column, datasource?, condition?, note? }`); it starts out `pending` |
-| `POST /relations/feedback` | move one edge (`{ edge_id, verdict, reason?, note?, datasource?, fanout? }`); `verdict` is `ok`, `too_many`, `missing` or `irrelevant` |
+| `POST /relations/feedback` | move one edge (`{ edge_id, verdict, reason?, note?, datasource?, fanout?, ms? }`); `verdict` is `ok`, `too_many`, `missing` or `irrelevant` |
 | `POST /relations/condition` | attach or clear the extra predicate a join needs (`{ edge_id, condition, datasource? }`; an empty condition clears it) |
 | `POST /relations/delete` | remove one edge (`{ edge_id, datasource? }`) |
 | `POST /relations/mine` | mine joins out of the audit log (`{ datasource?, schema?, limit? }`) |
 | `POST /relations/scan` | mine joins out of a project's source tree (`{ root, datasource?, schema?, limit? }`) |
-| `POST /trace` | follow one value across tables (`{ value, datasource?, entry_table?, entry_column?, max_depth?, max_rows_per_table?, direction? }`) — a read-only walk, never a SQL entry point |
+| `POST /trace` | follow one value across tables (`{ value, datasource?, entry_table?, entry_column?, max_depth?, max_rows_per_table?, direction?, confirm_slow? }`) — a read-only walk, never a SQL entry point; `confirm_slow` allows a step that would scan a whole table |
 | `POST /mcp/call` | dev helper: call one MCP tool through the panel |
 | `POST /reload` | dev helper: re-import `src/host.js` without restarting DSH |
 
@@ -107,15 +107,15 @@ memory before `max_rows` trims it; writes keep the ordinary cursor.
 | `list_datasources` | — | `[{ id, name, kind, target, readOnly, isDefault }]` |
 | `list_tables` | `datasource?`, `schema?` | `{ datasource, tables: [{ schema, name, type }], schemas: [string] }` |
 | `describe_table` | `table`, `datasource?`, `schema?` | `{ columns: [{ name, type, nullable, default, primaryKey, comment? }], primaryKey, indexes, comment, rowEstimate }` |
-| `list_edges` | `datasource?`, `status?`, `source?` | `{ edges: [{ id, from, to, source, status, condition, note, stats, createdAt, updatedAt }], counts, total, truncated }` |
-| `propose_relation` | `from_table`, `from_column`, `to_table`, `to_column`, `datasource?`, `condition?`, `note?` | `{ edge, created, reopened }` — the edge starts as `pending` |
+| `list_edges` | `datasource?`, `status?`, `source?` | `{ edges: [{ id, from, to, source, status, condition, note, stats, cost, createdAt, updatedAt }], counts, total, truncated }` |
+| `propose_relation` | `from_table`, `from_column`, `to_table`, `to_column`, `datasource?`, `condition?`, `note?` | `{ edge, cost, created, reopened }` — the edge starts as `pending`; `cost` reads the target column's index and the table's row estimate |
 | `discover_relations` | `datasource?`, `schema?` | `{ imported, updated, skipped, edges, counts }` — imports the declared foreign keys into the graph |
 | `mine_relations` | `datasource?`, `schema?`, `limit=20` | `{ mined, ambiguous, imported, updated, skipped, edges, counts }` — mines joins out of the audit log; see below |
 | `scan_code_relations` | `root`, `datasource?`, `schema?`, `limit=20` | `{ root, scanned, mined, ambiguous, imported, updated, skipped, edges, counts }` — mines joins out of a project's mapper XML, `@Select`-style annotations and MyBatis-Plus fragments; see below |
-| `feedback_relation` | `edge_id`, `verdict`, `reason?`, `note?`, `datasource?`, `fanout?` | `{ edge, previousStatus, indexed, unique }` — `verdict` is `ok`, `too_many`, `missing` or `irrelevant`; see below |
+| `feedback_relation` | `edge_id`, `verdict`, `reason?`, `note?`, `datasource?`, `fanout?`, `ms?` | `{ edge, cost, previousStatus, indexed, unique }` — `verdict` is `ok`, `too_many`, `missing` or `irrelevant`; `ms` records how long this step took; see below |
 | `set_relation_condition` | `edge_id`, `condition?`, `datasource?` | `{ edge, changed }` — an empty `condition` clears it |
 | `delete_edge` | `edge_id`, `datasource?` | `{ deleted, counts }` |
-| `trace_by_key` | `value`, `datasource?`, `entry_table?`, `entry_column?`, `max_depth=3`, `max_rows_per_table=20`, `direction=both` | `{ value, direction, elapsedMs, entry, summary, steps, pending, warnings, stoppedAt }` — walks only `confirmed` and `trusted` edges; see below |
+| `trace_by_key` | `value`, `datasource?`, `entry_table?`, `entry_column?`, `max_depth=3`, `max_rows_per_table=20`, `direction=both`, `confirm_slow=false` | `{ value, direction, elapsedMs, entry, summary, steps, pending, warnings, stoppedAt }` — walks only `confirmed` and `trusted` edges; `confirm_slow` allows a step that would scan a whole table; see below |
 | `sample_rows` | `table`, `datasource?`, `limit=20`, `schema?` | `{ columns, rows, rowCount, truncated }` |
 | `execute_sql` | `sql`, `datasource?`, `max_rows?`, `full_text?` | `{ columns, rows, rowCount, truncated, elapsedMs }`, or `{ affectedRows }` for a write |
 | `explain_query` | `sql`, `datasource?` | `{ sql, plan }` (engine-specific text) |
@@ -251,7 +251,12 @@ The Python child owns these files; the panel never writes them, it asks a tool.
       "status": "confirmed",
       "condition": null,
       "note": "t_trans_order_id_fkey",
-      "stats": { "confirmCount": 8, "rejectCount": 0, "lastVerifiedAt": "…", "avgFanout": 1.0, "hitCount": 8 },
+      "stats": {
+        "confirmCount": 8, "rejectCount": 0, "lastVerifiedAt": "…",
+        "avgFanout": 1.0, "hitCount": 8,
+        "indexed": true, "unique": true, "rowEstimate": 1200,
+        "timings": [12, 9, 14, 11, 10], "lastMs": 10, "avgMs": 11.2
+      },
       "history": [{ "at": "…", "action": "created", "by": "agent", "note": null }],
       "createdAt": "…",
       "updatedAt": "…"
@@ -268,6 +273,17 @@ at. `source` is `fk` (imported from the catalog by `discover_relations`), `manua
 (`when status = 'POSTED'`). `history` keeps the last 50 actions. A missing file is
 an empty graph, not an error; a corrupt one is reported rather than reset, because
 resetting would throw away joins somebody confirmed by hand.
+
+`stats` also carries what the edge costs, and every edge is returned with a `cost`
+object holding the same values: `indexed` (is the target column the leading column
+of an index or a single-column primary key — `null` when the catalog could not be
+read), `unique`, `rowEstimate` (the engine's own estimate: `pg_class.reltuples` for
+PostgreSQL and openGauss, `information_schema.TABLES.TABLE_ROWS` for MySQL,
+`ALL_TABLES.NUM_ROWS` for Oracle — never a `count(*)`), `timings` (the last five
+measured step durations in milliseconds),
+`lastMs`, `avgMs`, and `needsConfirm`.
+`propose_relation` and `feedback_relation` fill `indexed` / `rowEstimate` from the
+catalog; every trace adds the step durations it measured to `timings`.
 
 ### How `trace_by_key` walks
 
@@ -294,6 +310,15 @@ connect". It starts at one column, then follows graph edges one hop at a time:
   breaks there. `warnings` carries `no_edges`, `no_entry`, `probe_timeout`,
   `probe_failed`, `step_failed`, `depth_limit`, and `step_limit`; `stoppedAt` names
   the table and reason for each dead end.
+- **A full scan asks first.** A join whose target column has no index and whose
+  table the catalog estimates at a million rows or more is not run: the step comes
+  back as `status: "needs_confirm"` with `sql` empty, `rows: 0`, and the cost it
+  would pay, and `summary.needsConfirm` counts them. Run the trace again with
+  `confirm_slow: true` to allow it. An unknown row estimate or an unknown index
+  never blocks — a catalog that cannot be read must not freeze the walk.
+- **Every step is timed.** Each step reports `ms`, and a finished trace writes the
+  durations of the steps it actually ran onto their edges, where `lastMs` / `avgMs`
+  keep the last five measured durations.
 
 ### How an edge earns trust
 
@@ -308,11 +333,13 @@ the verdict decides what happens next:
 | `irrelevant` | — | `rejected` | blacklisted; only proposing it again lifts it |
 
 `trusted` is recomputed on every `ok`, never latched, and needs all four: three
-confirmations, no rejection left standing, an indexed or unique reference column
-(read from the catalog, not from the caller), and an average fanout of 5 or less.
-An edge whose fanout later grows, or whose reference column turns out not to be
-indexed, falls back to `confirmed` — which still walks, but stays visible as
-something a person vouched for rather than something measured.
+confirmations, no rejection left standing, an average fanout of 5 or less, and the
+last few measured steps all faster than the slow threshold (200ms) — at least three
+of them, so an edge nobody timed cannot be trusted. An index is a bonus, not a
+condition: an unindexed column that is genuinely fast earns trust all the same. An
+edge whose fanout later grows, or whose steps slow down, falls back to `confirmed` —
+which still walks, but stays visible as something a person vouched for rather than
+something measured.
 
 A `stale` edge returns to `pending` when it is proposed again or when
 `discover_relations` finds its key in the catalog; the next trace then has to earn

@@ -230,12 +230,13 @@
 | FR-MCP-6 | `explain_query` | 执行计划，按方言降级（Oracle 用 `EXPLAIN PLAN`，MySQL/PG 用 `EXPLAIN`） | P2 |
 | FR-MCP-7 | `get_ddl` | 取建表语句（0.6.0 加入） | P1 |
 | FR-MCP-7b | `list_edges` / `propose_relation` / `discover_relations` | 关系图：唯一的「什么连什么」来源。`discover_relations` 把目录里声明的外键导进图，`propose_relation` 记下目录没声明的 join，`list_edges` 列出全部边与状态 | P1 |
-| FR-MCP-7c | `trace_by_key` | 按值追踪：从一个值出发，沿**已确认**的边跨表走，逐步报告表、条件、SQL、命中行数与边来源；未确认的边只提示不跟随 | P1 |
-| FR-MCP-7d | `feedback_relation` / `set_relation_condition` / `delete_edge` | 边的状态机：`ok` 确认（三次 + 无拒绝 + 有索引或唯一 + 扇出≤5 → `trusted`），`too_many`/`missing` 降为 `stale`，`irrelevant` 进黑名单；条件增删与删除边 | P1 |
-| FR-MCP-7e | 面板「关系图」页 | 数据源级边列表：状态角标、来源、确认次数与扇出；筛选 全部/待确认/已确认/已失效；按状态给出确认、带原因拒绝、加条件、重新打开、删除；已确认/自动信任的边可展开看确认记录。面板只调关系图工具，不接受 SQL | P1 |
-| FR-MCP-7f | 面板「追踪」页 | 只收一个**值**（可选入口表/列与方向），SQL 由服务端按关系图拼装并参数绑定；逐步展示序号、表、条件与绑定值、命中行数、关键列样例、边状态与扇出；断链/截断/警告/中断位置单独列出；每步可做四选一反馈（对 / 多了+原因 / 漏了 / 无关）并回写对应边。未跟随的 pending 边单列并指回关系图页 | P1 |
+| FR-MCP-7c | `trace_by_key` | 按值追踪：从一个值出发，沿**已确认**的边跨表走，逐步报告表、条件、SQL、命中行数、耗时与边来源；未确认的边只提示不跟随。「目标列无索引且表估计 ≥100 万行」的步骤不执行，返回 `needs_confirm` 并等 `confirm_slow`；行数或索引未知时不拦 | P1 |
+| FR-MCP-7d | `feedback_relation` / `set_relation_condition` / `delete_edge` | 边的状态机：`ok` 确认（三次 + 无拒绝 + 扇出≤5 + 最近至少三次实测都 <200ms → `trusted`；索引只是加分项），`too_many`/`missing` 降为 `stale`，`irrelevant` 进黑名单；条件增删与删除边 | P1 |
+| FR-MCP-7e | 面板「关系图」页 | 数据源级边列表：状态角标、来源、确认次数、扇出、目标列有无索引、平均每步耗时；筛选 全部/待确认/已确认/已失效；按状态给出确认、带原因拒绝、加条件、重新打开、删除；已确认/自动信任的边可展开看确认记录。面板只调关系图工具，不接受 SQL | P1 |
+| FR-MCP-7f | 面板「追踪」页 | 只收一个**值**（可选入口表/列与方向），SQL 由服务端按关系图拼装并参数绑定；逐步展示序号、表、条件与绑定值、命中行数、耗时、关键列样例、边状态与扇出；断链/截断/警告/中断位置单独列出；`needs_confirm` 步骤给「仍然执行」按钮（带 `confirm_slow` 重跑）；每步可做四选一反馈（对 / 多了+原因 / 漏了 / 无关）并回写对应边。未跟随的 pending 边单列并指回关系图页 | P1 |
 | FR-MCP-7g | `mine_relations` | 从审计日志挖掘 join：只读 `execute_sql`/`explain_query` 的语句，解析 `on` 等值对；父子方向由目录定（唯一/主键侧为父），判不出方向的进 `ambiguous` 不入图；导入为 `pending` + `audit_mined`，来源强弱 `fk > manual > audit_mined > inferred` 只升不降 | P1 |
 | FR-MCP-7h | `scan_code_relations` | 从 Spring Boot 源码树挖掘 join：只读 mapper XML 的 `select/insert/update/delete/sql`、`@Select/@Insert/@Update/@Delete`、MyBatis-Plus 的 `apply/last/inSql/exists/notExists/having` 片段，其余字符串字面量一律不读；跳过 `build`/`target`/`.git` 等目录；方向与 ambiguous 规则同上；每条边记 `file:line`；只读文件、不执行任何语句 | P1 |
+| FR-MCP-7i | 边的代价 | 每条边记目标列有无索引、表行数估计（PG/openGauss `pg_class.reltuples`、MySQL `information_schema.TABLES.TABLE_ROWS`、Oracle `ALL_TABLES.NUM_ROWS`，不跑 `count(*)`）与最近五次实测耗时；`propose_relation`/`feedback_relation` 从目录补索引与行数，每次追踪回写各步耗时；只把单列主键与索引首列算「有索引」 | P1 |
 | FR-MCP-8 | `test_connection` | 用保存的源或内联连接串做一次真实登录探测 | P0 |
 | FR-MCP-9 | `session_scope` | **Host 侧原生工具**（非 MCP），限制本会话可见的数据源（0.9.0） | P1 |
 | FR-MCP-10 | instructions | 服务端说明：先看结构再查数、不要拼接用户输入、结果截断含义 | P1 |

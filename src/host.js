@@ -3433,6 +3433,7 @@ export function createHost(options = {}) {
           note: trimmed(payload.note) || undefined,
           datasource: trimmed(payload.datasource) || undefined,
           fanout: typeof payload.fanout === "number" ? payload.fanout : undefined,
+          ms: typeof payload.ms === "number" ? payload.ms : undefined,
         });
         return sendJson(response, result.status, result.body);
       }
@@ -3496,6 +3497,7 @@ export function createHost(options = {}) {
           max_rows_per_table:
             typeof payload.max_rows_per_table === "number" ? payload.max_rows_per_table : undefined,
           direction: trimmed(payload.direction) || undefined,
+          confirm_slow: payload.confirm_slow === true ? true : undefined,
         });
         return sendJson(response, result.status, result.body);
       }

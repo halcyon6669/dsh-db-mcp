@@ -1076,6 +1076,23 @@ check(
 check('graph page: an empty graph explains what to do next', /graph\.empty/.test(graphCard) && /graph\.emptyFiltered/.test(graphCard))
 check('graph page: the row border carries the status colour', /\.dbmcp-edge\.is-pending \{/.test(source) && /\.dbmcp-edge\.is-trusted \{/.test(source))
 
+/* The second line answers "what does this join cost me" before the reader has to
+   ask: whether the target column is indexed, how big the table is and how long a
+   step took last time. An edge whose cost was never measured keeps the line
+   readable instead of printing "undefined". */
+check(
+  'graph page: the evidence says whether the column is indexed',
+  /edgeIndexLabel\(cost\)/.test(graphCard) && /indexed === true/.test(graphCard),
+)
+check(
+  'graph page: an unmeasured edge still reads',
+  /graph\.indexUnknown/.test(source) && /graph\.indexYes/.test(source) && /graph\.indexNo/.test(source),
+)
+check(
+  'graph page: the evidence carries the row count and the step time',
+  /graph\.rows/.test(graphCard) && /graph\.avgMs/.test(graphCard) && /cost\.avgMs/.test(graphCard),
+)
+
 // Page B — the trace result. The page must take a value and nothing else that
 // could look like a statement, and every step must be judgeable.
 const traceCard = source.slice(source.indexOf('const traceCondition ='), source.indexOf('let body'))
@@ -1134,6 +1151,32 @@ check(
 )
 check('trace page: the value itself is never echoed back', !/traceValue\}/.test(traceCard))
 check('trace page: a datasource is required before anything is walked', /trace\.noSources/.test(source))
+
+/* A step that would scan a whole table is a question, not a result: it says why
+   it did not run and offers the one button that lets it run, which re-sends the
+   trace with confirm_slow. The panel itself can never set that flag any other
+   way — no input fields, no state, only that click. */
+check(
+  'trace page: a full scan is stopped before it runs',
+  /status === 'needs_confirm'/.test(traceCard) && /trace\.needsConfirm/.test(source),
+)
+check(
+  'trace page: the stopped step offers the one way to allow it',
+  /trace\.continueAnyway/.test(traceCard) && /runTrace\(true\)/.test(traceCard),
+)
+check(
+  'trace page: only that button sends confirm_slow',
+  /confirm_slow: confirmSlow === true \? true : undefined/.test(traceLogic) &&
+    (traceLogic.match(/confirm_slow/g) || []).length === 1,
+)
+check(
+  'trace page: each step reports how long it took',
+  /trace\.stepMs/.test(traceCard) && /step\.ms/.test(traceCard),
+)
+check(
+  'trace page: the summary counts the steps it refused',
+  /summary\.needsConfirm/.test(traceCard) && /trace\.needsConfirmSome/.test(source),
+)
 
 // the component's own header still took a min-height plus a bottom margin when
 // it rendered empty — about thirty pixels of nothing above the list.

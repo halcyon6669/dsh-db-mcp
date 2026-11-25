@@ -2346,8 +2346,11 @@ function groupTables(tables) {
         return fallback ? fallback.id : ''
       }, [traceSource, sources])
 
-      /** Follow one value; the panel never sends a statement, only a value. */
-      const runTrace = async () => {
+      /** Follow one value; the panel never sends a statement, only a value.
+       *
+       * `confirmSlow` is the user saying yes to a full table scan the previous
+       * run refused to pay for. Nothing else in the panel can set it. */
+      const runTrace = async (confirmSlow) => {
         const value = String(traceValue || '').trim()
         if (!value) {
           setTraceError(t('trace.needValue'))
@@ -2363,6 +2366,7 @@ function groupTables(tables) {
             entry_table: traceTable.trim() || undefined,
             entry_column: traceColumn.trim() || undefined,
             direction: traceDirection,
+            confirm_slow: confirmSlow === true ? true : undefined,
           })
           if (payload && payload.ok === false) {
             const failure = payload.error || {}
@@ -3513,6 +3517,12 @@ function groupTables(tables) {
         return typeof value === 'number' ? value.toFixed(1) : '—'
       }
 
+      /** What searching this edge's target column costs, as far as we know. */
+      const edgeCost = (edge) => (edge && edge.cost) || {}
+
+      const edgeIndexLabel = (cost) =>
+        cost.indexed === true ? t('graph.indexYes') : cost.indexed === false ? t('graph.indexNo') : t('graph.indexUnknown')
+
       const edgeMeta = (edge) => {
         const parts = [edgeSourceLabel(edge.source)]
         const confirmed = (edge.stats && edge.stats.confirmCount) || 0
@@ -3520,6 +3530,10 @@ function groupTables(tables) {
         const rejected = (edge.stats && edge.stats.rejectCount) || 0
         if (rejected) parts.push(fmt(t('graph.rejectedTimes'), { n: rejected }))
         parts.push(fmt(t('graph.fanout'), { value: edgeFanout(edge) }))
+        const cost = edgeCost(edge)
+        parts.push(edgeIndexLabel(cost))
+        if (typeof cost.rowEstimate === 'number') parts.push(fmt(t('graph.rows'), { n: cost.rowEstimate }))
+        if (typeof cost.avgMs === 'number') parts.push(fmt(t('graph.avgMs'), { ms: cost.avgMs }))
         return parts.join(' · ')
       }
 
@@ -3899,9 +3913,12 @@ function groupTables(tables) {
       const renderTraceStep = (step) => {
         const status = step.status || 'hit'
         const edge = step.edge || null
+        /* A step that was not run because it would scan a whole table reads as a
+         * question, not a result: no rows, no SQL, just what it would cost. */
+        const slow = status === 'needs_confirm'
         return h(
           'div',
-          { key: `${step.index}:${step.table}:${step.depth}`, className: `dbmcp-edge dbmcp-trace-step is-${status === 'empty' ? 'stale' : status === 'error' ? 'rejected' : 'confirmed'}` },
+          { key: `${step.index}:${step.table}:${step.depth}`, className: `dbmcp-edge dbmcp-trace-step is-${slow ? 'pending' : status === 'empty' ? 'stale' : status === 'error' ? 'rejected' : 'confirmed'}` },
           h(
             'div',
             { className: 'dbmcp-edge-head' },
@@ -3916,6 +3933,7 @@ function groupTables(tables) {
               'span',
               { className: 'dbmcp-inline' },
               step.truncated ? h('span', { className: 'dbmcp-pill dbmcp-trace-cut' }, t('trace.truncated')) : null,
+              slow ? h('span', { className: edgeStatusClass('pending') }, t('trace.needsConfirmChip')) : null,
               edge ? h('span', { className: edgeStatusClass(edge.status) }, edgeStatusLabel(edge.status)) : null,
             ),
           ),
@@ -3923,17 +3941,38 @@ function groupTables(tables) {
           h(
             'p',
             { className: 'dbmcp-hint dbmcp-edge-meta' },
-            status === 'empty'
-              ? t('trace.chainBreaks')
-              : status === 'error'
-                ? t('trace.stepFailed')
-                : fmt(t('trace.rows'), { n: step.rows }),
-            edge ? ` · ${edgeSourceLabel(edge.source)}` : '',
-            typeof step.fanout === 'number' ? ` · ${fmt(t('graph.fanout'), { value: step.fanout.toFixed(1) })}` : '',
+            slow
+              ? t('trace.needsConfirm')
+              : status === 'empty'
+                ? t('trace.chainBreaks')
+                : status === 'error'
+                  ? t('trace.stepFailed')
+                  : fmt(t('trace.rows'), { n: step.rows }),
+            slow ? '' : edge ? ` · ${edgeSourceLabel(edge.source)}` : '',
+            slow ? '' : typeof step.fanout === 'number' ? ` · ${fmt(t('graph.fanout'), { value: step.fanout.toFixed(1) })}` : '',
+            slow ? '' : typeof step.ms === 'number' ? ` · ${fmt(t('trace.stepMs'), { ms: step.ms })}` : '',
           ),
-          traceSample(step),
-          step.note ? h('p', { className: 'dbmcp-hint dbmcp-edge-why' }, step.note) : null,
-          traceStepActions(step),
+          slow
+            ? h(
+                'div',
+                { className: 'dbmcp-inline dbmcp-trace-judge' },
+                h(
+                  'button',
+                  {
+                    type: 'button',
+                    className: 'dbmcp-btn is-small',
+                    disabled: traceBusy,
+                    onClick: () => {
+                      void runTrace(true)
+                    },
+                  },
+                  t('trace.continueAnyway'),
+                ),
+              )
+            : null,
+          slow ? null : traceSample(step),
+          step.note && !slow ? h('p', { className: 'dbmcp-hint dbmcp-edge-why' }, step.note) : null,
+          slow ? null : traceStepActions(step),
         )
       }
 
@@ -4066,6 +4105,9 @@ function groupTables(tables) {
                     depth: summary.depthReached,
                   }),
                 ),
+                summary.needsConfirm
+                  ? h('p', { className: 'dbmcp-hint dbmcp-edge-why' }, fmt(t('trace.needsConfirmSome'), { n: summary.needsConfirm }))
+                  : null,
               )
             : null,
           steps.length > 0 ? h('div', { className: 'dbmcp-edges' }, steps.map(renderTraceStep)) : null,

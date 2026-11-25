@@ -36,6 +36,10 @@ SAMPLE_COLUMNS = 6
 WALK_STATUSES = ("confirmed", "trusted")
 DIRECTIONS = ("down", "up", "both")
 
+# The status a step carries when the walker stopped to ask instead of paying for
+# a full table scan. It is not an error and not a hit: nothing ran.
+NEEDS_CONFIRM = "needs_confirm"
+
 
 def _clamp(value, low: int, high: int, default: int) -> int:
     try:
@@ -67,6 +71,9 @@ def _edge_summary(edge: dict) -> dict:
         "status": edge.get("status"),
         "from": dict(edge.get("from") or {}),
         "to": dict(edge.get("to") or {}),
+        # The cost facts travel with every step, so the panel can label it without
+        # a second round trip.
+        "cost": relations.cost_of(edge),
     }
 
 
@@ -248,6 +255,7 @@ def trace(
     max_depth=3,
     max_rows_per_table=20,
     direction="both",
+    confirm_slow: bool = False,
 ) -> dict:
     """Follow one value across every confirmed join that touches it."""
     started = time.perf_counter()
@@ -311,6 +319,7 @@ def trace(
                 "rowsRead": 0,
                 "steps": 0,
                 "depthReached": 0,
+                "needsConfirm": 0,
             },
             "steps": [],
             "pending": [],
@@ -377,7 +386,53 @@ def trace(
                 extra = edge["condition"]
 
         info = describe(table)
+
+        # An unindexed column on a big table turns one hop into a full scan. That
+        # is a cost the operator should agree to, not one a trace spends on their
+        # behalf: stop here, say so, and let the panel run it again with
+        # `confirm_slow`. The step is reported rather than skipped, so the answer
+        # still shows where the walk wanted to go.
+        cost = relations.cost_of(edge) if edge is not None else {}
+        if not confirm_slow and cost.get("needsConfirm"):
+            steps.append(
+                {
+                    "index": len(steps) + 1,
+                    "depth": depth,
+                    "table": table,
+                    "schema": info.get("schema"),
+                    "condition": {
+                        "column": column,
+                        "operator": "in",
+                        "binds": list(fresh),
+                        "extra": extra,
+                    },
+                    "sql": "",
+                    "rows": 0,
+                    "truncated": False,
+                    "status": NEEDS_CONFIRM,
+                    "edge": _edge_summary(edge),
+                    "sample": {"columns": [], "rows": []},
+                    "fanout": None,
+                    "ms": 0,
+                    "note": "this step would scan the whole table",
+                    "cost": cost,
+                }
+            )
+            warnings.append(
+                {
+                    "code": "needs_confirm",
+                    "message": (
+                        f"{table}.{column} has no index and the table holds about "
+                        f"{cost.get('rowEstimate')} rows — that step is a full scan. "
+                        "Run the trace again with confirm_slow to allow it."
+                    ),
+                }
+            )
+            stopped.append({"table": table, "reason": "a full table scan needs confirmation"})
+            continue
+
         failure = None
+        step_started = time.perf_counter()
         try:
             found = engines.fetch_matching(
                 profile,
@@ -427,6 +482,7 @@ def trace(
                     "message": f"{table}.{column}: {failure}",
                 }
             )
+        step_ms = int((time.perf_counter() - step_started) * 1000)
 
         rows = found["rows"]
         visited_tables.add(_fold(table))
@@ -462,6 +518,7 @@ def trace(
             "edge": _edge_summary(edge) if edge else None,
             "sample": _sample(found["columns"], rows, info.get("primaryKey"), column),
             "fanout": fanout,
+            "ms": step_ms,
             "note": None,
         }
         if status == "empty":
@@ -521,6 +578,19 @@ def trace(
             }
         )
 
+    # Every step that measured something is reported back to the graph, so the
+    # cost of an edge comes from traces that actually happened instead of from a
+    # separate bookkeeping call nobody makes.
+    measured = {
+        step["edge"]["id"]: step["ms"]
+        for step in steps
+        if step.get("edge") and step.get("edge", {}).get("id") and step.get("status") in ("hit", "empty")
+    }
+    try:
+        relations.note_timings(profile, measured)
+    except store.StoreError:
+        pass
+
     # Pending edges are reported, not followed: they are the next thing the
     # caller can turn on, and silently ignoring them looks like a missing join.
     hints = []
@@ -555,6 +625,7 @@ def trace(
             "rowsRead": rows_read,
             "steps": len(steps),
             "depthReached": depth_reached,
+            "needsConfirm": sum(1 for step in steps if step.get("status") == NEEDS_CONFIRM),
         },
         "steps": steps,
         "pending": hints,

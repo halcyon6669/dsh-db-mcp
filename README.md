@@ -162,7 +162,8 @@ carries a status, and `trace_by_key` only walks the ones you have confirmed, so 
 guess never silently becomes a fact.
 
 The **Relations** tab shows that graph per data source: the join path, a status chip,
-where the edge came from, and how many times it was confirmed. Pending edges can be
+where the edge came from, how many times it was confirmed, whether the target column
+is indexed, and what a step through it costs on average. Pending edges can be
 confirmed, rejected with a reason, or given a condition; a stale edge shows what
 failed and offers a re-check; a rejected edge can be re-opened. Confirmed and trusted
 edges keep their confirmation record, so nothing is a black box. Two buttons fill
@@ -170,11 +171,13 @@ the graph: **Import foreign keys** reads the catalog, **Mine the log** reads the
 statements already audited.
 
 The **Trace** tab takes one value and shows the walk: each step's table, condition,
-row count, a few sample cells, and the edge that carried it there. Steps where the
-chain broke, was capped, or produced a warning are marked as such, and every step can
-be judged right / too many (with a reason) / missing / unrelated — which feeds the
-edge behind it. Neither page accepts SQL; the statements come from the graph and are
-bound server-side.
+row count, how long it took, a few sample cells, and the edge that carried it there.
+Steps where the chain broke, was capped, or produced a warning are marked as such,
+and every step can be judged right / too many (with a reason) / missing / unrelated —
+which feeds the edge behind it. A join whose target column has no index and whose
+table looks large is not run: that step comes back asking whether to scan the whole
+table, and **Run it anyway** re-runs the trace with `confirm_slow`. Neither page
+accepts SQL; the statements come from the graph and are bound server-side.
 
 ## Safety
 

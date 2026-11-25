@@ -562,9 +562,32 @@ class FeedbackReadsTheCatalog(unittest.TestCase):
     def test_three_confirmations_earn_trust(self):
         edge = main.propose_relation("t_trans", "order_id", "t_order", "id")["edge"]
         for _ in range(3):
-            payload = main.feedback_relation(edge["id"], "ok", fanout=2)
+            payload = main.feedback_relation(edge["id"], "ok", fanout=2, ms=20)
             self.assertTrue(payload["ok"], payload)
         self.assertEqual(payload["edge"]["status"], "trusted")
+        self.assertEqual(payload["edge"]["stats"]["lastMs"], 20)
+        self.assertEqual(payload["edge"]["stats"]["avgMs"], 20.0)
+
+    def test_a_confirmation_without_a_measurement_stays_confirmed(self):
+        edge = main.propose_relation("t_trans", "order_id", "t_order", "id")["edge"]
+        for _ in range(4):
+            payload = main.feedback_relation(edge["id"], "ok", fanout=2)
+            self.assertTrue(payload["ok"], payload)
+        self.assertEqual(payload["edge"]["status"], "confirmed")
+
+    def test_the_proposal_carries_the_cost_of_the_target_column(self):
+        payload = main.propose_relation("t_trans", "order_id", "t_order", "id")
+        self.assertTrue(payload["ok"], payload)
+        self.assertIs(payload["cost"]["indexed"], True, "t_order.id is the primary key")
+        self.assertIs(payload["cost"]["needsConfirm"], False)
+        self.assertEqual(payload["edge"]["stats"]["indexed"], True)
+
+    def test_the_feedback_records_the_measurement(self):
+        edge = main.propose_relation("t_trans", "order_id", "t_order", "id")["edge"]
+        payload = main.feedback_relation(edge["id"], "ok", fanout=1, ms=42)
+        self.assertTrue(payload["ok"], payload)
+        self.assertEqual(payload["cost"]["avgMs"], 42.0)
+        self.assertEqual(payload["cost"]["lastMs"], 42)
 
     def test_an_unreachable_database_leaves_the_hints_unknown(self):
         # The verdict still stands: a broken connection must not swallow it.

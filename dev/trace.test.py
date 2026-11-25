@@ -381,6 +381,80 @@ class TraceOnARealDatabase(unittest.TestCase):
         empty = [step for step in result["steps"] if step["status"] == "empty"][0]
         self.assertEqual(empty["sample"], {"columns": [], "rows": []})
 
+    # -- the cost of a step ------------------------------------------------
+
+    def _costly(self, indexed=False, rows=5_000_000):
+        """Put a cost fact on the trans→order edge: an unindexed big target."""
+        doc = relations.load(self.profile)
+        edge = next(item for item in doc["edges"] if item["to"]["table"] == "t_order")
+        edge["stats"]["indexed"] = indexed
+        edge["stats"]["rowEstimate"] = rows
+        relations.save(self.profile, doc)
+        return edge["id"]
+
+    def test_a_full_scan_is_not_run_without_permission(self):
+        self._chain()
+        edge_id = self._costly()
+        result = self._trace("10", entry_table="t_trans", entry_column="id", direction="up")
+        statuses = [(step["table"], step["status"]) for step in result["steps"]]
+        self.assertEqual(statuses[0], ("t_trans", "hit"))
+        self.assertEqual(statuses[1], ("t_order", "needs_confirm"), "the scan is asked about, not paid for")
+        self.assertEqual(result["summary"]["needsConfirm"], 1)
+        self.assertIn("needs_confirm", [warning["code"] for warning in result["warnings"]])
+        self.assertEqual(result["stoppedAt"][0]["table"], "t_order")
+
+    def test_the_stopped_step_carries_no_rows_and_no_statement(self):
+        self._chain()
+        self._costly()
+        result = self._trace("10", entry_table="t_trans", entry_column="id", direction="up")
+        stopped = [step for step in result["steps"] if step["status"] == "needs_confirm"][0]
+        self.assertEqual(stopped["rows"], 0)
+        self.assertEqual(stopped["sql"], "", "nothing ran, so there is no statement to report")
+        self.assertEqual(stopped["sample"], {"columns": [], "rows": []})
+        self.assertEqual(stopped["cost"]["rowEstimate"], 5_000_000)
+        self.assertEqual([str(item) for item in stopped["condition"]["binds"]], ["1"], "the parent id the walk arrived with")
+
+    def test_confirm_slow_runs_the_scan(self):
+        self._chain()
+        self._costly()
+        result = self._trace("10", entry_table="t_trans", entry_column="id", direction="up", confirm_slow=True)
+        statuses = [(step["table"], step["status"]) for step in result["steps"]]
+        self.assertEqual(statuses[1], ("t_order", "hit"))
+        self.assertEqual(result["summary"]["needsConfirm"], 0)
+        self.assertNotIn("needs_confirm", [warning["code"] for warning in result["warnings"]])
+
+    def test_an_indexed_big_table_is_not_asked_about(self):
+        self._chain()
+        self._costly(indexed=True)
+        result = self._trace("10", entry_table="t_trans", entry_column="id", direction="up")
+        self.assertNotIn("needs_confirm", [step["status"] for step in result["steps"]])
+        self.assertEqual(result["summary"]["needsConfirm"], 0)
+
+    def test_a_small_unindexed_table_is_not_asked_about(self):
+        self._chain()
+        self._costly(indexed=False, rows=90)
+        result = self._trace("10", entry_table="t_trans", entry_column="id", direction="up")
+        self.assertNotIn("needs_confirm", [step["status"] for step in result["steps"]])
+
+    def test_each_step_reports_how_long_it_took(self):
+        self._chain()
+        result = self._trace("1", entry_table="t_order", entry_column="id", direction="down")
+        for step in result["steps"]:
+            self.assertIsInstance(step["ms"], int)
+            self.assertGreaterEqual(step["ms"], 0)
+
+    def test_a_trace_stores_its_timings_on_the_edge(self):
+        self._chain()
+        result = self._trace("1", entry_table="t_order", entry_column="id", direction="down")
+        walked = [step for step in result["steps"] if step.get("edge") and step["status"] in ("hit", "empty")]
+        self.assertTrue(walked, "the walk has to travel an edge for a timing to land somewhere")
+        listed = {edge["id"]: edge for edge in relations.list_edges(self.profile)["edges"]}
+        for step in walked:
+            stats = listed[step["edge"]["id"]]["stats"]
+            self.assertTrue(stats["timings"], f"{step['table']} left no timing")
+            self.assertEqual(stats["lastMs"], step["ms"])
+            self.assertIsInstance(stats["avgMs"], float)
+
 
 class TraceShape(unittest.TestCase):
     """The reply shape a panel and a model both read."""
@@ -421,7 +495,10 @@ class TraceShape(unittest.TestCase):
             set(result),
             {"value", "direction", "elapsedMs", "entry", "summary", "steps", "pending", "warnings", "stoppedAt"},
         )
-        self.assertEqual(set(result["summary"]), {"tablesHit", "tablesVisited", "rowsRead", "steps", "depthReached"})
+        self.assertEqual(
+            set(result["summary"]),
+            {"tablesHit", "tablesVisited", "rowsRead", "steps", "depthReached", "needsConfirm"},
+        )
         self.assertIn("no_edges", [warning["code"] for warning in result["warnings"]])
 
     def test_the_clamps_are_applied(self):

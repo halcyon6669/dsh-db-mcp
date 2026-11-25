@@ -1582,6 +1582,36 @@ def describe_table(profile: dict, connection, table: str, schema: str | None) ->
 # relations
 
 
+def column_cost(profile: dict, connection, table: str, column: str, schema: str | None = None) -> dict:
+    """What searching one column costs: is it indexed, and how big is its table.
+
+    `indexed` means the column can lead a lookup. Only the first column of an
+    index serves a value match, so a column buried inside a composite index does
+    not count — treating it as indexed is how a "fast" plan turns into a scan.
+
+    `rowEstimate` is the planner's number, never a count(*): the whole point of
+    the figure is to avoid paying for the scan it warns about. Either side may be
+    None when the catalog cannot answer, and the caller treats None as "unknown"
+    rather than "fine".
+    """
+    try:
+        info = describe_table(profile, connection, table, schema)
+    except DbError:
+        return {"indexed": None, "rowEstimate": None}
+    estimate = info.get("rowEstimate")
+    wanted = str(column or "").strip().casefold()
+    if not wanted:
+        return {"indexed": None, "rowEstimate": estimate}
+    indexed = wanted in [str(name).casefold() for name in info.get("primaryKey") or []]
+    if not indexed:
+        for index in info.get("indexes") or []:
+            columns = [str(part).casefold() for part in index.get("columns") or []]
+            if columns and columns[0] == wanted:
+                indexed = True
+                break
+    return {"indexed": indexed, "rowEstimate": estimate}
+
+
 def indexed_columns(profile: dict, connection, table: str, schema: str | None = None) -> set[str]:
     """The columns of one table that an index (or the primary key) can serve.
 

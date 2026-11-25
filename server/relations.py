@@ -38,12 +38,28 @@ EDGE_LIMIT = 500
 # Importing a weaker source over a stronger one would quietly throw away evidence.
 SOURCE_RANK = {"inferred": 0, "audit_mined": 1, "manual": 2, "fk": 3}
 
-# What it takes to stop asking the user about an edge. Three separate
-# confirmations, no rejection left standing, a reference column the engine
-# actually indexes (so a value cannot match several parents), and a fanout the
-# walker can live with.
+# What it takes to stop asking the user about an edge: three separate
+# confirmations, no rejection left standing, a fanout the walker can live with,
+# and a measured cost that is not going to make every later trace slow. An index
+# on the reference column is a bonus — it makes the edge cheap — but plenty of
+# correct joins sit on unindexed columns in small tables, so it is no longer a
+# hard requirement. Timing is what actually tells the two apart.
 TRUST_CONFIRMS = 3
 TRUST_FANOUT = 5.0
+
+# A step slower than this is the sort of thing that turns a trace into a coffee
+# break. The window keeps the most recent measurements, newest last.
+SLOW_MS = 200
+TIMING_WINDOW = 5
+# Trust is evaluated on real measurements, so a window of one lucky trace cannot
+# promote an edge; three samples is the least that says anything.
+TRUST_SAMPLES = 3
+
+# Above this many rows an unindexed column means a full table scan. The estimate
+# comes from the catalog (pg_class.reltuples, information_schema.TABLES.TABLE_ROWS,
+# ALL_TABLES.NUM_ROWS) — never a count(*), which would cost what it is trying to
+# avoid.
+BIG_TABLE_ROWS = 1_000_000
 
 VERDICTS = ("ok", "too_many", "missing", "irrelevant")
 TOO_MANY_REASONS = ("wrong_column", "needs_condition", "not_unique")
@@ -171,6 +187,11 @@ def _blank_edge(frm: dict, to: dict, source: str, note: str | None) -> dict:
             "lastVerifiedAt": None,
             "avgFanout": None,
             "hitCount": 0,
+            "indexed": None,
+            "rowEstimate": None,
+            "timings": [],
+            "lastMs": None,
+            "avgMs": None,
         },
         "history": [{"at": now, "action": "created", "by": "agent", "note": note}],
         "createdAt": now,
@@ -254,12 +275,38 @@ def list_edges(
     selected.sort(key=_sort_key)
     total = len(selected)
     cap = max(1, int(limit))
+    shown = selected[:cap]
     return {
-        "edges": selected[:cap],
+        # Every row carries its cost facts, so the panel can show "no index, ~4M
+        # rows, 820ms" without a second call per edge.
+        "edges": [dict(edge, cost=cost_of(edge)) for edge in shown],
         "counts": tally,
         "total": total,
         "truncated": total > cap,
     }
+
+
+def note_timings(profile: dict, measured: dict[str, float]) -> int:
+    """Fold the step durations of one trace into the edges they belong to.
+
+    A trace is the only place that sees how long a hop really took, so it reports
+    them back here rather than the operator having to file a verdict per step.
+    Edges that no longer exist are skipped; nothing else about the edge moves —
+    a timing is not a confirmation.
+    """
+    if not measured:
+        return 0
+    doc = load(profile)
+    touched = 0
+    for edge in doc["edges"]:
+        ms = measured.get(edge.get("id"))
+        if ms is None:
+            continue
+        _timed(_stats_of(edge), ms)
+        touched += 1
+    if touched:
+        save(profile, doc)
+    return touched
 
 
 def propose(
@@ -271,12 +318,19 @@ def propose(
     condition: str | None = None,
     note: str | None = None,
     source: str = "manual",
+    indexed: bool | None = None,
+    row_estimate: int | None = None,
 ) -> dict:
     """Add or update one hand-specified edge; it starts out `pending`.
 
     Proposing an edge that a previous round rejected reopens it: asking again is
     an explicit statement that the earlier verdict no longer applies, and a
     blacklist nobody can get out of is worse than one that can be re-argued.
+
+    `indexed` and `row_estimate` describe the referenced column. The caller reads
+    them from the catalog when it can; a proposal made without a connection leaves
+    both unknown, and the edge is simply not eligible for the "needs a full scan"
+    warning until a trace fills them in.
     """
     frm = _endpoint(from_table, from_column, "from")
     to = _endpoint(to_table, to_column, "to")
@@ -286,8 +340,16 @@ def propose(
     wanted = edge_id(frm, to)
     for edge in doc["edges"]:
         if edge.get("id") == wanted:
+            stats = _stats_of(edge)
             changed = False
             reopened = False
+            if isinstance(indexed, bool) and stats.get("indexed") != indexed:
+                stats["indexed"] = indexed
+                changed = True
+            if isinstance(row_estimate, (int, float)) and not isinstance(row_estimate, bool):
+                if stats.get("rowEstimate") != int(row_estimate):
+                    stats["rowEstimate"] = int(row_estimate)
+                    changed = True
             if condition is not None and edge.get("condition") != (condition or None):
                 edge["condition"] = condition or None
                 changed = True
@@ -296,7 +358,7 @@ def propose(
                 changed = True
             if edge.get("status") == "rejected":
                 edge["status"] = "pending"
-                edge["stats"]["rejectCount"] = 0
+                stats["rejectCount"] = 0
                 _record(edge, "reopened", note=note)
                 changed = True
                 reopened = True
@@ -306,7 +368,7 @@ def propose(
                 # the condition it was missing. It goes back to pending, so the
                 # next trace has to earn its confirmation again.
                 edge["status"] = "pending"
-                edge["stats"]["rejectCount"] = 0
+                stats["rejectCount"] = 0
                 _record(edge, "reopened", note=note)
                 changed = True
                 reopened = True
@@ -316,11 +378,35 @@ def propose(
                 save(profile, doc)
             return {"edge": edge, "created": False, "reopened": reopened}
     edge = _blank_edge(frm, to, source, note)
+    stats = _stats_of(edge)
+    if isinstance(indexed, bool):
+        stats["indexed"] = indexed
+    if isinstance(row_estimate, (int, float)) and not isinstance(row_estimate, bool):
+        stats["rowEstimate"] = int(row_estimate)
     if condition:
         edge["condition"] = condition
     doc["edges"].append(edge)
     save(profile, doc)
     return {"edge": edge, "created": True, "reopened": False}
+
+
+def _carry_cost(edge: dict, row: dict) -> None:
+    """Copy whatever cost facts a discovery row happens to carry onto an edge.
+
+    Discovery normally knows nothing about indexes — it reads constraints, not
+    plans — so this is a no-op for most sources. It exists so a caller that does
+    have the figures (a scan that also described the table, say) does not need a
+    second write to record them.
+    """
+    indexed = row.get("indexed")
+    estimate = row.get("rowEstimate")
+    if not isinstance(indexed, bool) and not isinstance(estimate, (int, float)):
+        return
+    stats = _stats_of(edge)
+    if isinstance(indexed, bool):
+        stats["indexed"] = indexed
+    if isinstance(estimate, (int, float)) and not isinstance(estimate, bool):
+        stats["rowEstimate"] = int(estimate)
 
 
 def import_edges(profile: dict, found: list[dict], source: str = "fk") -> dict:
@@ -354,10 +440,14 @@ def import_edges(profile: dict, found: list[dict], source: str = "fk") -> dict:
             edge = _blank_edge(frm, to, source, None)
             edge["source"] = source
             edge["note"] = row.get("name") or None
+            _carry_cost(edge, row)
             doc["edges"].append(edge)
             by_id[wanted] = edge
             imported += 1
             continue
+        # A rediscovery can still tell us something new about cost, even when it
+        # changes nothing else about the edge.
+        _carry_cost(edge, row)
         current = edge.get("source") if edge.get("source") in SOURCE_RANK else "inferred"
         if edge.get("status") == "stale":
             edge["status"] = "pending"
@@ -380,7 +470,7 @@ def import_edges(profile: dict, found: list[dict], source: str = "fk") -> dict:
         "imported": imported,
         "updated": updated,
         "skipped": skipped,
-        "edges": edges,
+        "edges": [dict(edge, cost=cost_of(edge)) for edge in edges],
         "counts": counts(edges),
     }
 
@@ -397,25 +487,91 @@ def _stats_of(edge: dict) -> dict:
     stats.setdefault("avgFanout", None)
     stats.setdefault("hitCount", 0)
     stats.setdefault("lastFailure", None)
+    stats.setdefault("indexed", None)
+    stats.setdefault("unique", None)
+    stats.setdefault("rowEstimate", None)
+    if not isinstance(stats.get("timings"), list):
+        stats["timings"] = []
+    stats.setdefault("lastMs", None)
+    stats.setdefault("avgMs", None)
     return stats
 
 
-def _earns_trust(stats: dict, indexed: bool | None, unique: bool | None) -> bool:
+def _timed(stats: dict, ms) -> None:
+    """Record one measured step duration and refresh the running figures.
+
+    Only the last `TIMING_WINDOW` samples are kept: an edge is as expensive as it
+    is now, and an average dragged down by a year of fast traces would hide the
+    query that started doing a full scan yesterday.
+    """
+    if not isinstance(ms, (int, float)) or isinstance(ms, bool):
+        return
+    window = TIMING_WINDOW
+    value = max(0, int(round(float(ms))))
+    timings = stats.get("timings")
+    if not isinstance(timings, list):
+        timings = []
+        stats["timings"] = timings
+    timings.append(value)
+    del timings[:-window]
+    # `lastMs` and `avgMs` are projections of `timings`, kept alongside so the
+    # panel and the trust rule do not each re-derive them from the list.
+    stats["lastMs"] = value
+    stats["avgMs"] = round(sum(timings) / len(timings), 1)
+
+
+def _earns_trust(stats: dict) -> bool:
     """Whether an edge has earned the right to be walked without asking again.
 
-    All four have to hold, and the two the graph cannot know on its own
-    (`indexed`, `unique`) must be reported as true by the caller — an unknown
-    answer keeps the edge at `confirmed`, which still walks but stays visible as
-    something a person vouched for rather than something measured.
+    All four have to hold, and none of them is a guess about the schema: three
+    confirmations, no rejection left standing, a fanout the walker can absorb, and
+    a measured cost whose recent samples are all under the slow threshold.
+
+    An index is **not** required. It used to be, on the theory that only an
+    indexed reference column could be cheap — but that is the wrong question. A
+    correct join on an unindexed column of a 200-row table is faster than an
+    indexed one on a 20-million-row table, and only timing knows the difference.
+    The index and the row estimate are recorded and shown; they inform the
+    operator, they do not decide the badge.
     """
     fanout = stats.get("avgFanout")
-    return (
-        stats.get("confirmCount", 0) >= TRUST_CONFIRMS
-        and stats.get("rejectCount", 0) == 0
-        and bool(indexed or unique)
-        and isinstance(fanout, (int, float))
-        and float(fanout) <= TRUST_FANOUT
-    )
+    if not (stats.get("confirmCount", 0) >= TRUST_CONFIRMS and stats.get("rejectCount", 0) == 0):
+        return False
+    if not isinstance(fanout, (int, float)) or float(fanout) > TRUST_FANOUT:
+        return False
+    timings = stats.get("timings")
+    if not isinstance(timings, list) or len(timings) < TRUST_SAMPLES:
+        return False
+    return all(isinstance(sample, (int, float)) and float(sample) < SLOW_MS for sample in timings)
+
+
+def needs_confirm(stats: dict) -> bool:
+    """Whether walking this edge should ask before paying for a full scan.
+
+    True when the reference column has no index and the table is big enough that
+    a scan is not free. The answer for an unknown row estimate is "no": refusing
+    to walk a table whose size nobody can read would block the trace entirely,
+    which is worse than one slow step.
+    """
+    row_estimate = stats.get("rowEstimate")
+    if not isinstance(row_estimate, (int, float)):
+        return False
+    if float(row_estimate) < BIG_TABLE_ROWS:
+        return False
+    return stats.get("indexed") is False
+
+
+def cost_of(edge: dict) -> dict:
+    """The cost facts a caller — a tool, the panel — needs about one edge."""
+    stats = _stats_of(edge)
+    return {
+        "indexed": stats.get("indexed"),
+        "unique": stats.get("unique"),
+        "rowEstimate": stats.get("rowEstimate"),
+        "lastMs": stats.get("lastMs"),
+        "avgMs": stats.get("avgMs"),
+        "needsConfirm": needs_confirm(stats),
+    }
 
 
 def feedback(
@@ -427,6 +583,8 @@ def feedback(
     indexed: bool | None = None,
     unique: bool | None = None,
     fanout: float | None = None,
+    row_estimate: int | None = None,
+    ms: float | None = None,
 ) -> dict:
     """Record what one trace step showed, and move the edge accordingly.
 
@@ -438,8 +596,13 @@ def feedback(
     a fresh `propose_relation` can lift.
 
     Trust is recomputed on every `ok` rather than latched: an edge whose fanout
-    grew or whose reject count stopped being zero falls back to `confirmed`
-    instead of keeping a badge it no longer deserves.
+    grew, whose reject count stopped being zero, or whose recent steps got slow
+    falls back to `confirmed` instead of keeping a badge it no longer deserves.
+
+    `indexed` and `row_estimate` are the cost facts of the referenced column. They
+    are recorded on every call — including rejections, because when a join is wrong
+    the cost of the column it points at is still worth knowing — and they are what
+    the panel shows next to the edge.
     """
     wanted_verdict = str(verdict or "").strip().lower()
     if wanted_verdict not in VERDICTS:
@@ -460,13 +623,23 @@ def feedback(
     previous = edge.get("status")
     now = _now()
 
+    # The cost facts stand on their own: whether this verdict confirms the join or
+    # rejects it, what the column costs to search is true either way.
+    if isinstance(indexed, bool):
+        stats["indexed"] = indexed
+    if isinstance(unique, bool):
+        stats["unique"] = unique
+    if isinstance(row_estimate, (int, float)) and not isinstance(row_estimate, bool):
+        stats["rowEstimate"] = int(row_estimate)
+    _timed(stats, ms)
+
     if wanted_verdict == "ok":
         stats["confirmCount"] = int(stats.get("confirmCount") or 0) + 1
         stats["lastVerifiedAt"] = now
         stats["lastFailure"] = None
         if isinstance(fanout, (int, float)):
             stats["avgFanout"] = round(float(fanout), 2)
-        edge["status"] = "trusted" if _earns_trust(stats, indexed, unique) else "confirmed"
+        edge["status"] = "trusted" if _earns_trust(stats) else "confirmed"
         action = "confirmed" if edge["status"] == "confirmed" else "trusted"
         if previous != edge["status"]:
             _record(edge, action, note=note)

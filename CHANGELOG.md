@@ -21,6 +21,31 @@ report of each version in more detail.
 
 ## [Unreleased]
 
+### Added
+
+- **An edge now knows what it costs.** `propose_relation` and `feedback_relation`
+  read the target column's index and the table's row estimate from the catalogue
+  (`pg_class.reltuples`, `information_schema.TABLES.TABLE_ROWS`, `ALL_TABLES.NUM_ROWS`
+  — an estimate, never a `count(*)`), every trace records how long each step actually
+  took, and each edge keeps the last five durations with `lastMs` / `avgMs`. The
+  Relations tab shows whether the target column is indexed and the average step cost;
+  the Trace tab shows each step's `ms`.
+- **A full table scan asks before it runs.** A step whose target column has no index
+  and whose table the catalogue estimates at a million rows or more is not executed:
+  it comes back as `status: "needs_confirm"` with the statement omitted, and the Trace
+  tab offers **Run it anyway**, which re-runs the trace with `confirm_slow: true`.
+  An unknown row estimate or an unknown index never blocks a trace.
+- `feedback_relation` takes `ms`, so a confirmation made outside a trace still
+  carries its measurement.
+
+### Changed
+
+- **An index is no longer a condition for trust.** An edge becomes `trusted` after
+  three confirmations, with no rejection left standing, an average fanout of 5 or
+  less, and its recent steps all faster than 200ms — at least three measured ones, so
+  an edge nobody timed stays `confirmed`. An unindexed column that is genuinely fast
+  earns trust all the same, and an edge whose steps slow down falls back.
+
 ### Fixed
 
 - **A table outside `public` is found by name.** A datasource that does not pin a

@@ -444,9 +444,24 @@ def propose_relation(
     a soft-delete flag); it is kept with the edge so the walker can apply it.
     Proposing the same pair twice updates that one edge instead of adding a
     second, and reopens it if it had been rejected.
+
+    The edge records what searching the referenced column costs — whether an index
+    can serve it and roughly how many rows the table holds. That is what lets a
+    later trace warn instead of launching a full scan on a huge table. The figures
+    come from the catalog; when the datasource cannot be reached right now they are
+    left unknown, and a trace fills them in the first time it walks the edge.
     """
     try:
         profile, _secrets = store.resolve(datasource)
+        cost = {"indexed": None, "rowEstimate": None}
+        try:
+            _profile, (connection, close) = _open(datasource)
+            try:
+                cost = engines.column_cost(profile, connection, to_table, to_column)
+            finally:
+                close()
+        except Exception:  # noqa: BLE001 - the edge stands without the figures
+            cost = {"indexed": None, "rowEstimate": None}
         result = relations.propose(
             profile,
             from_table,
@@ -455,8 +470,10 @@ def propose_relation(
             to_column,
             condition=condition,
             note=note,
+            indexed=cost.get("indexed"),
+            row_estimate=cost.get("rowEstimate"),
         )
-        return {"ok": True, "datasource": _source(profile), **result}
+        return {"ok": True, "datasource": _source(profile), "cost": relations.cost_of(result["edge"]), **result}
     except Exception as error:  # noqa: BLE001
         return _error(error)
 
@@ -639,15 +656,18 @@ def feedback_relation(
     note: Optional[str] = None,
     datasource: Optional[str] = None,
     fanout: Optional[float] = None,
+    ms: Optional[float] = None,
 ) -> dict:
     """Record what a trace step showed, and move the edge accordingly.
 
     `verdict` is one of:
 
     - `ok` — the step returned the rows it should have. This is the only verdict
-      that confirms an edge; three confirmations with no rejection left, an
-      indexed reference column and a fanout of 5 or less make it `trusted`, which
-      the walker follows without asking again.
+      that confirms an edge; three confirmations, no rejection left, a fanout of 5
+      or less and recent steps all faster than the slow threshold make it
+      `trusted`, which the walker follows without asking again. An index on the
+      referenced column is a bonus, not a requirement — timing is what proves the
+      step is cheap.
     - `too_many` — the step matched rows it should not have. `reason` says why:
       `wrong_column` (the column is not the key), `needs_condition` (the join is
       only true under a filter — set it with set_relation_condition),
@@ -659,13 +679,15 @@ def feedback_relation(
 
     `fanout` is the average number of rows the parent side matched; pass what the
     trace reported so trust can be recomputed from real measurements rather than
-    guessed. Whether the reference column is indexed or unique is read from the
-    catalog, so the caller does not have to say.
+    guessed. `ms` is how long that step took — it is kept with the edge and is what
+    the trust rule reads. Whether the referenced column is indexed and how big its
+    table is are read from the catalog here, so the caller does not have to say.
     """
     try:
         profile, _secrets = store.resolve(datasource)
         indexed = None
         unique = None
+        row_estimate = None
         try:
             _profile, (connection, close) = _open(datasource)
             try:
@@ -675,15 +697,10 @@ def feedback_relation(
                     table = (target.get("to") or {}).get("table")
                     column = (target.get("to") or {}).get("column")
                     if table and column:
+                        cost = engines.column_cost(profile, connection, table, column)
+                        indexed = cost.get("indexed")
+                        row_estimate = cost.get("rowEstimate")
                         described = engines.describe_table(profile, connection, table, None)
-                        indexed = any(
-                            str(index.get("columns", [None])[0]).casefold() == str(column).casefold()
-                            for index in described.get("indexes") or []
-                        ) or any(
-                            str(item.get("name")).casefold() == str(column).casefold()
-                            for item in described.get("columns") or []
-                            if item.get("primaryKey")
-                        )
                         unique = any(
                             bool(index.get("unique"))
                             and [str(part).casefold() for part in index.get("columns") or []]
@@ -695,6 +712,7 @@ def feedback_relation(
         except Exception:  # noqa: BLE001 - the verdict stands without the hints
             indexed = None
             unique = None
+            row_estimate = None
         result = relations.feedback(
             profile,
             edge_id,
@@ -704,8 +722,17 @@ def feedback_relation(
             indexed=indexed,
             unique=unique,
             fanout=fanout,
+            row_estimate=row_estimate,
+            ms=ms,
         )
-        return {"ok": True, "datasource": _source(profile), "indexed": indexed, "unique": unique, **result}
+        return {
+            "ok": True,
+            "datasource": _source(profile),
+            "indexed": indexed,
+            "unique": unique,
+            "cost": relations.cost_of(result["edge"]),
+            **result,
+        }
     except Exception as error:  # noqa: BLE001
         return _error(error)
 
@@ -764,6 +791,7 @@ def trace_by_key(
     max_depth: int = 3,
     max_rows_per_table: int = 20,
     direction: str = "both",
+    confirm_slow: bool = False,
 ) -> dict:
     """Follow one value across the joins the relation graph trusts.
 
@@ -780,11 +808,16 @@ def trace_by_key(
     children) or `both`. `max_depth` is clamped to 6 and `max_rows_per_table` to
     200.
 
+    A step whose column has no index and whose table is very large is a full table
+    scan. The trace does not pay for it on its own: that step comes back with
+    `status: "needs_confirm"` and `summary.needsConfirm` counts them. Look at which
+    table and how big, then call again with `confirm_slow=True` to allow it.
+
     Every step reports the table, the bound condition, the SQL that ran, how many
-    rows came back and a few sample cells; `status: "empty"` is a chain that broke
-    there. Pending edges are listed under `pending` — confirming one lets the
-    trace follow it — and anything truncated or skipped is in `warnings` or
-    `stoppedAt` rather than quietly missing.
+    rows came back, how long it took and a few sample cells; `status: "empty"` is a
+    chain that broke there. Pending edges are listed under `pending` — confirming
+    one lets the trace follow it — and anything truncated or skipped is in
+    `warnings` or `stoppedAt` rather than quietly missing.
     """
     try:
         profile, (connection, close) = _open(datasource)
@@ -798,6 +831,7 @@ def trace_by_key(
                 max_depth=max_depth,
                 max_rows_per_table=max_rows_per_table,
                 direction=direction,
+                confirm_slow=confirm_slow,
             )
         finally:
             close()

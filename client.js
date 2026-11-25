@@ -333,6 +333,11 @@ window.__ModuleLoader__.load({
         'graph.confirmedTimes': '{n} confirmed',
         'graph.rejectedTimes': '{n} rejected',
         'graph.fanout': 'fanout {value}',
+        'graph.rows': '~{n} rows',
+        'graph.avgMs': '{ms}ms per step',
+        'graph.indexYes': 'indexed',
+        'graph.indexNo': 'no index',
+        'graph.indexUnknown': 'index unknown',
         'graph.when': 'on {at}',
         'graph.failedBecause': 'Last attempt failed: {verdict} ({reason})',
         'graph.verdictTooMany': 'matched too many rows',
@@ -372,6 +377,11 @@ window.__ModuleLoader__.load({
         'trace.rows': '{n} row(s)',
         'trace.and': 'and',
         'trace.chainBreaks': '0 rows — the chain stops here',
+        'trace.stepMs': '{ms}ms',
+        'trace.needsConfirmChip': 'full scan',
+        'trace.needsConfirm': 'This step would scan the whole table — it has no index and the table is large. It was not run.',
+        'trace.continueAnyway': 'Run it anyway',
+        'trace.needsConfirmSome': '{n} step(s) were not run because each would scan a whole table. Run the trace with "Run it anyway" if that is what you want.',
         'trace.stepFailed': 'this step failed',
         'trace.truncated': 'capped',
         'trace.stopped': 'Where it stopped',
@@ -713,6 +723,11 @@ window.__ModuleLoader__.load({
         'graph.confirmedTimes': '确认 {n} 次',
         'graph.rejectedTimes': '拒绝 {n} 次',
         'graph.fanout': '扇出 {value}',
+        'graph.rows': '约 {n} 行',
+        'graph.avgMs': '每步 {ms}ms',
+        'graph.indexYes': '有索引',
+        'graph.indexNo': '无索引',
+        'graph.indexUnknown': '索引未知',
         'graph.when': '于 {at}',
         'graph.failedBecause': '上次验证失败：{verdict}（{reason}）',
         'graph.verdictTooMany': '匹配到过多行',
@@ -752,6 +767,11 @@ window.__ModuleLoader__.load({
         'trace.rows': '{n} 行',
         'trace.and': '且',
         'trace.chainBreaks': '0 行 —— 链路在此中断',
+        'trace.stepMs': '{ms}ms',
+        'trace.needsConfirmChip': '全表扫描',
+        'trace.needsConfirm': '这一步会扫描整张表——该列没有索引，表又很大，所以没有执行。',
+        'trace.continueAnyway': '仍然执行',
+        'trace.needsConfirmSome': '{n} 步没有执行：这些步骤都会扫描整张表。确认要跑就点「仍然执行」。',
         'trace.stepFailed': '这一步失败了',
         'trace.truncated': '已截断',
         'trace.stopped': '中断位置',
@@ -5528,8 +5548,11 @@ function groupTables(tables) {
         return fallback ? fallback.id : ''
       }, [traceSource, sources])
 
-      /** Follow one value; the panel never sends a statement, only a value. */
-      const runTrace = async () => {
+      /** Follow one value; the panel never sends a statement, only a value.
+       *
+       * `confirmSlow` is the user saying yes to a full table scan the previous
+       * run refused to pay for. Nothing else in the panel can set it. */
+      const runTrace = async (confirmSlow) => {
         const value = String(traceValue || '').trim()
         if (!value) {
           setTraceError(t('trace.needValue'))
@@ -5545,6 +5568,7 @@ function groupTables(tables) {
             entry_table: traceTable.trim() || undefined,
             entry_column: traceColumn.trim() || undefined,
             direction: traceDirection,
+            confirm_slow: confirmSlow === true ? true : undefined,
           })
           if (payload && payload.ok === false) {
             const failure = payload.error || {}
@@ -6695,6 +6719,12 @@ function groupTables(tables) {
         return typeof value === 'number' ? value.toFixed(1) : '—'
       }
 
+      /** What searching this edge's target column costs, as far as we know. */
+      const edgeCost = (edge) => (edge && edge.cost) || {}
+
+      const edgeIndexLabel = (cost) =>
+        cost.indexed === true ? t('graph.indexYes') : cost.indexed === false ? t('graph.indexNo') : t('graph.indexUnknown')
+
       const edgeMeta = (edge) => {
         const parts = [edgeSourceLabel(edge.source)]
         const confirmed = (edge.stats && edge.stats.confirmCount) || 0
@@ -6702,6 +6732,10 @@ function groupTables(tables) {
         const rejected = (edge.stats && edge.stats.rejectCount) || 0
         if (rejected) parts.push(fmt(t('graph.rejectedTimes'), { n: rejected }))
         parts.push(fmt(t('graph.fanout'), { value: edgeFanout(edge) }))
+        const cost = edgeCost(edge)
+        parts.push(edgeIndexLabel(cost))
+        if (typeof cost.rowEstimate === 'number') parts.push(fmt(t('graph.rows'), { n: cost.rowEstimate }))
+        if (typeof cost.avgMs === 'number') parts.push(fmt(t('graph.avgMs'), { ms: cost.avgMs }))
         return parts.join(' · ')
       }
 
@@ -7081,9 +7115,12 @@ function groupTables(tables) {
       const renderTraceStep = (step) => {
         const status = step.status || 'hit'
         const edge = step.edge || null
+        /* A step that was not run because it would scan a whole table reads as a
+         * question, not a result: no rows, no SQL, just what it would cost. */
+        const slow = status === 'needs_confirm'
         return h(
           'div',
-          { key: `${step.index}:${step.table}:${step.depth}`, className: `dbmcp-edge dbmcp-trace-step is-${status === 'empty' ? 'stale' : status === 'error' ? 'rejected' : 'confirmed'}` },
+          { key: `${step.index}:${step.table}:${step.depth}`, className: `dbmcp-edge dbmcp-trace-step is-${slow ? 'pending' : status === 'empty' ? 'stale' : status === 'error' ? 'rejected' : 'confirmed'}` },
           h(
             'div',
             { className: 'dbmcp-edge-head' },
@@ -7098,6 +7135,7 @@ function groupTables(tables) {
               'span',
               { className: 'dbmcp-inline' },
               step.truncated ? h('span', { className: 'dbmcp-pill dbmcp-trace-cut' }, t('trace.truncated')) : null,
+              slow ? h('span', { className: edgeStatusClass('pending') }, t('trace.needsConfirmChip')) : null,
               edge ? h('span', { className: edgeStatusClass(edge.status) }, edgeStatusLabel(edge.status)) : null,
             ),
           ),
@@ -7105,17 +7143,38 @@ function groupTables(tables) {
           h(
             'p',
             { className: 'dbmcp-hint dbmcp-edge-meta' },
-            status === 'empty'
-              ? t('trace.chainBreaks')
-              : status === 'error'
-                ? t('trace.stepFailed')
-                : fmt(t('trace.rows'), { n: step.rows }),
-            edge ? ` · ${edgeSourceLabel(edge.source)}` : '',
-            typeof step.fanout === 'number' ? ` · ${fmt(t('graph.fanout'), { value: step.fanout.toFixed(1) })}` : '',
+            slow
+              ? t('trace.needsConfirm')
+              : status === 'empty'
+                ? t('trace.chainBreaks')
+                : status === 'error'
+                  ? t('trace.stepFailed')
+                  : fmt(t('trace.rows'), { n: step.rows }),
+            slow ? '' : edge ? ` · ${edgeSourceLabel(edge.source)}` : '',
+            slow ? '' : typeof step.fanout === 'number' ? ` · ${fmt(t('graph.fanout'), { value: step.fanout.toFixed(1) })}` : '',
+            slow ? '' : typeof step.ms === 'number' ? ` · ${fmt(t('trace.stepMs'), { ms: step.ms })}` : '',
           ),
-          traceSample(step),
-          step.note ? h('p', { className: 'dbmcp-hint dbmcp-edge-why' }, step.note) : null,
-          traceStepActions(step),
+          slow
+            ? h(
+                'div',
+                { className: 'dbmcp-inline dbmcp-trace-judge' },
+                h(
+                  'button',
+                  {
+                    type: 'button',
+                    className: 'dbmcp-btn is-small',
+                    disabled: traceBusy,
+                    onClick: () => {
+                      void runTrace(true)
+                    },
+                  },
+                  t('trace.continueAnyway'),
+                ),
+              )
+            : null,
+          slow ? null : traceSample(step),
+          step.note && !slow ? h('p', { className: 'dbmcp-hint dbmcp-edge-why' }, step.note) : null,
+          slow ? null : traceStepActions(step),
         )
       }
 
@@ -7248,6 +7307,9 @@ function groupTables(tables) {
                     depth: summary.depthReached,
                   }),
                 ),
+                summary.needsConfirm
+                  ? h('p', { className: 'dbmcp-hint dbmcp-edge-why' }, fmt(t('trace.needsConfirmSome'), { n: summary.needsConfirm }))
+                  : null,
               )
             : null,
           steps.length > 0 ? h('div', { className: 'dbmcp-edges' }, steps.map(renderTraceStep)) : null,

@@ -269,55 +269,81 @@ class RelationGraph(unittest.TestCase):
         self.assertEqual(result["edge"]["stats"]["confirmCount"], 1)
         self.assertIsNotNone(result["edge"]["stats"]["lastVerifiedAt"])
 
-    def test_three_confirmations_on_an_indexed_column_earn_trust(self):
+    def test_three_fast_confirmations_earn_trust(self):
         edge = self._edge()
-        relations.feedback(source(), edge["id"], "ok", indexed=True, fanout=1.0)
-        relations.feedback(source(), edge["id"], "ok", indexed=True, fanout=1.0)
-        result = relations.feedback(source(), edge["id"], "ok", indexed=True, fanout=1.0)
+        for _ in range(2):
+            relations.feedback(source(), edge["id"], "ok", indexed=True, fanout=1.0, ms=20)
+        result = relations.feedback(source(), edge["id"], "ok", indexed=True, fanout=1.0, ms=20)
         self.assertEqual(result["edge"]["status"], "trusted")
         self.assertEqual(result["edge"]["stats"]["confirmCount"], 3)
 
     def test_two_confirmations_are_not_enough_for_trust(self):
         edge = self._edge()
-        relations.feedback(source(), edge["id"], "ok", indexed=True, fanout=1.0)
-        result = relations.feedback(source(), edge["id"], "ok", indexed=True, fanout=1.0)
+        relations.feedback(source(), edge["id"], "ok", indexed=True, fanout=1.0, ms=20)
+        result = relations.feedback(source(), edge["id"], "ok", indexed=True, fanout=1.0, ms=20)
         self.assertEqual(result["edge"]["status"], "confirmed")
 
-    def test_an_unindexed_column_never_becomes_trusted(self):
+    def test_confirmation_without_a_measurement_cannot_be_trusted(self):
         edge = self._edge()
-        for _ in range(5):
-            result = relations.feedback(source(), edge["id"], "ok", indexed=False, unique=False, fanout=1.0)
-        self.assertEqual(result["edge"]["status"], "confirmed")
-        self.assertEqual(result["edge"]["stats"]["confirmCount"], 5)
+        for _ in range(4):
+            result = relations.feedback(source(), edge["id"], "ok", indexed=True, fanout=1.0)
+        self.assertEqual(result["edge"]["status"], "confirmed", "no timing means no evidence it is fast")
+        self.assertEqual(result["edge"]["stats"]["timings"], [])
 
-    def test_a_unique_column_earns_trust_without_an_index(self):
+    def test_an_unindexed_column_can_still_be_trusted(self):
+        # The index is a hint, not the badge: a small unindexed table walked fast
+        # three times is exactly as trustworthy as an indexed one.
         edge = self._edge()
-        relations.feedback(source(), edge["id"], "ok", indexed=False, unique=True, fanout=1.0)
-        relations.feedback(source(), edge["id"], "ok", indexed=False, unique=True, fanout=1.0)
-        result = relations.feedback(source(), edge["id"], "ok", indexed=False, unique=True, fanout=1.0)
+        for _ in range(3):
+            result = relations.feedback(source(), edge["id"], "ok", indexed=False, unique=False, fanout=1.0, ms=5)
         self.assertEqual(result["edge"]["status"], "trusted")
+        self.assertFalse(relations.cost_of(result["edge"])["indexed"])
+
+    def test_a_slow_edge_never_becomes_trusted(self):
+        edge = self._edge()
+        for _ in range(3):
+            result = relations.feedback(source(), edge["id"], "ok", indexed=True, fanout=1.0, ms=900)
+        self.assertEqual(result["edge"]["status"], "confirmed", "fast is the whole point")
+        self.assertEqual(relations.cost_of(result["edge"])["avgMs"], 900.0)
+
+    def test_one_slow_sample_in_the_window_blocks_trust(self):
+        edge = self._edge()
+        relations.feedback(source(), edge["id"], "ok", indexed=True, fanout=1.0, ms=10)
+        relations.feedback(source(), edge["id"], "ok", indexed=True, fanout=1.0, ms=700)
+        result = relations.feedback(source(), edge["id"], "ok", indexed=True, fanout=1.0, ms=10)
+        self.assertEqual(result["edge"]["status"], "confirmed")
+
+    def test_the_timing_window_keeps_the_last_five(self):
+        edge = self._edge()
+        relations.feedback(source(), edge["id"], "ok", indexed=True, fanout=1.0, ms=900)
+        for _ in range(5):
+            relations.feedback(source(), edge["id"], "ok", indexed=True, fanout=1.0, ms=10)
+        stats = self._stored(edge["id"])["stats"]
+        self.assertEqual(len(stats["timings"]), relations.TIMING_WINDOW)
+        self.assertNotIn(900, stats["timings"], "the slow sample has aged out of the window")
+        self.assertEqual(self._stored(edge["id"])["status"], "trusted")
 
     def test_a_wide_fanout_blocks_trust(self):
         edge = self._edge()
-        relations.feedback(source(), edge["id"], "ok", indexed=True, fanout=1.0)
-        relations.feedback(source(), edge["id"], "ok", indexed=True, fanout=1.0)
-        result = relations.feedback(source(), edge["id"], "ok", indexed=True, fanout=9.0)
+        relations.feedback(source(), edge["id"], "ok", indexed=True, fanout=1.0, ms=10)
+        relations.feedback(source(), edge["id"], "ok", indexed=True, fanout=1.0, ms=10)
+        result = relations.feedback(source(), edge["id"], "ok", indexed=True, fanout=9.0, ms=10)
         self.assertEqual(result["edge"]["status"], "confirmed")
         self.assertEqual(result["edge"]["stats"]["avgFanout"], 9.0)
 
     def test_trust_falls_back_when_the_fanout_grows(self):
         edge = self._edge()
         for _ in range(3):
-            relations.feedback(source(), edge["id"], "ok", indexed=True, fanout=1.0)
+            relations.feedback(source(), edge["id"], "ok", indexed=True, fanout=1.0, ms=10)
         self.assertEqual(self._stored(edge["id"])["status"], "trusted")
-        result = relations.feedback(source(), edge["id"], "ok", indexed=True, fanout=12.0)
+        result = relations.feedback(source(), edge["id"], "ok", indexed=True, fanout=12.0, ms=10)
         self.assertEqual(result["edge"]["status"], "confirmed", "trust is recomputed, not latched")
 
     def test_a_standing_rejection_blocks_trust(self):
         edge = self._edge()
         relations.feedback(source(), edge["id"], "too_many", reason="not_unique")
         for _ in range(3):
-            result = relations.feedback(source(), edge["id"], "ok", indexed=True, fanout=1.0)
+            result = relations.feedback(source(), edge["id"], "ok", indexed=True, fanout=1.0, ms=10)
         self.assertEqual(result["edge"]["status"], "confirmed")
         self.assertEqual(result["edge"]["stats"]["rejectCount"], 1)
 
@@ -368,6 +394,138 @@ class RelationGraph(unittest.TestCase):
         actions = [entry["action"] for entry in self._stored(edge["id"])["history"]]
         self.assertEqual(actions[0], "created")
         self.assertEqual(actions[-1], "confirmed")
+
+
+class EdgeCost(unittest.TestCase):
+    """What an edge costs to walk, and when that cost has to be asked about.
+
+    The whole point of these numbers is to stop a trace from quietly scanning a
+    ten-million-row table with no index. So the two decisions have to be separate:
+    a big table with no index asks before running, and a fast edge earns trust
+    whatever its index says. Mixing the two would either block every unindexed
+    join or let one slow edge be trusted forever.
+    """
+
+    def setUp(self):
+        self.saved = os.environ.get("DB_MCP_RUNTIME")
+        self.tmp = tempfile.TemporaryDirectory()
+        os.environ["DB_MCP_RUNTIME"] = self.tmp.name
+
+    def tearDown(self):
+        if self.saved is None:
+            os.environ.pop("DB_MCP_RUNTIME", None)
+        else:
+            os.environ["DB_MCP_RUNTIME"] = self.saved
+        self.tmp.cleanup()
+
+    def _edge(self, indexed=None, rows=None):
+        return relations.propose(
+            source(), "t_trans", "order_id", "t_order", "id", indexed=indexed, row_estimate=rows
+        )["edge"]
+
+    def _stored(self, edge_id: str) -> dict:
+        return next(edge for edge in relations.list_edges(source())["edges"] if edge["id"] == edge_id)
+
+    # -- recording the cost ------------------------------------------------
+
+    def test_a_proposal_records_the_index_and_the_row_count(self):
+        edge = self._edge(indexed=False, rows=4_000_000)
+        self.assertIs(edge["stats"]["indexed"], False)
+        self.assertEqual(edge["stats"]["rowEstimate"], 4_000_000)
+
+    def test_a_proposal_without_figures_leaves_them_unknown(self):
+        stats = self._edge()["stats"]
+        self.assertIsNone(stats["indexed"])
+        self.assertIsNone(stats["rowEstimate"])
+
+    def test_a_feedback_without_figures_keeps_what_it_had(self):
+        edge = self._edge(indexed=True, rows=900)
+        result = relations.feedback(source(), edge["id"], "ok", fanout=1.0, ms=10)
+        self.assertIs(result["edge"]["stats"]["indexed"], True)
+        self.assertEqual(result["edge"]["stats"]["rowEstimate"], 900)
+
+    def test_rediscovery_carries_the_cost_onto_a_known_edge(self):
+        edge = relations.propose(source(), "t_trans", "order_id", "t_order", "id")["edge"]
+        row = {"table": "t_trans", "column": "order_id", "refTable": "t_order", "refColumn": "id", "indexed": True, "rowEstimate": 120}
+        relations.import_edges(source(), [row], source="fk")
+        stats = self._stored(edge["id"])["stats"]
+        self.assertIs(stats["indexed"], True)
+        self.assertEqual(stats["rowEstimate"], 120)
+
+    # -- the trust badge ---------------------------------------------------
+
+    def test_trust_needs_three_measured_samples(self):
+        stats = {"confirmCount": 3, "rejectCount": 0, "avgFanout": 1.0, "timings": [10, 10]}
+        self.assertFalse(relations._earns_trust(stats))
+        stats["timings"] = [10, 10, 10]
+        self.assertTrue(relations._earns_trust(stats))
+
+    def test_a_measured_edge_needs_no_index(self):
+        stats = {"confirmCount": 3, "rejectCount": 0, "avgFanout": 1.0, "timings": [1, 1, 1], "indexed": False}
+        self.assertTrue(relations._earns_trust(stats))
+
+    def test_the_slowest_sample_decides(self):
+        stats = {"confirmCount": 3, "rejectCount": 0, "avgFanout": 1.0, "timings": [1, relations.SLOW_MS, 1]}
+        self.assertFalse(relations._earns_trust(stats))
+
+    def test_the_timer_counts_whole_milliseconds(self):
+        stats = relations._blank_edge(
+            {"table": "a", "column": "b"}, {"table": "c", "column": "d"}, "manual", None
+        )["stats"]
+        relations._timed(stats, 12.4)
+        relations._timed(stats, "nonsense")
+        self.assertEqual(stats["timings"], [12])
+        self.assertEqual(stats["lastMs"], 12)
+        self.assertEqual(stats["avgMs"], 12.0)
+
+    def test_trace_timings_land_on_the_edge_they_belong_to(self):
+        edge = self._edge()
+        relations.note_timings(source(), {edge["id"]: 40})
+        relations.note_timings(source(), {edge["id"]: 60})
+        stats = self._stored(edge["id"])["stats"]
+        self.assertEqual(stats["timings"], [40, 60])
+        self.assertEqual(stats["lastMs"], 60)
+        self.assertEqual(stats["avgMs"], 50.0)
+
+    def test_timings_for_an_unknown_edge_are_ignored(self):
+        self.assertEqual(relations.note_timings(source(), {"e_nope": 10}), 0)
+
+    # -- the full-scan gate ------------------------------------------------
+
+    def test_a_big_unindexed_target_asks_first(self):
+        self.assertTrue(relations.needs_confirm({"rowEstimate": relations.BIG_TABLE_ROWS, "indexed": False}))
+
+    def test_a_big_indexed_target_does_not(self):
+        self.assertFalse(relations.needs_confirm({"rowEstimate": relations.BIG_TABLE_ROWS, "indexed": True}))
+
+    def test_a_small_unindexed_target_does_not(self):
+        self.assertFalse(relations.needs_confirm({"rowEstimate": relations.BIG_TABLE_ROWS - 1, "indexed": False}))
+
+    def test_an_unknown_row_count_never_blocks_the_walk(self):
+        self.assertFalse(relations.needs_confirm({"rowEstimate": None, "indexed": False}))
+
+    def test_an_unknown_index_never_blocks_the_walk(self):
+        self.assertFalse(
+            relations.needs_confirm({"rowEstimate": relations.BIG_TABLE_ROWS * 2, "indexed": None}),
+            "blocking on a catalog we could not read would stop every trace",
+        )
+
+    def test_the_cost_summary_carries_all_of_it(self):
+        edge = self._edge(indexed=False, rows=2_000_000)
+        relations.feedback(source(), edge["id"], "ok", fanout=1.0, ms=340)
+        cost = relations.cost_of(self._stored(edge["id"]))
+        self.assertIs(cost["indexed"], False)
+        self.assertEqual(cost["rowEstimate"], 2_000_000)
+        self.assertEqual(cost["lastMs"], 340)
+        self.assertEqual(cost["avgMs"], 340.0)
+        self.assertTrue(cost["needsConfirm"])
+
+    def test_the_listing_carries_the_cost_without_being_asked(self):
+        edge = self._edge(indexed=True, rows=10)
+        listed = next(item for item in relations.list_edges(source())["edges"] if item["id"] == edge["id"])
+        self.assertIn("cost", listed)
+        self.assertIs(listed["cost"]["indexed"], True)
+        self.assertFalse(listed["cost"]["needsConfirm"])
 
 
 if __name__ == "__main__":
