@@ -1141,7 +1141,10 @@ check(
 )
 check(
   'trace page: the entry table and column are optional',
-  /entry_table: traceTable\.trim\(\) \|\| undefined/.test(traceLogic) && /entry_column: traceColumn\.trim\(\) \|\| undefined/.test(traceLogic),
+  /const entryTable = startAt && startAt\.table \? startAt\.table : traceTable\.trim\(\)/.test(traceLogic) &&
+    /const entryColumn = startAt && startAt\.column \? startAt\.column : traceColumn\.trim\(\)/.test(traceLogic) &&
+    /entry_table: entryTable \|\| undefined/.test(traceLogic) &&
+    /entry_column: entryColumn \|\| undefined/.test(traceLogic),
 )
 check(
   'trace page: the direction is one of three',
@@ -1208,6 +1211,122 @@ check(
 check(
   'trace page: the summary counts the steps it refused',
   /summary\.needsConfirm/.test(traceCard) && /trace\.needsConfirmSome/.test(source),
+)
+
+/* The walk is read as one picture: the graph is the view, and the step you pick
+   in it is read underneath. The flat list is still one click away for anyone who
+   prefers the order the walk ran in. Both come from the same `steps`. */
+check(
+  'trace page: the graph is the default reading',
+  /useState\('tree'\)/.test(source) &&
+    /traceView === 'tree' \? traceOverview\(\) : null/.test(traceCard) &&
+    /t\('trace\.viewGraph'\)/.test(traceCard),
+)
+check(
+  'trace page: the flat list is still one click away',
+  /trace\.viewGraph/.test(source) && /trace\.viewFlat/.test(source) && /steps\.map\(renderTraceFlat\)/.test(traceCard),
+)
+check(
+  'trace page: the step picked in the graph is read under it, not in a second tree',
+  /const traceDetailNode = \(node, sceneOn\) =>/.test(traceCard) &&
+    /const traceAllNodes = \(nodes\) =>/.test(traceCard) &&
+    /className: 'dbmcp-trace-detail', id: 'dbmcp-trace-detail'/.test(traceCard) &&
+    /traceAllNodes\(nodes\)\.find\(\(node\) => node\.index === traceFocus\) \|\| nodes\[0\]/.test(traceCard) &&
+    !/dbmcp-trace-kids/.test(traceCard),
+)
+check(
+  'trace page: the entry node is marked as the start and can be changed',
+  /trace\.root/.test(source) && /trace\.changeEntry/.test(source) && /traceDetailNode/.test(traceCard),
+)
+check(
+  'trace page: a repeated table is folded, not walked again',
+  /node\.repeated/.test(traceCard) &&
+    /trace\.repeatedNote/.test(source) &&
+    /dbmcp-trace-node is-/.test(traceCard) &&
+    /node\.repeated \? 'repeat'/.test(traceCard),
+)
+check(
+  'trace page: rows expand under the picked step',
+  /trace\.showRowsN/.test(source) && /traceRows\(node\)/.test(traceCard) && /is-bound/.test(traceCard),
+)
+check(
+  'trace page: a join carries its own confidence chip',
+  /const traceEdgeChip = \(edge, sceneOn\)/.test(traceCard) &&
+    /trace\.sceneClaim/.test(source) &&
+    /edgeStatusClass\(edge\.status\)/.test(traceCard),
+)
+check(
+  'trace page: the legend separates the join from the rows',
+  /trace\.legend/.test(source) && /trace\.legendFeedback/.test(source),
+)
+check(
+  'trace page: more than one place to start becomes a chip, not a guess',
+  /trace\.appearsIn/.test(source) && /runTrace\(undefined, \{ table/.test(traceCard) && /candidates\.map/.test(traceCard),
+)
+check(
+  'trace page: the scene is a filter the reader can pick',
+  /trace\.sceneAll/.test(source) && /scenes\.map/.test(traceCard) && /scene: traceScene \|\| undefined/.test(traceLogic),
+)
+check(
+  'trace page: a table outside the scene says so and can be folded in',
+  /trace\.outsideTitle/.test(source) &&
+    /trace\.outsideNote/.test(source) &&
+    /trace\.addToScene/.test(source) &&
+    /traceAddToScene\(item\.table\)/.test(traceCard) &&
+    /apiPost\('\/scenes\/save'/.test(traceCard),
+)
+check(
+  'trace page: a node carries the values it was bound to, not a placeholder',
+  /const traceValues = \(step\)/.test(traceCard) && /\(step\.condition \|\| \{\}\)\.binds/.test(traceCard),
+)
+check(
+  'trace page: the shape is drawn once, left to right',
+  /const traceOverview = \(\) =>/.test(traceCard) &&
+    /className: 'dbmcp-trace-overview'/.test(traceCard) &&
+    /'svg',/.test(traceCard) &&
+    /const LANE_W = 340/.test(traceCard) &&
+    /const GUTTER = 150/.test(traceCard),
+)
+check(
+  'trace page: one column per depth, one box per table the walk reached',
+  /const traceLanes = \(nodes\) =>/.test(traceCard) &&
+    /lanes\[depth\]\.push\(node\)/.test(traceCard) &&
+    /const BOX_W = 150/.test(traceCard) &&
+    /dbmcp-ov-node is-/.test(traceCard),
+)
+check(
+  'trace page: every taken join is a line in the graph, named by its columns',
+  /const parent = node\.parent \? spots\[node\.parent\] : null/.test(traceCard) &&
+    /className: `dbmcp-ov-link is-/.test(traceCard) &&
+    /dbmcp-ov-edge-label/.test(traceCard) &&
+    /edge\.from\.column/.test(traceCard),
+)
+check(
+  'trace page: joins leave the parent on separate rows, not one smeared point',
+  /const fanout = \{\}/.test(traceCard) &&
+    /taken\[node\.parent\] = order \+ 1/.test(traceCard) &&
+    /const spread = Math\.min\(/.test(traceCard),
+)
+check(
+  'trace page: joins are ordered to draw the fewest crossings, not arrival order',
+  /const traceOrder = \(lanes\) =>/.test(traceCard) &&
+    /const crossings = \(state\) =>/.test(traceCard) &&
+    /const score = crossings\(current\)/.test(traceCard) &&
+    /traceOrder\(traceLanes\(nodes\)\)/.test(traceCard),
+)
+check(
+  'trace page: the join label sits in its own gutter, clear of every curve',
+  /const elbow = x2 - GUTTER/.test(traceCard) &&
+    /L \$\{x2\} \$\{y2\}/.test(traceCard) &&
+    /x: x2 - GUTTER \+ 8/.test(traceCard) &&
+    /textAnchor: 'start'/.test(traceCard),
+)
+check(
+  'trace page: clicking a box reads that step underneath',
+  /const focusTraceNode = \(index\) =>/.test(traceCard) &&
+    /onClick: \(\) => focusTraceNode\(node\.index\)/.test(traceCard) &&
+    /getElementById\('dbmcp-trace-detail'\)/.test(traceCard) &&
+    /node\.index === current/.test(traceCard),
 )
 
 // the component's own header still took a min-height plus a bottom margin when

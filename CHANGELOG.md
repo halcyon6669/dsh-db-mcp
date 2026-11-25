@@ -59,6 +59,15 @@ report of each version in more detail.
   out forever. The entry probe reports every candidate it tried with its row count
   (`entry.candidates[].matches`), so a value that lives in several places can be
   started from the one that was meant.
+- **The Trace tab draws that graph.** The walk is no longer a list of steps: it is one
+  column per depth from left to right, one box per table the walk reached, and every
+  join drawn as a line labelled with the pair of columns it compares — so the shape of
+  the walk is the whole view instead of a picture next to a list. Clicking a box reads
+  that step underneath it: the values it was bound to, its rows with the bound column
+  highlighted, and the ✓/✗ judgement for the join. Lanes are ordered to draw the
+  fewest crossings rather than in arrival order, and each join label sits in its own
+  gutter so no curve can run through it. The flat list the page used to be is still
+  one click away.
 
 ### Changed
 

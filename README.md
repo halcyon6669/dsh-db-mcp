@@ -130,6 +130,9 @@ for real before you commit the source.
 | `mcp__db__mine_relations` | mine joins out of the statements already in the audit log |
 | `mcp__db__scan_code_relations` | mine joins out of a project's mapper XML, `@Select` annotations and MyBatis-Plus fragments |
 | `mcp__db__trace_by_key` | find where a value lives and which confirmed joins carry it across tables |
+| `mcp__db__list_scenes` | the scenes of a source: named sets of tables a trace may stay inside |
+| `mcp__db__save_scene` | create or update a scene |
+| `mcp__db__delete_scene` | remove a scene — the relation graph keeps every edge |
 | `mcp__db__feedback_relation` | confirm, reject or retire a join after a trace step |
 | `mcp__db__set_relation_condition` | attach the extra predicate a join needs to be true |
 | `mcp__db__delete_edge` | remove one edge from the graph for good |
@@ -177,10 +180,21 @@ The **Trace** tab takes one value and shows the walk: each step's table, conditi
 row count, how long it took, a few sample cells, and the edge that carried it there.
 Steps where the chain broke, was capped, or produced a warning are marked as such,
 and every step can be judged right / too many (with a reason) / missing / unrelated —
-which feeds the edge behind it. A join whose target column has no index and whose
-table looks large is not run: that step comes back asking whether to scan the whole
-table, and **Run it anyway** re-runs the trace with `confirm_slow`. Neither page
-accepts SQL; the statements come from the graph and are bound server-side.
+which feeds the edge behind it. The walk is read as a **graph**: one column per
+depth, left to right, one box per table the walk reached, and every join drawn as a
+line labelled with the pair of columns it compares — so the shape of the walk is the
+whole view instead of a picture next to a list. Clicking a box reads that step
+underneath it: the values it was bound to, its rows with the bound column
+highlighted, and the ✓/✗ judgement for the join that carried it there. A table
+reached twice is drawn once more but not walked again, and a value that lives in
+several places offers those places as starting chips. The older flat list is one
+click away. A **scene** narrows a walk to a named set of tables: joins
+leading out of the set are not followed, the tables they would reach are listed
+outside it, and one button folds a table into the scene and re-runs. A join whose
+target column has no index and whose table looks large is not run: that step comes
+back asking whether to scan the whole table, and **Run it anyway** re-runs the trace
+with `confirm_slow`. Neither page accepts SQL; the statements come from the graph and
+are bound server-side.
 
 ## Safety
 

@@ -1904,6 +1904,22 @@ function groupTables(tables) {
       const [traceBusy, setTraceBusy] = React.useState(false)
       const [traceError, setTraceError] = React.useState(null)
       const [traceOpen, setTraceOpen] = React.useState('')
+      /* The walk can be read two ways: as a path tree, where the indent is the
+         parent link, or as a flat list, where the order is the order it ran.
+         The tree is the default because a join walk is a shape, not a list. */
+      const [traceView, setTraceView] = React.useState('tree')
+      const [traceScene, setTraceScene] = React.useState('')
+      const [scenes, setScenes] = React.useState([])
+      /* The manual entry columns stay hidden until asked for: most walks start
+         from "wherever the value lives", and two empty boxes over the form read
+         as required fields. */
+      const [traceManual, setTraceManual] = React.useState(false)
+      /* Nodes arrive collapsed: the shape is what you scan first, and the rows are
+         what you open when a node is the one you doubt. */
+      const [traceExpanded, setTraceExpanded] = React.useState([])
+      /* Which node the overview strip is pointing at — set by clicking a box up
+         there, cleared when the walk is re-run. */
+      const [traceFocus, setTraceFocus] = React.useState(0)
 
       const load = React.useCallback(async () => {
         setBusy(true)
@@ -2401,27 +2417,56 @@ function groupTables(tables) {
         return fallback ? fallback.id : ''
       }, [traceSource, sources])
 
+      /** The scenes of this datasource. A scene is a named table list, so it can
+       * only ever narrow a walk — it never adds a join the graph does not hold. */
+      const loadScenes = React.useCallback(async () => {
+        if (!traceTarget) {
+          setScenes([])
+          return
+        }
+        try {
+          const payload = await apiGet(`/scenes?datasource=${encodeURIComponent(traceTarget)}`)
+          setScenes(payload && payload.ok !== false && Array.isArray(payload.scenes) ? payload.scenes : [])
+        } catch {
+          setScenes([])
+        }
+      }, [traceTarget])
+
+      React.useEffect(() => {
+        if (tab !== 'trace') return
+        void loadScenes()
+      }, [tab, loadScenes])
+
       /** Follow one value; the panel never sends a statement, only a value.
        *
        * `confirmSlow` is the user saying yes to a full table scan the previous
-       * run refused to pay for. Nothing else in the panel can set it. */
-      const runTrace = async (confirmSlow) => {
+       * run refused to pay for. Nothing else in the panel can set it.
+       *
+       * `startAt` lets a candidate row in the result start the walk again from
+       * that column: the same value, a different entry. It is how the reader
+       * moves the start instead of re-typing the table and column by hand. */
+      const runTrace = async (confirmSlow, startAt) => {
         const value = String(traceValue || '').trim()
         if (!value) {
           setTraceError(t('trace.needValue'))
           return
         }
+        const entryTable = startAt && startAt.table ? startAt.table : traceTable.trim()
+        const entryColumn = startAt && startAt.column ? startAt.column : traceColumn.trim()
         setTraceBusy(true)
         setTraceError(null)
         setTraceOpen('')
+        setTraceExpanded([])
+        setTraceFocus(0)
         try {
           const payload = await apiPost('/trace', {
             value,
             datasource: traceTarget,
-            entry_table: traceTable.trim() || undefined,
-            entry_column: traceColumn.trim() || undefined,
+            entry_table: entryTable || undefined,
+            entry_column: entryColumn || undefined,
             direction: traceDirection,
             confirm_slow: confirmSlow === true ? true : undefined,
+            scene: traceScene || undefined,
           })
           if (payload && payload.ok === false) {
             const failure = payload.error || {}
@@ -3983,7 +4028,19 @@ function groupTables(tables) {
          statements are built server-side from the relation graph, so the panel
          cannot become a SQL console by degrees. What comes back is a walk, and the
          walk is what the reader has to judge — so every step carries the feedback
-         buttons for the edge that carried it there. */
+         buttons for the edge that carried it there.
+
+         A walk is a shape, so the default reading is a tree: the indent is the
+         parent link the server reported, and the edge line above each node is the
+         join that carried the value there. The flat list is kept as the second
+         reading, because sometimes you want to see the order it ran. */
+
+      /** Which way the value travelled over this edge to reach this node. */
+      const traceStepDirection = (edge, table) => {
+        if (!edge || !edge.to || !table) return 'down'
+        return String(edge.to.table || '').toLowerCase() === String(table).toLowerCase() ? 'up' : 'down'
+      }
+
       const traceCondition = (step) => {
         const condition = step.condition || {}
         const binds = (condition.binds || []).map((item) => String(item))
@@ -4037,15 +4094,236 @@ function groupTables(tables) {
         )
       }
 
-      const renderTraceStep = (step) => {
+      /** The chip that explains how much this join is trusted.
+       *
+       * Inside a scene a hand-added or mined edge is a claim the scene makes, and
+       * saying "confirmed" there would overstate it: the database never declared
+       * that join. So the chip says what the edge actually is. */
+      const traceEdgeChip = (edge, sceneOn) => {
+        if (!edge) return null
+        if (sceneOn && (edge.source === 'manual' || edge.source === 'audit_mined')) {
+          return h('span', { className: 'dbmcp-pill dbmcp-edge-chip is-scene' }, t('trace.sceneClaim'))
+        }
+        return h('span', { className: edgeStatusClass(edge.status) }, edgeStatusLabel(edge.status))
+      }
+
+      /** The values the walk carried into a node, as one readable line. */
+      const traceValues = (step) => {
+        const binds = ((step.condition || {}).binds || []).map((item) => String(item))
+        if (binds.length === 0) return '—'
+        const shown = binds.length > 4 ? binds.slice(0, 4).concat('…') : binds
+        return shown.join(' · ')
+      }
+
+      /** The rows behind a node, opened on demand. The column the walk bound to is
+       * highlighted because that is the one the reader is checking. */
+      const traceRows = (step) => {
+        const sample = step.sample || {}
+        const columns = sample.columns || []
+        const rows = sample.rows || []
+        if (columns.length === 0 || rows.length === 0) return null
+        const bound = ((step.condition || {}).column || '').toLowerCase()
+        return h(
+          'table',
+          { className: 'dbmcp-trace-table' },
+          h(
+            'thead',
+            null,
+            h(
+              'tr',
+              null,
+              columns.map((column) =>
+                h(
+                  'th',
+                  { key: column, className: String(column).toLowerCase() === bound ? 'is-bound' : undefined },
+                  column,
+                ),
+              ),
+            ),
+          ),
+          h(
+            'tbody',
+            null,
+            rows.map((row, rowIndex) =>
+              h(
+                'tr',
+                { key: rowIndex },
+                columns.map((column, columnIndex) =>
+                  h(
+                    'td',
+                    { key: `${column}:${columnIndex}`, className: String(column).toLowerCase() === bound ? 'is-bound' : undefined },
+                    row[columnIndex] === null || row[columnIndex] === undefined ? '∅' : String(row[columnIndex]),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        )
+      }
+
+      const toggleExpanded = (index) => {
+        setTraceExpanded((current) =>
+          current.includes(index) ? current.filter((item) => item !== index) : current.concat(index),
+        )
+      }
+
+      /** One step, read in full: the join that carried the value there, the values
+       * it was bound to, how many rows it hit and how long it took. This is what
+       * sits under the graph for whichever table the reader picked, so the shape
+       * and the values are one view instead of two stacked ones. */
+      const traceDetailNode = (node, sceneOn) => {
+        const status = node.status || 'hit'
+        const edge = node.edge || null
+        const slow = status === 'needs_confirm'
+        const open = traceExpanded.includes(node.index)
+        const rows = node.rows || 0
+        const direction = node.index === 1 || !edge ? null : traceStepDirection(edge, node.table)
+        return h(
+          'div',
+          {
+            key: `n${node.index}`,
+            className: `dbmcp-trace-node is-${slow ? 'pending' : status === 'empty' ? 'stale' : status === 'error' ? 'rejected' : node.repeated ? 'repeat' : 'confirmed'}`,
+          },
+          h(
+            'div',
+            { className: 'dbmcp-trace-node-head' },
+            h(
+              'span',
+              { className: 'dbmcp-trace-mark' },
+              node.index === 1 ? t('trace.root') : `d${node.depth}`,
+            ),
+            h('code', { className: 'dbmcp-trace-name' }, node.table),
+            h('span', { className: 'dbmcp-pill' }, fmt(t('trace.rows'), { n: rows })),
+            node.repeated ? h('span', { className: 'dbmcp-pill' }, '↻') : null,
+            node.truncated ? h('span', { className: 'dbmcp-pill dbmcp-trace-cut' }, t('trace.truncated')) : null,
+            slow ? h('span', { className: edgeStatusClass('pending') }, t('trace.needsConfirmChip')) : null,
+            node.index === 1
+              ? h(
+                  'span',
+                  { className: 'dbmcp-inline' },
+                  h(
+                    'button',
+                    {
+                      type: 'button',
+                      className: 'dbmcp-btn is-small is-plain',
+                      onClick: () => {
+                        setTraceTable(node.table)
+                        setTraceColumn(node.condition ? node.condition.column : '')
+                      },
+                    },
+                    t('trace.changeEntry'),
+                  ),
+                )
+              : null,
+          ),
+          direction
+            ? h(
+                'p',
+                { className: 'dbmcp-hint dbmcp-trace-edge' },
+                h('span', { className: 'dbmcp-trace-arrow' }, direction === 'up' ? `↑ ${t('trace.up')}` : `↓ ${t('trace.down')}`),
+                ' ',
+                h(
+                  'code',
+                  null,
+                  edge ? `${edge.from.table}.${edge.from.column} → ${edge.to.table}.${edge.to.column}` : '',
+                ),
+                ' ',
+                traceEdgeChip(edge, sceneOn),
+                edge
+                  ? h(
+                      'span',
+                      { className: 'dbmcp-inline dbmcp-trace-judge' },
+                      h(
+                        'button',
+                        {
+                          type: 'button',
+                          className: 'dbmcp-btn is-small is-plain',
+                          title: t('trace.judgeOk'),
+                          onClick: () => void judgeStep(edge.id, 'ok'),
+                        },
+                        '✓',
+                      ),
+                      h(
+                        'button',
+                        {
+                          type: 'button',
+                          className: 'dbmcp-btn is-small is-plain',
+                          title: t('trace.judgeWrong'),
+                          onClick: () => setTraceOpen(traceOpen === `${node.index}` ? '' : `${node.index}`),
+                        },
+                        '✗',
+                      ),
+                    )
+                  : null,
+              )
+            : null,
+          h(
+            'p',
+            { className: 'dbmcp-hint dbmcp-trace-values' },
+            slow
+              ? t('trace.needsConfirm')
+              : status === 'empty'
+                ? t('trace.chainBreaks')
+                : status === 'error'
+                  ? t('trace.stepFailed')
+                  : traceValues(node),
+            slow ? '' : typeof node.ms === 'number' ? ` · ${fmt(t('trace.stepMs'), { ms: node.ms })}` : '',
+            slow ? '' : typeof node.fanout === 'number' ? ` · ${fmt(t('graph.fanout'), { value: node.fanout.toFixed(1) })}` : '',
+          ),
+          slow
+            ? h(
+                'div',
+                { className: 'dbmcp-inline dbmcp-trace-judge' },
+                h(
+                  'button',
+                  {
+                    type: 'button',
+                    className: 'dbmcp-btn is-small',
+                    disabled: traceBusy,
+                    onClick: () => {
+                      void runTrace(true)
+                    },
+                  },
+                  t('trace.continueAnyway'),
+                ),
+              )
+            : null,
+          slow ? null : node.note ? h('p', { className: 'dbmcp-hint dbmcp-trace-note' }, node.note) : null,
+          node.repeated ? h('p', { className: 'dbmcp-hint dbmcp-trace-note' }, t('trace.repeatedNote')) : null,
+          slow || rows === 0
+            ? null
+            : h(
+                'div',
+                { className: 'dbmcp-inline dbmcp-trace-more' },
+                h(
+                  'button',
+                  { type: 'button', className: 'dbmcp-btn is-small is-plain', onClick: () => toggleExpanded(node.index) },
+                  open ? t('trace.hideRows') : fmt(t('trace.showRowsN'), { n: rows }),
+                ),
+                traceOpen === `${node.index}`
+                  ? h(
+                      'span',
+                      { className: 'dbmcp-inline dbmcp-trace-reasons' },
+                      h('button', { type: 'button', className: 'dbmcp-btn is-small', onClick: () => void judgeStep(edge.id, 'too_many', 'not_unique') }, t('graph.reasonNotUnique')),
+                      h('button', { type: 'button', className: 'dbmcp-btn is-small', onClick: () => void judgeStep(edge.id, 'too_many', 'wrong_column') }, t('graph.reasonWrongColumn')),
+                      h('button', { type: 'button', className: 'dbmcp-btn is-small', onClick: () => void judgeStep(edge.id, 'too_many', 'needs_condition') }, t('graph.reasonNeedsCondition')),
+                      h('button', { type: 'button', className: 'dbmcp-btn is-small is-plain', onClick: () => void judgeStep(edge.id, 'missing') }, t('trace.judgeMissing')),
+                      h('button', { type: 'button', className: 'dbmcp-btn is-small is-danger', onClick: () => void judgeStep(edge.id, 'irrelevant') }, t('trace.judgeIrrelevant')),
+                    )
+                  : null,
+              ),
+          open ? traceRows(node) : null,
+        )
+      }
+
+      /** The second reading: the same steps in the order they ran, no indent. */
+      const renderTraceFlat = (step) => {
         const status = step.status || 'hit'
         const edge = step.edge || null
-        /* A step that was not run because it would scan a whole table reads as a
-         * question, not a result: no rows, no SQL, just what it would cost. */
         const slow = status === 'needs_confirm'
         return h(
           'div',
-          { key: `${step.index}:${step.table}:${step.depth}`, className: `dbmcp-edge dbmcp-trace-step is-${slow ? 'pending' : status === 'empty' ? 'stale' : status === 'error' ? 'rejected' : 'confirmed'}` },
+          { key: `f${step.index}`, className: `dbmcp-edge dbmcp-trace-step is-${slow ? 'pending' : status === 'empty' ? 'stale' : status === 'error' ? 'rejected' : 'confirmed'}` },
           h(
             'div',
             { className: 'dbmcp-edge-head' },
@@ -4103,13 +4381,338 @@ function groupTables(tables) {
         )
       }
 
+      /** Fold a table into the scene the reader is currently using, then re-run.
+       * The scene is the only thing that decides what a walk may read, so this is
+       * the one click that turns "not read" into "read". */
+      const traceAddToScene = async (table) => {
+        const scene = scenes.find((item) => item.id === traceScene)
+        if (!scene) return
+        const tables = Array.from(new Set([...(scene.tables || []), table]))
+        setTraceBusy(true)
+        try {
+          const payload = await apiPost('/scenes/save', {
+            datasource: traceTarget,
+            scene_id: scene.id,
+            name: scene.name,
+            tables,
+            note: scene.note || undefined,
+          })
+          if (payload && payload.ok === false) {
+            const failure = payload.error || {}
+            setTraceError(failure.message || 'save_scene failed')
+            return
+          }
+          await loadScenes()
+          await runTrace()
+        } catch (error) {
+          setTraceError(String((error && error.message) || error))
+        } finally {
+          setTraceBusy(false)
+        }
+      }
+
+      /** Clicking a box in the graph asks for that step's values, which are read
+       * underneath the picture — one view, not a graph next to a tree. */
+      const focusTraceNode = (index) => {
+        setTraceFocus(index)
+        if (typeof document === 'undefined') return
+        const host = document.getElementById('dbmcp-trace-detail')
+        if (host && typeof host.scrollIntoView === 'function') {
+          host.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+        }
+      }
+
+      /** Every node, depth first, so the panel can find the one the graph points at. */
+      const traceAllNodes = (nodes) => {
+        const out = []
+        const visit = (list) => {
+          list.forEach((node) => {
+            out.push(node)
+            if (node.children && node.children.length) visit(node.children)
+          })
+        }
+        visit(nodes)
+        return out
+      }
+
+      /**
+       * The walk as a picture: one column per depth, left to right, one box per
+       * table reached, and every join drawn as an edge labelled with the pair of
+       * columns it compares. A join walk is a shape, so the shape is the whole
+       * view; clicking a box reads that step underneath it.
+       */
+      const traceLanes = (nodes) => {
+        const lanes = []
+        const place = (list) => {
+          list.forEach((node) => {
+            const depth = node.depth || 0
+            while (lanes.length <= depth) lanes.push([])
+            lanes[depth].push(node)
+            if (node.children && node.children.length) place(node.children)
+          })
+        }
+        place(nodes)
+        return lanes
+      }
+
+      /**
+       * Sugiyama's third step, which every layered drawing engine does (dagre
+       * calls it `order`): put each lane in the order that draws the fewest
+       * crossings, by repeatedly sorting a lane on the average row of the nodes
+       * it connects to in the neighbouring lane — down, then up — and keeping
+       * whichever sweep scored best. Arrival order, which is what a BFS hands
+       * us, is exactly the order that draws the most crossings.
+       */
+      const traceOrder = (lanes) => {
+        const crossings = (state) => {
+          let total = 0
+          for (let depth = 1; depth < state.length; depth += 1) {
+            const rows = {}
+            state[depth].forEach((node, row) => { rows[node.index] = row })
+            const pairs = []
+            state[depth].forEach((node) => {
+              if (node.parent === null || node.parent === undefined) return
+              const from = state[depth - 1].findIndex((other) => other.index === node.parent)
+              if (from < 0) return
+              pairs.push([from, rows[node.index]])
+            })
+            for (let i = 0; i < pairs.length; i += 1) {
+              for (let j = i + 1; j < pairs.length; j += 1) {
+                if ((pairs[i][0] - pairs[j][0]) * (pairs[i][1] - pairs[j][1]) < 0) total += 1
+              }
+            }
+          }
+          return total
+        }
+        /* A node with no neighbour to average falls back to where it already
+           sits, so the sort only moves what it has evidence about. */
+        const sortLane = (lane, weightOf) => lane
+          .map((node, row) => ({ node, row, weight: weightOf(node) }))
+          .sort((left, right) => {
+            const a = left.weight === null ? left.row : left.weight
+            const b = right.weight === null ? right.row : right.weight
+            return a === b ? left.row - right.row : a - b
+          })
+          .map((item) => item.node)
+        let best = lanes.map((lane) => lane.slice())
+        let bestScore = crossings(best)
+        let current = best.map((lane) => lane.slice())
+        for (let pass = 0; pass < 4 && bestScore > 0; pass += 1) {
+          for (let depth = 1; depth < current.length; depth += 1) {
+            const above = {}
+            current[depth - 1].forEach((node, row) => { above[node.index] = row })
+            current[depth] = sortLane(current[depth], (node) => (
+              node.parent !== null && node.parent !== undefined && above[node.parent] !== undefined
+                ? above[node.parent]
+                : null
+            ))
+          }
+          for (let depth = current.length - 2; depth >= 0; depth -= 1) {
+            const below = {}
+            current[depth + 1].forEach((node, row) => { below[node.index] = row })
+            current[depth] = sortLane(current[depth], (node) => {
+              const kids = (node.children || []).filter((child) => below[child.index] !== undefined)
+              if (kids.length === 0) return null
+              return kids.reduce((sum, child) => sum + below[child.index], 0) / kids.length
+            })
+          }
+          const score = crossings(current)
+          if (score < bestScore) {
+            bestScore = score
+            best = current.map((lane) => lane.slice())
+          }
+        }
+        return best
+      }
+
+      const traceOverview = () => {
+        const nodes = (trace && trace.nodes) || []
+        if (nodes.length === 0) return null
+        const lanes = traceOrder(traceLanes(nodes))
+        /* Nothing picked yet means the entry: the walk starts somewhere, and the
+           detail under the graph should start there too. */
+        const current = traceFocus || (nodes[0] && nodes[0].index) || 0
+        /* One lane per depth, so the walk reads left to right: the entry on the
+           left, everything it drags in further right. Each lane ends with a
+           gutter that only that lane's labels use: the curve stops at the
+           gutter's left edge and a short horizontal stub carries it into the
+           box, so a label written above the stub has no other curve to fight
+           with. Labels written into the middle of the gap, which is what we did
+           first, get crossed by every sibling curve that sweeps past them. */
+        const LANE_W = 340
+        const ROW_H = 58
+        const PAD = 18
+        const HEAD = 22
+        const BOX_W = 150
+        const BOX_H = 40
+        const GUTTER = 150
+        const width = PAD * 2 + Math.max(lanes.length - 1, 0) * LANE_W + BOX_W
+        let busiest = 0
+        lanes.forEach((lane) => {
+          if (lane.length > busiest) busiest = lane.length
+        })
+        const height = HEAD + PAD + Math.max(busiest, 1) * ROW_H
+        const spots = {}
+        lanes.forEach((lane, depth) => {
+          lane.forEach((node, row) => {
+            spots[node.index] = {
+              depth,
+              x: PAD + depth * LANE_W,
+              y: HEAD + PAD + row * ROW_H,
+            }
+          })
+        })
+        const links = []
+        const labels = []
+        const boxes = []
+        /* A parent with six children used to launch all six curves from the same
+           point, which reads as one grey smear. Spreading the exits down its
+           right edge keeps each join a line you can follow. */
+        const fanout = {}
+        lanes.forEach((lane) => {
+          lane.forEach((node) => {
+            if (node.parent) fanout[node.parent] = (fanout[node.parent] || 0) + 1
+          })
+        })
+        const taken = {}
+        lanes.forEach((lane) => {
+          lane.forEach((node) => {
+            const here = spots[node.index]
+            if (!here) return
+            const name = String(node.table || '')
+            const short = name.length > 20 ? `${name.slice(0, 19)}…` : name
+            const status = node.repeated ? 'repeat' : node.status || 'hit'
+            const focused = node.index === current
+            boxes.push(
+              h(
+                'g',
+                {
+                  key: `ov${node.index}`,
+                  className: 'dbmcp-ov-hit',
+                  onClick: () => focusTraceNode(node.index),
+                  onKeyDown: (event) => {
+                    if (event.key === 'Enter' || event.key === ' ') focusTraceNode(node.index)
+                  },
+                  tabIndex: 0,
+                  role: 'button',
+                  'aria-label': `${node.table} · ${fmt(t('trace.rows'), { n: node.rows || 0 })}`,
+                },
+                h('rect', {
+                  className: `dbmcp-ov-node is-${status === 'needs_confirm' ? 'pending' : status === 'empty' ? 'stale' : status === 'error' ? 'rejected' : status}${focused ? ' is-focus' : ''}`,
+                  x: here.x,
+                  y: here.y,
+                  width: BOX_W,
+                  height: BOX_H,
+                  rx: 7,
+                }),
+                h(
+                  'text',
+                  { className: 'dbmcp-ov-text', x: here.x + BOX_W / 2, y: here.y + 17, textAnchor: 'middle' },
+                  short,
+                ),
+                h(
+                  'text',
+                  { className: 'dbmcp-ov-sub', x: here.x + BOX_W / 2, y: here.y + 31, textAnchor: 'middle' },
+                  node.repeated
+                    ? `${fmt(t('trace.rows'), { n: node.rows || 0 })} · ↻`
+                    : fmt(t('trace.rows'), { n: node.rows || 0 }),
+                ),
+                h('title', null, `${node.table} · ${fmt(t('trace.rows'), { n: node.rows || 0 })}`),
+              ),
+            )
+            const parent = node.parent ? spots[node.parent] : null
+            if (!parent) return
+            /* Walk the exits down the parent's right edge instead of stacking
+               them at one point. */
+            const order = taken[node.parent] || 0
+            taken[node.parent] = order + 1
+            const count = fanout[node.parent] || 1
+            const spread = Math.min(BOX_H - 10, 8 * Math.max(count - 1, 0))
+            const offset = count > 1 ? (BOX_H / 2 - 4) - (spread / (count - 1)) * order : BOX_H / 2
+            const x1 = parent.x + BOX_W
+            const y1 = parent.y + Math.max(4, Math.min(BOX_H - 4, offset))
+            /* The curve ends in the gutter, then a straight stub enters the box:
+               the label lives above the stub, and the only line in that band is
+               the stub itself, so nothing can cross the text. */
+            const x2 = here.x
+            const y2 = here.y + BOX_H / 2
+            const elbow = x2 - GUTTER
+            const mid = (x1 + elbow) / 2
+            links.push(
+              h('path', {
+                key: `ln${node.index}`,
+                className: `dbmcp-ov-link is-${status === 'needs_confirm' ? 'pending' : status === 'empty' ? 'stale' : status === 'error' ? 'rejected' : 'walked'}`,
+                d: `M ${x1} ${y1} C ${mid} ${y1}, ${mid} ${y2}, ${elbow} ${y2} L ${x2} ${y2}`,
+              }),
+            )
+            /* The edge carries the pair of columns it compares, written in the
+               gutter above its own stub. Nothing else is drawn in that band — the
+               curves all stop at the gutter's left edge and only horizontal stubs
+               cross it, each on its own row — so the text cannot be crossed. */
+            const edge = node.edge || null
+            const join = edge ? `${edge.from.column} → ${edge.to.column}` : ''
+            const clipped = join.length > 24 ? `${join.slice(0, 23)}…` : join
+            if (clipped) {
+              labels.push(
+                h(
+                  'text',
+                  {
+                    key: `el${node.index}`,
+                    className: 'dbmcp-ov-edge-label',
+                    x: x2 - GUTTER + 8,
+                    y: y2 - 6,
+                    textAnchor: 'start',
+                  },
+                  clipped,
+                ),
+              )
+            }
+          })
+        })
+        const heads = lanes.map((lane, depth) =>
+          h(
+            'text',
+            {
+              key: `hd${depth}`,
+              className: 'dbmcp-ov-head',
+              x: PAD + depth * LANE_W + BOX_W / 2,
+              y: 12,
+              textAnchor: 'middle',
+            },
+            depth === 0 ? t('trace.root') : `d${depth}`,
+          ),
+        )
+        return h(
+          'div',
+          { className: 'dbmcp-trace-overview' },
+          h(
+            'svg',
+            {
+              className: 'dbmcp-ov-svg',
+              viewBox: `0 0 ${width} ${height}`,
+              style: { width: `${width}px`, height: `${height}px` },
+              role: 'img',
+              'aria-label': t('trace.overview'),
+            },
+            heads,
+            links,
+            labels,
+            boxes,
+          ),
+        )
+      }
+
       const renderTrace = () => {
         const summary = (trace && trace.summary) || null
         const steps = (trace && trace.steps) || []
+        const nodes = (trace && trace.nodes) || []
+        const outside = (trace && trace.outside) || []
         const pending = (trace && trace.pending) || []
         const warnings = (trace && trace.warnings) || []
         const stopped = (trace && trace.stoppedAt) || []
         const entry = (trace && trace.entry) || null
+        const candidates = (entry && Array.isArray(entry.candidates)) ? entry.candidates : []
+        const sceneOn = Boolean(traceScene)
         const directions = [
           { id: 'both', label: t('trace.dirBoth') },
           { id: 'down', label: t('trace.dirDown') },
@@ -4123,6 +4726,7 @@ function groupTables(tables) {
                 value: traceTarget,
                 onChange: (event) => {
                   setTraceSource(event.target.value)
+                  setTraceScene('')
                   setTrace(null)
                   setTraceError(null)
                 },
@@ -4130,11 +4734,61 @@ function groupTables(tables) {
               sources.map((item) => h('option', { key: item.id, value: item.id }, item.name || item.id)),
             )
           : null
+        const scenePick = h(
+          'select',
+          {
+            className: 'dbmcp-input dbmcp-select',
+            value: traceScene,
+            onChange: (event) => setTraceScene(event.target.value),
+          },
+          h('option', { value: '' }, t('trace.sceneAll')),
+          scenes.map((item) =>
+            h('option', { key: item.id, value: item.id }, `${item.name} · ${fmt(t('trace.sceneTables'), { n: item.tableCount })}`),
+          ),
+        )
+        const dirPick = h(
+          'div',
+          { className: 'dbmcp-inline dbmcp-trace-dirs' },
+          directions.map((item) =>
+            h(
+              'button',
+              {
+                key: item.id,
+                type: 'button',
+                className: `dbmcp-btn is-small${traceDirection === item.id ? ' is-primary' : ''}`,
+                title: item.label,
+                onClick: () => setTraceDirection(item.id),
+              },
+              item.id === 'both' ? t('trace.dirBothShort') : item.id === 'up' ? '↑' : '↓',
+            ),
+          ),
+        )
         return h(
           Card,
           {
             title: t('trace.title'),
-            aside: summary ? h('span', { className: 'dbmcp-pill' }, `${summary.tablesHit} / ${summary.tablesVisited}`) : null,
+            aside: h(
+              'div',
+              { className: 'dbmcp-inline dbmcp-trace-views' },
+              h(
+                'button',
+                {
+                  type: 'button',
+                  className: `dbmcp-btn is-small${traceView === 'tree' ? ' is-primary' : ''}`,
+                  onClick: () => setTraceView('tree'),
+                },
+                t('trace.viewGraph'),
+              ),
+              h(
+                'button',
+                {
+                  type: 'button',
+                  className: `dbmcp-btn is-small${traceView === 'flat' ? ' is-primary' : ''}`,
+                  onClick: () => setTraceView('flat'),
+                },
+                t('trace.viewFlat'),
+              ),
+            ),
           },
           h('p', { className: 'dbmcp-hint' }, t('trace.hint')),
           sources.length === 0
@@ -4163,38 +4817,14 @@ function groupTables(tables) {
                   h(
                     'label',
                     { className: 'dbmcp-cell' },
-                    h('span', { className: 'dbmcp-label' }, t('trace.entryTable')),
-                    h('input', {
-                      className: 'dbmcp-input dbmcp-mono',
-                      value: traceTable,
-                      placeholder: t('trace.entryOptional'),
-                      onChange: (event) => setTraceTable(event.target.value),
-                    }),
-                  ),
-                  h(
-                    'label',
-                    { className: 'dbmcp-cell' },
-                    h('span', { className: 'dbmcp-label' }, t('trace.entryColumn')),
-                    h('input', {
-                      className: 'dbmcp-input dbmcp-mono',
-                      value: traceColumn,
-                      placeholder: t('trace.entryOptional'),
-                      onChange: (event) => setTraceColumn(event.target.value),
-                    }),
+                    h('span', { className: 'dbmcp-label' }, t('trace.scene')),
+                    scenePick,
                   ),
                   h(
                     'label',
                     { className: 'dbmcp-cell' },
                     h('span', { className: 'dbmcp-label' }, t('trace.direction')),
-                    h(
-                      'select',
-                      {
-                        className: 'dbmcp-input dbmcp-select',
-                        value: traceDirection,
-                        onChange: (event) => setTraceDirection(event.target.value),
-                      },
-                      directions.map((item) => h('option', { key: item.id, value: item.id }, item.label)),
-                    ),
+                    dirPick,
                   ),
                 ),
                 h(
@@ -4205,12 +4835,67 @@ function groupTables(tables) {
                     { type: 'button', className: 'dbmcp-btn is-small is-primary', disabled: traceBusy || !traceTarget, onClick: () => void runTrace() },
                     traceBusy ? t('trace.running') : t('trace.run'),
                   ),
+                  h(
+                    'button',
+                    {
+                      type: 'button',
+                      className: `dbmcp-btn is-small${traceManual ? ' is-primary' : ' is-plain'}`,
+                      onClick: () => setTraceManual(!traceManual),
+                      title: t('trace.manualEntry'),
+                    },
+                    t('trace.manualEntry'),
+                  ),
                 ),
+                traceManual
+                  ? h(
+                      'div',
+                      { className: 'dbmcp-trace-grid' },
+                      h(
+                        'label',
+                        { className: 'dbmcp-cell' },
+                        h('span', { className: 'dbmcp-label' }, t('trace.entryTable')),
+                        h('input', {
+                          className: 'dbmcp-input dbmcp-mono',
+                          value: traceTable,
+                          placeholder: t('trace.entryOptional'),
+                          onChange: (event) => setTraceTable(event.target.value),
+                        }),
+                      ),
+                      h(
+                        'label',
+                        { className: 'dbmcp-cell' },
+                        h('span', { className: 'dbmcp-label' }, t('trace.entryColumn')),
+                        h('input', {
+                          className: 'dbmcp-input dbmcp-mono',
+                          value: traceColumn,
+                          placeholder: t('trace.entryOptional'),
+                          onChange: (event) => setTraceColumn(event.target.value),
+                        }),
+                      ),
+                    )
+                  : null,
               ),
           traceError ? h('p', { className: 'dbmcp-hint dbmcp-edge-error' }, traceError) : null,
           traceBusy && !trace ? h('p', { className: 'dbmcp-hint' }, t('loading')) : null,
-          trace && steps.length === 0
-            ? h('p', { className: 'dbmcp-hint' }, t('trace.nothing'))
+          trace && steps.length === 0 ? h('p', { className: 'dbmcp-hint' }, t('trace.nothing')) : null,
+          trace && candidates.length > 1
+            ? h(
+                'div',
+                { className: 'dbmcp-trace-candidates' },
+                h('span', { className: 'dbmcp-hint' }, fmt(t('trace.appearsIn'), { n: candidates.length })),
+                candidates.map((item, index) =>
+                  h(
+                    'button',
+                    {
+                      key: `${item.table}:${item.column}:${index}`,
+                      type: 'button',
+                      className: `dbmcp-btn is-small${item.table === (entry && entry.table) && item.column === (entry && entry.column) ? ' is-primary' : ''}`,
+                      onClick: () => void runTrace(undefined, { table: item.table, column: item.column }),
+                    },
+                    `${item.table}.${item.column}${typeof item.matches === 'number' ? ` · ${fmt(t('trace.rows'), { n: item.matches })}` : ''}`,
+                  ),
+                ),
+              )
             : null,
           trace && summary && steps.length > 0
             ? h(
@@ -4231,13 +4916,65 @@ function groupTables(tables) {
                     rows: summary.rowsRead,
                     depth: summary.depthReached,
                   }),
+                  summary.outside ? ` · ${fmt(t('trace.outsideCount'), { n: summary.outside })}` : '',
                 ),
                 summary.needsConfirm
                   ? h('p', { className: 'dbmcp-hint dbmcp-edge-why' }, fmt(t('trace.needsConfirmSome'), { n: summary.needsConfirm }))
                   : null,
               )
             : null,
-          steps.length > 0 ? h('div', { className: 'dbmcp-edges' }, steps.map(renderTraceStep)) : null,
+          steps.length > 0 && traceView === 'tree' ? traceOverview() : null,
+          steps.length > 0 && traceView === 'tree'
+            ? h(
+                'div',
+                { className: 'dbmcp-trace-detail', id: 'dbmcp-trace-detail' },
+                traceDetailNode(
+                  traceAllNodes(nodes).find((node) => node.index === traceFocus) || nodes[0],
+                  sceneOn,
+                ),
+              )
+            : null,
+          steps.length > 0 && traceView === 'flat'
+            ? h('div', { className: 'dbmcp-edges' }, steps.map(renderTraceFlat))
+            : null,
+          outside.length > 0
+            ? h(
+                'div',
+                { className: 'dbmcp-trace-aside' },
+                h('p', { className: 'dbmcp-label' }, t('trace.outsideTitle')),
+                h('p', { className: 'dbmcp-hint' }, t('trace.outsideNote')),
+                outside.map((item, index) =>
+                  h(
+                    'div',
+                    { key: `${item.table}:${index}`, className: 'dbmcp-trace-outside' },
+                    h('div', { className: 'dbmcp-trace-node-head' },
+                      h('code', { className: 'dbmcp-trace-name' }, item.table),
+                      h('span', { className: 'dbmcp-pill dbmcp-edge-chip is-outside' }, t('trace.outsideChip')),
+                    ),
+                    h('p', { className: 'dbmcp-hint' }, item.reason),
+                    sceneOn
+                      ? h(
+                          'button',
+                          {
+                            type: 'button',
+                            className: 'dbmcp-btn is-small',
+                            disabled: traceBusy,
+                            onClick: () => void traceAddToScene(item.table),
+                          },
+                          t('trace.addToScene'),
+                        )
+                      : null,
+                  ),
+                ),
+              )
+            : null,
+          steps.length > 0
+            ? h(
+                'p',
+                { className: 'dbmcp-hint dbmcp-trace-legend' },
+                `${t('trace.legend')} ${t('graph.statusTrusted')} / ${t('graph.statusConfirmed')} / ${t('trace.sceneClaim')} / ${t('trace.outsideChip')} — ${t('trace.legendFeedback')}`,
+              )
+            : null,
           stopped.length > 0
             ? h(
                 'div',

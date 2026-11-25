@@ -2318,6 +2318,246 @@
         flex-wrap: wrap;
       }
 
+      /* The overview strip: the same walk as the tree below, but with the shape
+         as the subject. One column per depth, so "how deep did this go, and where
+         did it fan out" is answered before reading a single row. */
+      .dbmcp-trace-overview {
+        margin-top: 10px;
+        padding: 8px;
+        border: 1px solid var(--dsw-alias-border-l1);
+        border-radius: 10px;
+        background: var(--dsw-alias-bg-layer-2);
+        overflow-x: auto;
+      }
+      .dbmcp-ov-svg {
+        display: block;
+      }
+      .dbmcp-ov-head {
+        font-size: 10px;
+        fill: var(--dsw-alias-label-secondary);
+        font-variant-numeric: tabular-nums;
+      }
+      .dbmcp-ov-link {
+        fill: none;
+        stroke: var(--dsw-alias-border-l1);
+        stroke-width: 1.2;
+      }
+      .dbmcp-ov-link.is-pending {
+        stroke: var(--dsw-alias-state-warn-primary);
+        stroke-dasharray: 4 3;
+      }
+      .dbmcp-ov-link.is-stale {
+        stroke: var(--dsw-alias-state-error-primary);
+      }
+      .dbmcp-ov-link.is-rejected {
+        stroke: var(--dsw-alias-state-error-primary);
+        stroke-dasharray: 2 3;
+      }
+      .dbmcp-ov-edge-label {
+        font-size: 10px;
+        fill: var(--dsw-alias-label-secondary);
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        /* A halo of the card colour, so a label crossing its own curve stays
+           readable instead of merging with it. */
+        paint-order: stroke;
+        stroke: var(--dsw-alias-bg-layer-2);
+        stroke-width: 3px;
+        stroke-linejoin: round;
+      }
+      .dbmcp-ov-hit {
+        cursor: pointer;
+      }
+      .dbmcp-ov-hit:focus-visible .dbmcp-ov-node {
+        stroke: var(--dsw-alias-brand-primary);
+        stroke-width: 2;
+      }
+      .dbmcp-ov-node {
+        fill: var(--dsw-alias-bg-base);
+        stroke: var(--dsw-alias-border-l1);
+        stroke-width: 1;
+      }
+      .dbmcp-ov-node.is-pending {
+        stroke: var(--dsw-alias-state-warn-primary);
+        stroke-dasharray: 3 2;
+      }
+      .dbmcp-ov-node.is-stale {
+        stroke: var(--dsw-alias-state-error-primary);
+      }
+      .dbmcp-ov-node.is-rejected {
+        stroke: var(--dsw-alias-state-error-primary);
+        stroke-dasharray: 2 2;
+      }
+      .dbmcp-ov-node.is-repeat {
+        fill: transparent;
+        stroke: var(--dsw-alias-border-l1);
+        stroke-dasharray: 3 3;
+      }
+      .dbmcp-ov-node.is-focus {
+        stroke: var(--dsw-alias-brand-primary);
+        stroke-width: 2;
+      }
+      .dbmcp-ov-text {
+        font-size: 12px;
+        fill: var(--dsw-alias-label-primary);
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+      .dbmcp-ov-sub {
+        font-size: 10px;
+        fill: var(--dsw-alias-label-secondary);
+        font-variant-numeric: tabular-nums;
+      }
+
+      /* The step that was picked in the graph. There is no second tree under the
+         graph: the picture carries the shape, and this card carries the values. */
+      .dbmcp-trace-detail {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        margin-top: 10px;
+      }
+      .dbmcp-trace-node {
+        border: 1px solid var(--dsw-alias-border-l1);
+        border-radius: 10px;
+        background: var(--dsw-alias-bg-layer-2);
+        padding: 8px 10px;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      .dbmcp-trace-node.is-stale {
+        border-color: var(--dsw-alias-state-error-primary);
+      }
+      .dbmcp-trace-node.is-pending {
+        border-style: dashed;
+        border-color: var(--dsw-alias-state-warn-primary);
+      }
+      .dbmcp-trace-node.is-repeat {
+        border-style: dashed;
+        background: transparent;
+      }
+      .dbmcp-trace-node.is-focus {
+        border-color: var(--dsw-alias-brand-primary);
+        box-shadow: 0 0 0 1px var(--dsw-alias-brand-primary) inset;
+      }
+      .dbmcp-trace-node-head {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-wrap: wrap;
+      }
+      .dbmcp-trace-mark {
+        flex: 0 0 auto;
+        min-width: 30px;
+        text-align: center;
+        font-size: 11px;
+        line-height: 18px;
+        padding: 0 5px;
+        border-radius: 999px;
+        color: var(--dsw-alias-label-secondary);
+        background: var(--dsw-alias-bg-base);
+        border: 1px solid var(--dsw-alias-border-l1);
+        font-variant-numeric: tabular-nums;
+      }
+      .dbmcp-trace-name {
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--dsw-alias-label-primary);
+      }
+      .dbmcp-trace-edge {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-wrap: wrap;
+        margin: 0;
+      }
+      .dbmcp-trace-arrow {
+        flex: 0 0 auto;
+        color: var(--dsw-alias-label-secondary);
+      }
+      .dbmcp-trace-edge code {
+        font-size: 12px;
+        color: var(--dsw-alias-label-secondary);
+        word-break: break-all;
+      }
+      .dbmcp-trace-values {
+        margin: 0;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 12px;
+        color: var(--dsw-alias-label-primary);
+        word-break: break-all;
+      }
+      .dbmcp-trace-note {
+        margin: 0;
+        font-size: 12px;
+      }
+      .dbmcp-trace-more {
+        margin-top: 2px;
+        flex-wrap: wrap;
+        row-gap: 4px;
+      }
+      .dbmcp-trace-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 6px;
+        font-size: 12px;
+        font-variant-numeric: tabular-nums;
+      }
+      .dbmcp-trace-table th,
+      .dbmcp-trace-table td {
+        text-align: left;
+        padding: 3px 8px;
+        border-bottom: 1px solid var(--dsw-alias-border-l1);
+        white-space: nowrap;
+      }
+      .dbmcp-trace-table th {
+        font-weight: 600;
+        color: var(--dsw-alias-label-secondary);
+        background: var(--dsw-alias-bg-base);
+      }
+      .dbmcp-trace-table th.is-bound,
+      .dbmcp-trace-table td.is-bound {
+        color: var(--dsw-alias-brand-primary);
+        background: var(--dsw-alias-bg-layer-2);
+      }
+      .dbmcp-trace-candidates {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-wrap: wrap;
+        padding: 6px 0;
+      }
+      .dbmcp-trace-tools {
+        flex-wrap: wrap;
+        row-gap: 4px;
+      }
+      .dbmcp-trace-views,
+      .dbmcp-trace-dirs {
+        gap: 4px;
+      }
+      .dbmcp-trace-outside {
+        border: 1px dashed var(--dsw-alias-border-l1);
+        border-radius: 10px;
+        padding: 8px 10px;
+        margin-top: 6px;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      .dbmcp-trace-legend {
+        margin: 10px 0 0;
+        padding-top: 8px;
+        border-top: 1px solid var(--dsw-alias-border-l1);
+        font-size: 12px;
+      }
+      .dbmcp-edge-chip.is-scene {
+        border-color: var(--dsw-alias-brand-primary);
+        color: var(--dsw-alias-brand-primary);
+      }
+      .dbmcp-edge-chip.is-outside {
+        border-style: dashed;
+        color: var(--dsw-alias-label-secondary);
+      }
+
       /* Narrow sidebar: two- and three-column rows have no room to sit side by
          side, and before this query they simply ran past the right edge — the
          labels and inputs on the right were cut off with no scrollbar to say
