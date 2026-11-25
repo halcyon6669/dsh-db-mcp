@@ -43,6 +43,22 @@ report of each version in more detail.
   in `settings.json` under `cost` and has a **Cost thresholds** card on the Relations
   tab. The Python server re-reads them on every decision, so a change applies to the
   next trace without a restart. The fanout cap stays a constant.
+- **Scenes.** A scene is a named set of tables for one datasource, managed with
+  `list_scenes`, `save_scene` and `delete_scene` (and the `/scenes` routes). A scene
+  owns no joins: it only says which tables a walk may read, so deleting one loses no
+  edge. Passing `scene` to `trace_by_key` narrows the walk to those tables — a join
+  leading out of the set is not followed, and the table it would reach is reported
+  under `outside` with the join and the reason.
+- **A walk comes back as a graph, not only a list.** `trace_by_key` now returns
+  `nodes`: the same steps linked by the join that reached each one, with `children`
+  under every node. `steps` stays the flat list and the only source of truth — the
+  graph is a reading of it. Each node also carries its `condition` (with the bound
+  `binds`), `sql` and `sample`, so a reader can render a step without re-reading
+  `steps`. A table reached again at a deeper depth is marked `repeated` and its
+  children are not walked twice, so a cycle walks each table once instead of fanning
+  out forever. The entry probe reports every candidate it tried with its row count
+  (`entry.candidates[].matches`), so a value that lives in several places can be
+  started from the one that was meant.
 
 ### Changed
 

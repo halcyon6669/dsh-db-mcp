@@ -3284,6 +3284,13 @@ export function createHost(options = {}) {
           const result = await callTool("list_edges", args);
           return sendJson(response, result.status, result.body);
         }
+        if (route === "/scenes") {
+          const search = new URL(request.url, "http://localhost").searchParams;
+          const result = await callTool("list_scenes", {
+            datasource: trimmed(search.get("datasource")) || undefined,
+          });
+          return sendJson(response, result.status, result.body);
+        }
         if (route === "/mcp/status") {
           const state = bridge.status();
           return sendJson(response, 200, {
@@ -3512,6 +3519,23 @@ export function createHost(options = {}) {
         });
         return sendJson(response, result.status, result.body);
       }
+      if (route === "/scenes/save") {
+        const result = await callTool("save_scene", {
+          name: trimmed(payload.name),
+          tables: Array.isArray(payload.tables) ? payload.tables : [],
+          datasource: trimmed(payload.datasource) || undefined,
+          note: trimmed(payload.note) || undefined,
+          scene_id: trimmed(payload.scene_id) || undefined,
+        });
+        return sendJson(response, result.status, result.body);
+      }
+      if (route === "/scenes/delete") {
+        const result = await callTool("delete_scene", {
+          scene_id: trimmed(payload.scene_id),
+          datasource: trimmed(payload.datasource) || undefined,
+        });
+        return sendJson(response, result.status, result.body);
+      }
       if (route === "/mcp/start" || route === "/mcp/restart") {
         const state =
           route === "/mcp/start"
@@ -3539,6 +3563,7 @@ export function createHost(options = {}) {
             typeof payload.max_rows_per_table === "number" ? payload.max_rows_per_table : undefined,
           direction: trimmed(payload.direction) || undefined,
           confirm_slow: payload.confirm_slow === true ? true : undefined,
+          scene: trimmed(payload.scene) || undefined,
         });
         return sendJson(response, result.status, result.body);
       }

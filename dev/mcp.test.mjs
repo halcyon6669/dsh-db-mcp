@@ -60,7 +60,11 @@ try {
   await client.start()
   check('initialize handshake', client.serverInfo !== null, JSON.stringify(client.serverInfo))
   const names = client.tools.map((tool) => tool.name).sort()
-  check('seventeen tools listed', names.length === 17 && names.includes('test_connection') && names.includes('get_ddl'), names.join(', '))
+  check(
+    'twenty tools listed',
+    names.length === 20 && names.includes('test_connection') && names.includes('get_ddl'),
+    names.join(', '),
+  )
   check(
     'tool names',
     [
@@ -75,6 +79,9 @@ try {
       'scan_code_relations',
       'trace_by_key',
       'feedback_relation',
+      'list_scenes',
+      'save_scene',
+      'delete_scene',
       'set_relation_condition',
       'delete_edge',
       'execute_sql',

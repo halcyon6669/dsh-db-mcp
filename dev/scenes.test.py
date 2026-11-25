@@ -1,0 +1,281 @@
+"""Regression tests for `server/scenes.py`, the named table sets a trace stays inside.
+
+The point of a scene is that it is *only* a table list: it must never own an edge,
+or deleting one would quietly lose a join somebody confirmed. Most of what is
+guarded here follows from that one rule — save by name updates instead of piling
+up duplicates, case differences do not create a second scene, and delete leaves
+the relation graph untouched.
+
+The module writes under `store.runtime_dir()`, so every test points
+`DB_MCP_RUNTIME` at a temporary directory. Run it through `dev/engines.test.mjs`
+(`npm run test:engines`), which picks the right interpreter.
+"""
+
+from __future__ import annotations
+
+import importlib.util
+import json
+import os
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+PACKAGE = Path(__file__).resolve().parent.parent
+# `scenes.py` reaches `import store`, which is how `main.py` imports it too.
+sys.path.insert(0, str(PACKAGE / "server"))
+SPEC = importlib.util.spec_from_file_location("db_mcp_scenes", PACKAGE / "server" / "scenes.py")
+scenes = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(scenes)
+
+
+def source(identity: str = "shop") -> dict:
+    return {"id": identity, "name": identity, "kind": "sqlite", "config": {}, "readOnly": True}
+
+
+class SceneFile(unittest.TestCase):
+    """The file itself: atomic writes, a blank start, and a refusal to reset."""
+
+    def setUp(self):
+        self.saved = os.environ.get("DB_MCP_RUNTIME")
+        self.tmp = tempfile.TemporaryDirectory()
+        os.environ["DB_MCP_RUNTIME"] = self.tmp.name
+        self.profile = source()
+
+    def tearDown(self):
+        if self.saved is None:
+            os.environ.pop("DB_MCP_RUNTIME", None)
+        else:
+            os.environ["DB_MCP_RUNTIME"] = self.saved
+        self.tmp.cleanup()
+
+    def test_a_missing_file_starts_empty(self):
+        doc = scenes.load(self.profile)
+        self.assertEqual(doc["scenes"], [])
+        self.assertEqual(doc["datasource"], "shop")
+
+    def test_the_path_is_per_datasource(self):
+        one = scenes.path_of(source("shop"))
+        two = scenes.path_of(source("warehouse"))
+        self.assertNotEqual(one, two)
+        self.assertEqual(one.parent.name, "scenes")
+
+    def test_saving_then_loading_round_trips(self):
+        scenes.save_scene(self.profile, "order to cash", ["sales_order", "payment"])
+        again = scenes.load(self.profile)
+        self.assertEqual(len(again["scenes"]), 1)
+        self.assertEqual(again["scenes"][0]["tables"], ["sales_order", "payment"])
+
+    def test_a_broken_file_is_reported_not_reset(self):
+        target = scenes.path_of(self.profile)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("{not json", encoding="utf-8")
+        with self.assertRaises(Exception) as caught:
+            scenes.load(self.profile)
+        self.assertEqual(getattr(caught.exception, "code", None), "infra_error")
+        # The file is still there, untouched: its scenes were somebody's work.
+        self.assertTrue(target.exists())
+        self.assertEqual(target.read_text(encoding="utf-8"), "{not json")
+
+    def test_the_file_is_not_world_readable(self):
+        scenes.save_scene(self.profile, "order to cash", ["sales_order"])
+        target = scenes.path_of(self.profile)
+        if os.name == "nt":  # pragma: no cover - Windows has no POSIX mode bits
+            self.skipTest("no POSIX modes on Windows")
+        self.assertEqual(target.stat().st_mode & 0o077, 0)
+
+
+class SavingScenes(unittest.TestCase):
+    def setUp(self):
+        self.saved = os.environ.get("DB_MCP_RUNTIME")
+        self.tmp = tempfile.TemporaryDirectory()
+        os.environ["DB_MCP_RUNTIME"] = self.tmp.name
+        self.profile = source()
+
+    def tearDown(self):
+        if self.saved is None:
+            os.environ.pop("DB_MCP_RUNTIME", None)
+        else:
+            os.environ["DB_MCP_RUNTIME"] = self.saved
+        self.tmp.cleanup()
+
+    def test_a_new_scene_is_created(self):
+        result = scenes.save_scene(self.profile, "order to cash", ["t_order", "t_trans"])
+        self.assertTrue(result["created"])
+        self.assertEqual(result["scene"]["name"], "order to cash")
+        self.assertEqual(result["scene"]["tables"], ["t_order", "t_trans"])
+        self.assertTrue(result["scene"]["id"].startswith("s_"))
+
+    def test_saving_the_same_name_updates_instead_of_duplicating(self):
+        first = scenes.save_scene(self.profile, "order to cash", ["t_order"])
+        second = scenes.save_scene(self.profile, "order to cash", ["t_order", "t_trans"])
+        self.assertFalse(second["created"])
+        self.assertEqual(first["scene"]["id"], second["scene"]["id"])
+        self.assertEqual(len(scenes.load(self.profile)["scenes"]), 1)
+        self.assertEqual(second["scene"]["tables"], ["t_order", "t_trans"])
+
+    def test_the_name_is_matched_without_case(self):
+        first = scenes.save_scene(self.profile, "Order To Cash", ["t_order"])
+        second = scenes.save_scene(self.profile, "order to cash", ["t_order", "t_trans"])
+        self.assertFalse(second["created"])
+        self.assertEqual(first["scene"]["id"], second["scene"]["id"])
+        self.assertEqual(second["scene"]["name"], "order to cash")
+
+    def test_the_id_lets_a_scene_be_renamed(self):
+        first = scenes.save_scene(self.profile, "order to cash", ["t_order"])
+        renamed = scenes.save_scene(
+            self.profile, "revenue", ["t_order"], scene_id=first["scene"]["id"]
+        )
+        self.assertFalse(renamed["created"])
+        self.assertEqual(renamed["scene"]["name"], "revenue")
+        self.assertEqual(len(scenes.load(self.profile)["scenes"]), 1)
+
+    def test_duplicate_tables_collapse_ignoring_case(self):
+        result = scenes.save_scene(
+            self.profile, "order to cash", ["t_order", "T_ORDER", " t_order ", "t_trans"]
+        )
+        self.assertEqual(result["scene"]["tables"], ["t_order", "t_trans"])
+
+    def test_a_comma_separated_string_is_accepted(self):
+        result = scenes.save_scene(self.profile, "order to cash", "t_order, t_trans\nt_payment")
+        self.assertEqual(result["scene"]["tables"], ["t_order", "t_trans", "t_payment"])
+
+    def test_a_scene_needs_a_name(self):
+        with self.assertRaises(Exception) as caught:
+            scenes.save_scene(self.profile, "  ", ["t_order"])
+        self.assertEqual(getattr(caught.exception, "code", None), "user_error")
+
+    def test_a_scene_needs_at_least_one_table(self):
+        with self.assertRaises(Exception) as caught:
+            scenes.save_scene(self.profile, "empty", [])
+        self.assertEqual(getattr(caught.exception, "code", None), "user_error")
+
+    def test_blank_entries_are_ignored(self):
+        result = scenes.save_scene(self.profile, "order to cash", ["t_order", "", "  ", None])
+        self.assertEqual(result["scene"]["tables"], ["t_order"])
+
+    def test_the_note_is_kept(self):
+        result = scenes.save_scene(self.profile, "order to cash", ["t_order"], note="the ten tables a question spans")
+        self.assertEqual(result["scene"]["note"], "the ten tables a question spans")
+
+    def test_saving_without_a_note_keeps_the_old_one(self):
+        scenes.save_scene(self.profile, "order to cash", ["t_order"], note="first")
+        again = scenes.save_scene(self.profile, "order to cash", ["t_order", "t_trans"])
+        self.assertEqual(again["scene"]["note"], "first")
+
+
+class ReadingScenes(unittest.TestCase):
+    def setUp(self):
+        self.saved = os.environ.get("DB_MCP_RUNTIME")
+        self.tmp = tempfile.TemporaryDirectory()
+        os.environ["DB_MCP_RUNTIME"] = self.tmp.name
+        self.profile = source()
+        scenes.save_scene(self.profile, "order to cash", ["t_order", "t_trans"], note="six tables")
+        scenes.save_scene(self.profile, "stock", ["t_stock"])
+
+    def tearDown(self):
+        if self.saved is None:
+            os.environ.pop("DB_MCP_RUNTIME", None)
+        else:
+            os.environ["DB_MCP_RUNTIME"] = self.saved
+        self.tmp.cleanup()
+
+    def test_listing_reports_a_table_count(self):
+        result = scenes.list_scenes(self.profile)
+        self.assertEqual(result["total"], 2)
+        names = [scene["name"] for scene in result["scenes"]]
+        self.assertEqual(names, ["order to cash", "stock"])
+        self.assertEqual(result["scenes"][0]["tableCount"], 2)
+
+    def test_find_by_name_and_by_id(self):
+        doc = scenes.load(self.profile)
+        by_name = scenes.find(doc, "order to cash")
+        by_id = scenes.find(doc, by_name["id"])
+        self.assertEqual(by_name["id"], by_id["id"])
+
+    def test_find_is_case_insensitive(self):
+        doc = scenes.load(self.profile)
+        self.assertEqual(scenes.find(doc, "ORDER TO CASH")["name"], "order to cash")
+
+    def test_an_unknown_scene_names_the_ones_that_exist(self):
+        with self.assertRaises(Exception) as caught:
+            scenes.find(scenes.load(self.profile), "nope")
+        self.assertEqual(getattr(caught.exception, "code", None), "user_error")
+        self.assertIn("order to cash", str(caught.exception.hint))
+
+    def test_resolve_without_a_target_is_none(self):
+        self.assertIsNone(scenes.resolve(self.profile, None))
+        self.assertIsNone(scenes.resolve(self.profile, "   "))
+
+    def test_table_set_is_folded(self):
+        scene = scenes.find(scenes.load(self.profile), "order to cash")
+        self.assertEqual(scenes.table_set(scene), {"t_order", "t_trans"})
+
+    def test_no_scene_means_the_whole_graph(self):
+        self.assertIsNone(scenes.table_set(None))
+
+
+class DeletingScenes(unittest.TestCase):
+    def setUp(self):
+        self.saved = os.environ.get("DB_MCP_RUNTIME")
+        self.tmp = tempfile.TemporaryDirectory()
+        os.environ["DB_MCP_RUNTIME"] = self.tmp.name
+        self.profile = source()
+
+    def tearDown(self):
+        if self.saved is None:
+            os.environ.pop("DB_MCP_RUNTIME", None)
+        else:
+            os.environ["DB_MCP_RUNTIME"] = self.saved
+        self.tmp.cleanup()
+
+    def test_delete_removes_only_that_scene(self):
+        kept = scenes.save_scene(self.profile, "order to cash", ["t_order"])
+        gone = scenes.save_scene(self.profile, "stock", ["t_stock"])
+        result = scenes.delete_scene(self.profile, gone["scene"]["id"])
+        self.assertEqual(result["deleted"], gone["scene"]["id"])
+        remaining = scenes.list_scenes(self.profile)["scenes"]
+        self.assertEqual([scene["id"] for scene in remaining], [kept["scene"]["id"]])
+
+    def test_delete_never_touches_the_relation_graph(self):
+        # The graph lives in a different file; the scene file simply has no say.
+        before = scenes.path_of(self.profile)
+        scenes.save_scene(self.profile, "order to cash", ["t_order"])
+        scenes.delete_scene(self.profile, scenes.list_scenes(self.profile)["scenes"][0]["id"])
+        self.assertFalse((before.parent.parent / "relations").exists())
+
+    def test_deleting_a_scene_that_is_not_there_is_a_user_error(self):
+        with self.assertRaises(Exception) as caught:
+            scenes.delete_scene(self.profile, "s_nope")
+        self.assertEqual(getattr(caught.exception, "code", None), "user_error")
+
+
+class Limits(unittest.TestCase):
+    def setUp(self):
+        self.saved = os.environ.get("DB_MCP_RUNTIME")
+        self.tmp = tempfile.TemporaryDirectory()
+        os.environ["DB_MCP_RUNTIME"] = self.tmp.name
+        self.profile = source()
+
+    def tearDown(self):
+        if self.saved is None:
+            os.environ.pop("DB_MCP_RUNTIME", None)
+        else:
+            os.environ["DB_MCP_RUNTIME"] = self.saved
+        self.tmp.cleanup()
+
+    def test_too_many_scenes_is_refused(self):
+        for index in range(scenes.SCENE_LIMIT):
+            scenes.save_scene(self.profile, f"scene {index}", [f"t_{index}"])
+        with self.assertRaises(Exception) as caught:
+            scenes.save_scene(self.profile, "one more", ["t_extra"])
+        self.assertEqual(getattr(caught.exception, "code", None), "user_error")
+
+    def test_a_scene_too_wide_is_refused(self):
+        with self.assertRaises(Exception) as caught:
+            scenes.save_scene(self.profile, "everything", [f"t_{index}" for index in range(scenes.TABLE_LIMIT + 1)])
+        self.assertEqual(getattr(caught.exception, "code", None), "user_error")
+
+
+if __name__ == "__main__":
+    sys.exit(unittest.main(verbosity=2))

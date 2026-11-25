@@ -25,6 +25,7 @@ import audit
 import engines
 import mining
 import relations
+import scenes
 import sources
 import tracing
 import writes
@@ -792,6 +793,7 @@ def trace_by_key(
     max_rows_per_table: int = 20,
     direction: str = "both",
     confirm_slow: bool = False,
+    scene: Optional[str] = None,
 ) -> dict:
     """Follow one value across the joins the relation graph trusts.
 
@@ -801,8 +803,11 @@ def trace_by_key(
     quote in it cannot alter the query.
 
     Without `entry_table` the walker probes the columns a join already points at,
-    then the indexed key-shaped columns of the most connected tables. Naming the
-    table and column skips that search and is faster on a large schema.
+    then the indexed key-shaped columns of the most connected tables. Every column
+    that held the value is reported under `entry.candidates` with `matches` (how
+    many rows it held), so a value present in several places can be started from
+    the one you meant instead of the first one found. Naming the table and column
+    skips that search and is faster on a large schema.
 
     `direction` is `down` (follow foreign keys: child to parent), `up` (parent to
     children) or `both`. `max_depth` is clamped to 6 and `max_rows_per_table` to
@@ -813,11 +818,18 @@ def trace_by_key(
     `status: "needs_confirm"` and `summary.needsConfirm` counts them. Look at which
     table and how big, then call again with `confirm_slow=True` to allow it.
 
+    `scene` names a table set saved with `save_scene`. The walk then only reads
+    tables inside it; a join that would leave the scene is listed under `outside`
+    with the table it would have reached, so the boundary is visible instead of
+    looking like a broken chain.
+
     Every step reports the table, the bound condition, the SQL that ran, how many
     rows came back, how long it took and a few sample cells; `status: "empty"` is a
-    chain that broke there. Pending edges are listed under `pending` — confirming
-    one lets the trace follow it — and anything truncated or skipped is in
-    `warnings` or `stoppedAt` rather than quietly missing.
+    chain that broke there. `nodes` is the same walk as a tree (each node carries
+    `parent` and `children`), with `repeated: true` on a table already expanded
+    elsewhere so its subtree is not walked twice. Pending edges are listed under
+    `pending` — confirming one lets the trace follow it — and anything truncated or
+    skipped is in `warnings` or `stoppedAt` rather than quietly missing.
     """
     try:
         profile, (connection, close) = _open(datasource)
@@ -832,9 +844,66 @@ def trace_by_key(
                 max_rows_per_table=max_rows_per_table,
                 direction=direction,
                 confirm_slow=confirm_slow,
+                scene=scene,
             )
         finally:
             close()
+        return {"ok": True, "datasource": _source(profile), **result}
+    except Exception as error:  # noqa: BLE001
+        return _error(error)
+
+
+@mcp.tool()
+@_audited
+def list_scenes(datasource: Optional[str] = None) -> dict:
+    """List the table sets saved for one data source.
+
+    A scene is a name over a list of tables — "order to cash", the ten tables a
+    question actually spans. It narrows a trace to that slice without touching the
+    relation graph: edges belong to the graph, a scene only chooses which of them
+    to walk. Deleting a scene therefore never loses a join.
+    """
+    try:
+        profile, _secrets = store.resolve(datasource)
+        result = scenes.list_scenes(profile)
+        return {"ok": True, "datasource": _source(profile), **result}
+    except Exception as error:  # noqa: BLE001
+        return _error(error)
+
+
+@mcp.tool()
+@_audited
+def save_scene(
+    name: str,
+    tables: list[str],
+    datasource: Optional[str] = None,
+    note: Optional[str] = None,
+    scene_id: Optional[str] = None,
+) -> dict:
+    """Create or update a named table set.
+
+    Pass `scene_id` to rename or re-scope an existing scene; without it a scene of
+    the same name is updated, and a new one is created when the name is free.
+    `tables` may be bare names or `schema.table`; duplicates differing only in case
+    collapse. It stores no joins — only which tables a trace should stay inside.
+    """
+    try:
+        profile, _secrets = store.resolve(datasource)
+        result = scenes.save_scene(
+            profile, name, tables, note=note, scene_id=scene_id
+        )
+        return {"ok": True, "datasource": _source(profile), **result}
+    except Exception as error:  # noqa: BLE001
+        return _error(error)
+
+
+@mcp.tool()
+@_audited
+def delete_scene(scene_id: str, datasource: Optional[str] = None) -> dict:
+    """Delete one saved table set. The edges it referenced stay in the graph."""
+    try:
+        profile, _secrets = store.resolve(datasource)
+        result = scenes.delete_scene(profile, scene_id)
         return {"ok": True, "datasource": _source(profile), **result}
     except Exception as error:  # noqa: BLE001
         return _error(error)

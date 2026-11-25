@@ -20,12 +20,14 @@ from collections import deque
 
 import engines
 import relations
+import scenes
 import store
 
 MAX_DEPTH_LIMIT = 6
 MAX_ROWS_LIMIT = 200
 MAX_STEPS = 200
 PROBE_COLUMNS = 8
+PROBE_ROWS = 5
 PROBE_SECONDS = 3.0
 SAMPLE_ROWS = 3
 SAMPLE_COLUMNS = 6
@@ -158,8 +160,15 @@ def _known_columns(edges, table: str) -> list[str]:
     return names
 
 
-def _probe(profile, connection, edges, value, entry_table, entry_column):
-    """Find where the value enters. Returns (picked, candidates, warnings)."""
+def _probe(profile, connection, edges, value, entry_table, entry_column, tables=None):
+    """Find where the value enters. Returns (picked, candidates, warnings).
+
+    `tables` restricts the search to a scene. A value usually lives in more than
+    one column — an order id is on the order, its lines and its payments — so every
+    column that held it is reported with how many rows it held, and the first one
+    is the one the walk starts from. The caller chooses between them instead of
+    the walker guessing and hiding the alternatives.
+    """
     warnings = []
     candidates: list[dict] = []
     if entry_table:
@@ -173,7 +182,23 @@ def _probe(profile, connection, edges, value, entry_table, entry_column):
             limit=PROBE_COLUMNS,
         )
     else:
-        for table in _entry_tables(edges):
+        order = _entry_tables(edges)
+        if tables is not None:
+            kept = [table for table in order if _fold(table) in tables]
+            if kept:
+                order = kept
+            else:
+                warnings.append(
+                    {
+                        "code": "scene_empty",
+                        "message": (
+                            "no table of the scene carries a join — name the entry "
+                            "table and column, or widen the scene"
+                        ),
+                    }
+                )
+                order = []
+        for table in order:
             candidates.extend(
                 engines.entry_candidates(
                     profile,
@@ -200,7 +225,9 @@ def _probe(profile, connection, edges, value, entry_table, entry_column):
                 }
             )
             break
-        tried.append(candidate)
+        entry = dict(candidate)
+        entry["matches"] = 0
+        tried.append(entry)
         try:
             found = engines.fetch_matching(
                 profile,
@@ -208,7 +235,7 @@ def _probe(profile, connection, edges, value, entry_table, entry_column):
                 candidate["table"],
                 candidate["column"],
                 [value],
-                1,
+                PROBE_ROWS,
             )
         except engines.DbError as error:
             warnings.append(
@@ -218,8 +245,10 @@ def _probe(profile, connection, edges, value, entry_table, entry_column):
                 }
             )
             continue
+        entry["matches"] = len(found["rows"])
+        entry["truncated"] = bool(found.get("truncated"))
         if found["rows"]:
-            return candidate, tried, warnings
+            return entry, tried, warnings
     return None, tried, warnings
 
 
@@ -246,6 +275,54 @@ def _sample(columns, rows, primary, current_column) -> dict:
     }
 
 
+def _nodes(steps) -> list[dict]:
+    """The walk as a tree, keeping the flat `steps` list as the source of truth.
+
+    A step already carries everything a node shows; the tree is just the parent
+    link and the child list, so the panel can indent without re-deriving the
+    shape from `parent` indexes itself.
+    """
+    by_index = {step["index"]: step for step in steps}
+    children: dict[int, list[int]] = {}
+    roots: list[int] = []
+    for step in steps:
+        parent = step.get("parent")
+        if parent and parent in by_index:
+            children.setdefault(parent, []).append(step["index"])
+        else:
+            roots.append(step["index"])
+
+    def node_of(index: int) -> dict:
+        step = by_index[index]
+        return {
+            "index": index,
+            "parent": step.get("parent"),
+            "depth": step.get("depth"),
+            "table": step.get("table"),
+            "schema": step.get("schema"),
+            "column": (step.get("condition") or {}).get("column"),
+            # The panel shows the bound values, the sample rows and the statement
+            # straight off the node; without them it can only print a placeholder
+            # dash for every step, which is exactly what made the tree unreadable.
+            "condition": step.get("condition"),
+            "sql": step.get("sql"),
+            "sample": step.get("sample"),
+            "rows": step.get("rows"),
+            "status": step.get("status"),
+            "truncated": step.get("truncated"),
+            "repeated": step.get("repeated", False),
+            "inside": step.get("inside", True),
+            "ms": step.get("ms"),
+            "fanout": step.get("fanout"),
+            "edge": step.get("edge"),
+            "note": step.get("note"),
+            "cost": step.get("cost"),
+            "children": [node_of(child) for child in children.get(index, [])],
+        }
+
+    return [node_of(index) for index in roots]
+
+
 def trace(
     profile: dict,
     connection,
@@ -256,6 +333,7 @@ def trace(
     max_rows_per_table=20,
     direction="both",
     confirm_slow: bool = False,
+    scene: str | None = None,
 ) -> dict:
     """Follow one value across every confirmed join that touches it."""
     started = time.perf_counter()
@@ -269,6 +347,18 @@ def trace(
     depth_limit = _clamp(max_depth, 1, MAX_DEPTH_LIMIT, 3)
     row_limit = _clamp(max_rows_per_table, 1, MAX_ROWS_LIMIT, 20)
     heading = _direction(direction)
+
+    chosen_scene = scenes.resolve(profile, scene)
+    inside = scenes.table_set(chosen_scene)
+    scene_report = (
+        {
+            "id": chosen_scene.get("id"),
+            "name": chosen_scene.get("name"),
+            "tables": list(chosen_scene.get("tables") or []),
+        }
+        if chosen_scene
+        else None
+    )
 
     doc = relations.load(profile)
     all_edges = doc.get("edges") or []
@@ -289,7 +379,7 @@ def trace(
         )
 
     picked, tried, probe_warnings = _probe(
-        profile, connection, walkable, text, entry_table, entry_column
+        profile, connection, walkable, text, entry_table, entry_column, tables=inside
     )
     warnings.extend(probe_warnings)
     entry = {
@@ -312,6 +402,7 @@ def trace(
             "value": text,
             "direction": heading,
             "elapsedMs": int((time.perf_counter() - started) * 1000),
+            "scene": scene_report,
             "entry": entry,
             "summary": {
                 "tablesHit": 0,
@@ -320,8 +411,12 @@ def trace(
                 "steps": 0,
                 "depthReached": 0,
                 "needsConfirm": 0,
+                "repeated": 0,
+                "outside": 0,
             },
+            "nodes": [],
             "steps": [],
+            "outside": [],
             "pending": [],
             "warnings": warnings,
             "stoppedAt": [],
@@ -341,9 +436,12 @@ def trace(
 
     steps: list[dict] = []
     stopped: list[dict] = []
+    repeated: list[dict] = []
+    outside: list[dict] = []
     seen: set[tuple[str, str, str]] = set()
     hit_tables: set[str] = set()
     visited_tables: set[str] = set()
+    expanded: set[str] = set()
     rows_read = 0
     depth_reached = 0
 
@@ -356,6 +454,8 @@ def trace(
                 "depth": 0,
                 "edge": None,
                 "side": None,
+                "parent": None,
+                "path": frozenset(),
             }
         ]
     )
@@ -387,6 +487,14 @@ def trace(
 
         info = describe(table)
 
+        # A table already expanded elsewhere in the tree is reported once more with
+        # its rows, but not walked again: the same table reached from three orders
+        # would otherwise branch into the same subtree three times and tell the
+        # reader nothing new. A table reached again along its own chain (a
+        # self-reference climbing a hierarchy) is a genuine continuation, so an
+        # ancestor repeats rather than counts as a revisit.
+        revisit = _fold(table) in expanded and _fold(table) not in node["path"]
+
         # An unindexed column on a big table turns one hop into a full scan. That
         # is a cost the operator should agree to, not one a trace spends on their
         # behalf: stop here, say so, and let the panel run it again with
@@ -397,6 +505,7 @@ def trace(
             steps.append(
                 {
                     "index": len(steps) + 1,
+                    "parent": node["parent"],
                     "depth": depth,
                     "table": table,
                     "schema": info.get("schema"),
@@ -410,12 +519,14 @@ def trace(
                     "rows": 0,
                     "truncated": False,
                     "status": NEEDS_CONFIRM,
-                    "edge": _edge_summary(edge),
+                    "edge": _edge_summary(edge) if edge else None,
                     "sample": {"columns": [], "rows": []},
                     "fanout": None,
                     "ms": 0,
                     "note": "this step would scan the whole table",
                     "cost": cost,
+                    "repeated": False,
+                    "inside": True,
                 }
             )
             warnings.append(
@@ -502,6 +613,7 @@ def trace(
 
         step = {
             "index": len(steps) + 1,
+            "parent": node["parent"],
             "depth": depth,
             "table": table,
             "schema": info.get("schema"),
@@ -520,16 +632,26 @@ def trace(
             "fanout": fanout,
             "ms": step_ms,
             "note": None,
+            "repeated": revisit,
+            "inside": inside is None or _fold(table) in inside,
         }
         if status == "empty":
             step["note"] = "0 rows, the chain breaks here"
             stopped.append({"table": table, "reason": f"no row held the value in {column}"})
         elif found["truncated"]:
             step["note"] = f"stopped at {row_limit} rows; the value has more matches than that"
+        elif revisit:
+            step["note"] = (
+                f"already expanded at a shallower depth; its children are not walked again"
+            )
+            repeated.append({"table": table, "column": column, "rows": len(rows)})
         steps.append(step)
 
         if not rows:
             continue
+        if revisit:
+            continue
+        expanded.add(_fold(table))
         if depth >= depth_limit:
             if _incident(walkable, table):
                 warnings.append(
@@ -559,6 +681,26 @@ def trace(
                     values.append(cell)
             if not values:
                 continue
+            # A scene narrows what the walk is allowed to read. The join is not
+            # hidden — it is listed as `outside`, so the reader sees the table the
+            # value would have reached and can add it to the scene deliberately
+            # instead of wondering why the walk stopped.
+            if inside is not None and _fold(other_table) not in inside:
+                if not any(_fold(item["table"]) == _fold(other_table) for item in outside):
+                    outside.append(
+                        {
+                            "table": other_table,
+                            "column": other_column,
+                            "rows": len(values),
+                            "from": {"table": table, "column": here.get("column")},
+                            "edge": _edge_summary(other_edge),
+                            "reason": (
+                                f"{other_table} is not in the scene "
+                                f"{chosen_scene.get('name')!r}"
+                            ),
+                        }
+                    )
+                continue
             queue.append(
                 {
                     "table": other_table,
@@ -567,6 +709,8 @@ def trace(
                     "depth": depth + 1,
                     "edge": other_edge,
                     "side": side,
+                    "parent": step["index"],
+                    "path": node["path"] | {_fold(table)},
                 }
             )
 
@@ -618,6 +762,7 @@ def trace(
         "value": text,
         "direction": heading,
         "elapsedMs": int((time.perf_counter() - started) * 1000),
+        "scene": scene_report,
         "entry": entry,
         "summary": {
             "tablesHit": len(hit_tables),
@@ -626,8 +771,12 @@ def trace(
             "steps": len(steps),
             "depthReached": depth_reached,
             "needsConfirm": sum(1 for step in steps if step.get("status") == NEEDS_CONFIRM),
+            "repeated": len(repeated),
+            "outside": len(outside),
         },
+        "nodes": _nodes(steps),
         "steps": steps,
+        "outside": outside,
         "pending": hints,
         "warnings": warnings,
         "stoppedAt": stopped,

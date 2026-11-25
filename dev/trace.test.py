@@ -33,6 +33,7 @@ def _load(name: str):
 
 engines = _load("engines")
 relations = _load("relations")
+scenes = _load("scenes")
 tracing = _load("tracing")
 
 
@@ -42,6 +43,9 @@ create table t_trans (id integer primary key, order_id integer references t_orde
 create table t_line (id integer primary key, trans_id integer references t_trans(id), sku text);
 create table t_orphan (id integer primary key, note text);
 create table t_node (id integer primary key, parent_id integer references t_node(id), name text);
+create table t_left (id integer primary key, order_id integer);
+create table t_right (id integer primary key, order_id integer);
+create table t_shared (id integer primary key, name text, left_id integer, right_id integer);
 create index t_order_code on t_order(code);
 """
 
@@ -51,10 +55,19 @@ insert into t_trans (id, order_id, state) values (10, 1, 'POSTED'), (11, 1, 'DRA
 insert into t_line (id, trans_id, sku) values (100, 10, 'SKU-1'), (101, 10, 'SKU-2'), (102, 11, 'SKU-3');
 insert into t_orphan (id, note) values (1, 'nobody points here');
 insert into t_node (id, parent_id, name) values (1, null, 'root'), (2, 1, 'child'), (3, 2, 'grandchild'), (4, 3, 'great');
+insert into t_left (id, order_id) values (900, 1);
+insert into t_right (id, order_id) values (910, 1);
+insert into t_shared (id, name, left_id, right_id) values (500, 'via left', 900, null), (501, 'via right', null, 910);
 """
 
 
-class TraceOnARealDatabase(unittest.TestCase):
+class _Walk(unittest.TestCase):
+    """The fixture every walk test needs: a real SQLite file and a connection.
+
+    Kept as a plain base so a subclass can add its own cases without inheriting
+    (and re-running) every case of the main suite.
+    """
+
     def setUp(self):
         self.saved = os.environ.get("DB_MCP_RUNTIME")
         self.tmp = tempfile.TemporaryDirectory()
@@ -107,6 +120,8 @@ class TraceOnARealDatabase(unittest.TestCase):
     def _trace(self, value, **kwargs):
         return tracing.trace(self.profile, self.connection, value, **kwargs)
 
+
+class TraceOnARealDatabase(_Walk):
     # -- the happy path ----------------------------------------------------
 
     def test_down_walks_into_the_rows_that_reference_it(self):
@@ -456,6 +471,156 @@ class TraceOnARealDatabase(unittest.TestCase):
             self.assertIsInstance(stats["avgMs"], float)
 
 
+class ScenesNarrowTheWalk(_Walk):
+    """A scene chooses which tables a walk may read; it must never hide the join."""
+
+    def _scene(self, name, tables):
+        return scenes.save_scene(self.profile, name, tables)["scene"]
+
+    def test_a_scene_keeps_the_walk_inside(self):
+        self._chain()
+        scene = self._scene("orders only", ["t_order", "t_trans"])
+        result = self._trace(
+            "1",
+            entry_table="t_order",
+            entry_column="id",
+            direction="down",
+            scene=scene["id"],
+        )
+        self.assertEqual([step["table"] for step in result["steps"]], ["t_order", "t_trans"])
+        self.assertEqual(result["scene"]["id"], scene["id"])
+        self.assertEqual(result["summary"]["outside"], 1)
+        self.assertEqual([item["table"] for item in result["outside"]], ["t_line"])
+
+    def test_the_table_left_out_is_reported_not_silently_dropped(self):
+        self._chain()
+        scene = self._scene("orders only", ["t_order", "t_trans"])
+        result = self._trace(
+            "1", entry_table="t_order", entry_column="id", direction="down", scene=scene["name"]
+        )
+        outside = result["outside"][0]
+        self.assertEqual(outside["table"], "t_line")
+        self.assertEqual(outside["from"]["table"], "t_trans")
+        self.assertIn("scene", outside["reason"])
+        self.assertTrue(outside["edge"]["id"], "the join it would have taken is named")
+
+    def test_the_same_walk_without_a_scene_reaches_everything(self):
+        self._chain()
+        result = self._trace("1", entry_table="t_order", entry_column="id", direction="down")
+        self.assertEqual([step["table"] for step in result["steps"]], ["t_order", "t_trans", "t_line"])
+        self.assertEqual(result["outside"], [])
+        self.assertIsNone(result["scene"])
+
+    def test_an_unknown_scene_is_a_user_error(self):
+        self._chain()
+        with self.assertRaises(Exception) as caught:
+            self._trace("1", entry_table="t_order", entry_column="id", scene="nope")
+        self.assertEqual(getattr(caught.exception, "code", None), "user_error")
+
+    def test_every_step_says_whether_it_was_inside_the_scene(self):
+        self._chain()
+        scene = self._scene("orders only", ["t_order", "t_trans"])
+        result = self._trace(
+            "1", entry_table="t_order", entry_column="id", direction="down", scene=scene["id"]
+        )
+        for step in result["steps"]:
+            self.assertTrue(step["inside"], step["table"])
+
+
+class TheTreeShape(_Walk):
+    """`nodes` mirrors `steps`, indented; `repeated` folds a duplicate subtree."""
+
+    def _edge(self, from_table, from_column, to_table, to_column, status="confirmed"):
+        super()._edge(from_table, from_column, to_table, to_column, status)
+
+    def _fan(self):
+        """t_order -> t_left and t_order -> t_right both reach t_shared."""
+        self._edge("t_left", "order_id", "t_order", "id")
+        self._edge("t_right", "order_id", "t_order", "id")
+        self._edge("t_shared", "left_id", "t_left", "id")
+        self._edge("t_shared", "right_id", "t_right", "id")
+
+    def test_the_tree_mirrors_the_steps(self):
+        self._fan()
+        result = self._trace("1", entry_table="t_order", entry_column="id", direction="down")
+        flat = [
+            (step["index"], step["table"], step["depth"], step["parent"]) for step in result["steps"]
+        ]
+        walked = []
+
+        def walk(nodes):
+            for node in nodes:
+                walked.append((node["index"], node["table"], node["depth"], node["parent"]))
+                walk(node["children"])
+
+        walk(result["nodes"])
+        # `steps` is the breadth-first order the walker took; the tree is the same
+        # nodes read depth-first. Same set, and the parent links must agree — the
+        # order differs on purpose, so compare sorted by index.
+        self.assertEqual(sorted(walked), sorted(flat))
+
+    def test_the_entry_is_the_only_root(self):
+        self._chain()
+        result = self._trace("1", entry_table="t_order", entry_column="id", direction="down")
+        self.assertEqual(len(result["nodes"]), 1)
+        self.assertIsNone(result["nodes"][0]["parent"])
+        self.assertIsNone(result["nodes"][0]["edge"])
+
+    def test_a_child_hangs_off_the_step_that_reached_it(self):
+        self._chain()
+        result = self._trace("1", entry_table="t_order", entry_column="id", direction="down")
+        root = result["nodes"][0]
+        self.assertEqual(root["table"], "t_order")
+        self.assertEqual([child["table"] for child in root["children"]], ["t_trans"])
+        grandchild = root["children"][0]["children"][0]
+        self.assertEqual(grandchild["table"], "t_line")
+        self.assertEqual(grandchild["depth"], 2)
+
+    def test_a_table_reached_twice_is_expanded_once(self):
+        self._fan()
+        result = self._trace("1", entry_table="t_order", entry_column="id", direction="down")
+        shared = [step for step in result["steps"] if step["table"] == "t_shared"]
+        self.assertGreaterEqual(len(shared), 1)
+        repeated = [step for step in shared if step["repeated"]]
+        self.assertTrue(repeated, "the second reach of t_shared must say it is a repeat")
+        self.assertIn("already expanded", repeated[0]["note"])
+        self.assertIn("repeated", result["summary"])
+
+    def test_a_repeat_is_not_walked_again(self):
+        self._fan()
+        result = self._trace("1", entry_table="t_order", entry_column="id", direction="down")
+        rows = {
+            (step["table"], tuple(str(item) for item in step["condition"]["binds"]))
+            for step in result["steps"]
+        }
+        self.assertEqual(len(rows), len(set(rows)))
+
+    def test_a_node_carries_what_the_panel_needs_to_read_it(self):
+        """The panel shows the bound values and the sample rows off the node, so
+        the node has to carry them — otherwise every step reads as a dash."""
+        self._chain()
+        result = self._trace("1", entry_table="t_order", entry_column="id", direction="down")
+        root = result["nodes"][0]
+        self.assertIn("condition", root)
+        self.assertIn("binds", root["condition"])
+        self.assertEqual(root["condition"]["binds"], ["1"])
+        self.assertIn("sql", root)
+        self.assertIn("sample", root)
+        child = root["children"][0]
+        self.assertEqual(
+            [str(item) for item in child["condition"]["binds"]], [str(root["sample"]["rows"][0][0])]
+        )
+
+    def test_the_summary_counts_the_repeats_and_the_outside_tables(self):
+        self._fan()
+        scene = scenes.save_scene(self.profile, "no shared", ["t_order", "t_left", "t_right"])["scene"]
+        result = self._trace(
+            "1", entry_table="t_order", entry_column="id", direction="down", scene=scene["id"]
+        )
+        self.assertGreaterEqual(result["summary"]["outside"], 1)
+        self.assertIsInstance(result["summary"]["repeated"], int)
+
+
 class TraceShape(unittest.TestCase):
     """The reply shape a panel and a model both read."""
 
@@ -493,11 +658,33 @@ class TraceShape(unittest.TestCase):
             close()
         self.assertEqual(
             set(result),
-            {"value", "direction", "elapsedMs", "entry", "summary", "steps", "pending", "warnings", "stoppedAt"},
+            {
+                "value",
+                "direction",
+                "elapsedMs",
+                "scene",
+                "entry",
+                "summary",
+                "nodes",
+                "steps",
+                "outside",
+                "pending",
+                "warnings",
+                "stoppedAt",
+            },
         )
         self.assertEqual(
             set(result["summary"]),
-            {"tablesHit", "tablesVisited", "rowsRead", "steps", "depthReached", "needsConfirm"},
+            {
+                "tablesHit",
+                "tablesVisited",
+                "rowsRead",
+                "steps",
+                "depthReached",
+                "needsConfirm",
+                "repeated",
+                "outside",
+            },
         )
         self.assertIn("no_edges", [warning["code"] for warning in result["warnings"]])
 

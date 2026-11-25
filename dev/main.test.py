@@ -112,6 +112,22 @@ class ToolSurface(unittest.TestCase):
         ):
             self.assertTrue(callable(getattr(main, name, None)), name)
 
+    def test_the_scene_tools_are_registered(self):
+        for name in ("list_scenes", "save_scene", "delete_scene"):
+            self.assertTrue(callable(getattr(main, name, None)), name)
+
+    def test_the_scene_tools_say_what_a_scene_is(self):
+        text = main.save_scene.__doc__ or ""
+        self.assertIn("table", text.lower())
+        self.assertIn("join", text, "a scene must say it stores no joins")
+        self.assertIn("scene_id", text)
+
+    def test_the_trace_tool_accepts_a_scene(self):
+        text = main.trace_by_key.__doc__ or ""
+        self.assertIn("scene", text)
+        self.assertIn("outside", text)
+        self.assertIn("save_scene", text)
+
     def test_the_scanner_tool_explains_what_it_skips(self):
         text = main.scan_code_relations.__doc__ or ""
         self.assertIn("mapper XML", text)
@@ -226,6 +242,86 @@ class GraphTools(unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["deleted"]["id"], edge["id"])
         self.assertEqual(main.list_edges()["edges"], [])
+
+
+@unittest.skipUnless(HAVE_MAIN, "the MCP SDK is not installed for this interpreter")
+class SceneTools(unittest.TestCase):
+    """The scene tools go through `store.resolve`, which hands back a pair.
+
+    This class exists because they did not: `store.resolve` returns
+    `(profile, secrets)`, and all three scene tools unpacked only the first value
+    and then treated the tuple as the profile — the tests that only checked the
+    tools were registered passed while every real call failed. These call them.
+    """
+
+    def setUp(self):
+        import json
+        import os
+        import tempfile
+
+        self.tmp = tempfile.TemporaryDirectory()
+        self.saved = os.environ.get("DB_MCP_RUNTIME")
+        os.environ["DB_MCP_RUNTIME"] = self.tmp.name
+        registry = {
+            "schemaVersion": 1,
+            "datasources": [
+                {
+                    "id": "shop",
+                    "name": "shop",
+                    "kind": "sqlite",
+                    "config": {"file": str(Path(self.tmp.name) / "shop.db")},
+                    "readOnly": True,
+                    "isDefault": True,
+                }
+            ],
+        }
+        (Path(self.tmp.name) / "datasources.json").write_text(json.dumps(registry), encoding="utf-8")
+
+    def tearDown(self):
+        import os
+
+        if self.saved is None:
+            os.environ.pop("DB_MCP_RUNTIME", None)
+        else:
+            os.environ["DB_MCP_RUNTIME"] = self.saved
+        self.tmp.cleanup()
+
+    def test_an_empty_datasource_lists_no_scenes(self):
+        payload = main.list_scenes()
+        self.assertTrue(payload["ok"], payload)
+        self.assertEqual(payload["scenes"], [])
+        self.assertEqual(payload["total"], 0)
+        self.assertEqual(payload["datasource"]["id"], "shop")
+
+    def test_saving_a_scene_makes_it_listable(self):
+        saved = main.save_scene("order to cash", ["t_order", "t_trans"])
+        self.assertTrue(saved["ok"], saved)
+        self.assertTrue(saved["created"])
+        self.assertEqual(len(saved["scene"]["tables"]), 2)
+        listed = main.list_scenes()
+        self.assertEqual(len(listed["scenes"]), 1)
+        self.assertEqual(listed["scenes"][0]["name"], "order to cash")
+
+    def test_saving_the_same_name_updates_instead_of_duplicating(self):
+        first = main.save_scene("flow", ["a"])["scene"]
+        second = main.save_scene("flow", ["a", "b"])
+        self.assertFalse(second["created"])
+        self.assertEqual(second["scene"]["id"], first["id"])
+        self.assertEqual(len(main.list_scenes()["scenes"]), 1)
+
+    def test_deleting_a_scene_leaves_the_graph_alone(self):
+        edge = main.propose_relation("t_trans", "order_id", "t_order", "id")["edge"]
+        scene = main.save_scene("flow", ["t_order"])["scene"]
+        payload = main.delete_scene(scene["id"])
+        self.assertTrue(payload["ok"], payload)
+        self.assertEqual(payload["deleted"], scene["id"])
+        self.assertEqual(main.list_scenes()["scenes"], [])
+        self.assertEqual([row["id"] for row in main.list_edges()["edges"]], [edge["id"]])
+
+    def test_an_unknown_scene_comes_back_as_a_user_error(self):
+        payload = main.delete_scene("s_nope")
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["error"]["code"], "user_error")
 
 
 @unittest.skipUnless(HAVE_MAIN, "the MCP SDK is not installed for this interpreter")

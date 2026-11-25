@@ -520,6 +520,7 @@ try {
      must not be reachable from another origin — the panel is the only client. */
   const graphRoutes = [
     ['GET', '/relations?datasource=alpha'],
+    ['GET', '/scenes?datasource=alpha'],
     ['POST', '/relations/discover'],
     ['POST', '/relations/propose'],
     ['POST', '/relations/feedback'],
@@ -527,6 +528,8 @@ try {
     ['POST', '/relations/delete'],
     ['POST', '/relations/mine'],
     ['POST', '/relations/scan'],
+    ['POST', '/scenes/save'],
+    ['POST', '/scenes/delete'],
     ['POST', '/trace'],
   ]
   for (const [method, path] of graphRoutes) {
@@ -577,6 +580,27 @@ try {
     'the scan route takes a root and no SQL',
     scanArgs.status !== 404 && !/sql|statement/.test(JSON.stringify(scanArgs.body?.error || '')),
     JSON.stringify(scanArgs.body).slice(0, 160),
+  )
+
+  /* A scene is a table list, so the route must forward `tables` as an array and
+     nothing else that could smuggle SQL through it. */
+  const sceneSave = await post('/scenes/save', {
+    name: 'order to cash',
+    datasource: 'alpha',
+    tables: ['t_order', 't_trans'],
+    sql: 'select 1',
+  })
+  check(
+    'the scene save route forwards a table list and no SQL',
+    sceneSave.status !== 404 &&
+      !/sql|statement/.test(JSON.stringify(sceneSave.body?.error || '')),
+    JSON.stringify(sceneSave.body).slice(0, 160),
+  )
+  const sceneNoName = await post('/scenes/save', { tables: ['t_order'] })
+  check(
+    'the scene save route refuses a scene without a name',
+    sceneNoName.status !== 404 && /name|required|user_error/i.test(JSON.stringify(sceneNoName.body)),
+    JSON.stringify(sceneNoName.body).slice(0, 160),
   )
 } finally {
   await new Promise((resolve) => server.close(resolve))

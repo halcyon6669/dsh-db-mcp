@@ -44,7 +44,10 @@ are `GET`; every mutation is `POST` (the same-origin check compares `Origin` wit
 | `POST /relations/delete` | remove one edge (`{ edge_id, datasource? }`) |
 | `POST /relations/mine` | mine joins out of the audit log (`{ datasource?, schema?, limit? }`) |
 | `POST /relations/scan` | mine joins out of a project's source tree (`{ root, datasource?, schema?, limit? }`) |
-| `POST /trace` | follow one value across tables (`{ value, datasource?, entry_table?, entry_column?, max_depth?, max_rows_per_table?, direction?, confirm_slow? }`) — a read-only walk, never a SQL entry point; `confirm_slow` allows a step that would scan a whole table |
+| `GET /scenes?datasource=…` | the scenes of one datasource: `{ scenes, total }` |
+| `POST /scenes/save` | create or update a scene (`{ name, tables, datasource?, note?, scene_id? }`) |
+| `POST /scenes/delete` | remove one scene (`{ scene_id, datasource? }`) — the edges stay |
+| `POST /trace` | follow one value across tables (`{ value, datasource?, entry_table?, entry_column?, scene?, max_depth?, max_rows_per_table?, direction?, confirm_slow? }`) — a read-only walk, never a SQL entry point; `scene` narrows it to that scene's tables and reports the rest under `outside`; `confirm_slow` allows a step that would scan a whole table |
 | `POST /mcp/call` | dev helper: call one MCP tool through the panel |
 | `POST /reload` | dev helper: re-import `src/host.js` without restarting DSH |
 
@@ -115,7 +118,10 @@ memory before `max_rows` trims it; writes keep the ordinary cursor.
 | `feedback_relation` | `edge_id`, `verdict`, `reason?`, `note?`, `datasource?`, `fanout?`, `ms?` | `{ edge, cost, previousStatus, indexed, unique }` — `verdict` is `ok`, `too_many`, `missing` or `irrelevant`; `ms` records how long this step took; see below |
 | `set_relation_condition` | `edge_id`, `condition?`, `datasource?` | `{ edge, changed }` — an empty `condition` clears it |
 | `delete_edge` | `edge_id`, `datasource?` | `{ deleted, counts }` |
-| `trace_by_key` | `value`, `datasource?`, `entry_table?`, `entry_column?`, `max_depth=3`, `max_rows_per_table=20`, `direction=both`, `confirm_slow=false` | `{ value, direction, elapsedMs, entry, summary, steps, pending, warnings, stoppedAt }` — walks only `confirmed` and `trusted` edges; `confirm_slow` allows a step that would scan a whole table; see below |
+| `trace_by_key` | `value`, `datasource?`, `entry_table?`, `entry_column?`, `scene?`, `max_depth=3`, `max_rows_per_table=20`, `direction=both`, `confirm_slow=false` | `{ value, direction, elapsedMs, scene, entry, summary, nodes, steps, outside, pending, warnings, stoppedAt }` — walks only `confirmed` and `trusted` edges; `scene` narrows the walk to that scene's tables and reports the rest under `outside`; `nodes` is the same walk as a parent/child tree; `confirm_slow` allows a step that would scan a whole table; see below |
+| `list_scenes` | `datasource?` | `{ scenes: [{ id, name, tables, tableCount, note, createdAt, updatedAt }], total }` — a scene is a named set of tables, nothing more |
+| `save_scene` | `name`, `tables`, `datasource?`, `note?`, `scene_id?` | `{ scene, created }` — updates the scene with that `scene_id`, else the one with that name, else creates one; a scene holds no joins, so deleting one never loses an edge |
+| `delete_scene` | `scene_id`, `datasource?` | `{ deleted }` — removes the table set only; the relation graph keeps every edge |
 | `sample_rows` | `table`, `datasource?`, `limit=20`, `schema?` | `{ columns, rows, rowCount, truncated }` |
 | `execute_sql` | `sql`, `datasource?`, `max_rows?`, `full_text?` | `{ columns, rows, rowCount, truncated, elapsedMs }`, or `{ affectedRows }` for a write |
 | `explain_query` | `sql`, `datasource?` | `{ sql, plan }` (engine-specific text) |
@@ -123,7 +129,7 @@ memory before `max_rows` trims it; writes keep the ordinary cursor.
 | `test_connection` | `datasource?` or `kind`+`config`+`password?`, `read_only?` | `{ ok, latencyMs, message, detail: { stage, server, database, user, schema } }` |
 | `session_scope` | `datasources?`, `all?` | the limit saved for this conversation; `all: true` or an empty list lifts it |
 
-`session_scope` is not an MCP tool: the Host registers it next to the seventeen bridged
+`session_scope` is not an MCP tool: the Host registers it next to the twenty bridged
 ones so a conversation can narrow itself. While a limit is saved for the calling
 conversation, `list_datasources` only returns the allowed rows, a call that names
 another source fails with `user_error`, and a call that omits `datasource` either
@@ -324,6 +330,29 @@ connect". It starts at one column, then follows graph edges one hop at a time:
 - **Every step is timed.** Each step reports `ms`, and a finished trace writes the
   durations of the steps it actually ran onto their edges, where `lastMs` / `avgMs`
   keep the last `cost.timingWindow` (five by default).
+- **The walk is also a graph.** `nodes` holds the same steps linked by `parent`, with
+  `children` under each node, so a reader can see which join reached which table.
+  Each node carries what the panel needs to render it without re-reading `steps`:
+  `condition` (with the bound `binds`), `sql`, and `sample`. `steps` is still the flat
+  list and the only source of truth — the graph is a reading of it, and the panel's
+  graph and flat list are both built from `steps`.
+- **A table is expanded once.** When the walk reaches a table it already expanded at a
+  shallower depth, that step is marked `repeated` and its children are not walked
+  again; its rows are still reported, and `summary.repeated` counts them.
+- **A scene narrows what may be read.** Passing `scene` restricts the walk to the
+  tables that scene names. A join leading out of the set is not followed: the table is
+  recorded under `outside` with the join and the reason, and `summary.outside` counts
+  it. A scene holds table names only — never joins — so saving or deleting one cannot
+  change the relation graph.
+
+### Scenes
+
+A scene is a named set of tables for one datasource, stored beside the relation graph
+in `<runtime>/scenes/<source>.json`. It exists so a walk can be scoped to "order to
+cash" without narrowing the graph itself. `list_scenes`, `save_scene` and
+`delete_scene` manage them; `save_scene` updates by `scene_id` first, then by name
+(case-insensitively), and creates only when neither matches. Duplicate tables collapse,
+and the limits are 50 scenes per datasource and 500 tables per scene.
 
 ### How an edge earns trust
 

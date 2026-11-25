@@ -46,7 +46,7 @@
 
 - 页面内 SQL 编辑器、结果表格、数据预览、数据编辑 —— **全部不做**（用户明确：只有 AI 调用 MCP）。
 - 数据同步 / ETL / 备份恢复 / 迁移。
-- 图形化 ER 图（节点连线画布）、可视化建模、图表。表间连接以**列表形态**的关系图管理（FR-MCP-7e），这是为了回答「什么连接什么」，不是为了画图。追踪页（FR-MCP-7f）同样只是查看与判断，它接收一个值、由服务端按关系图拼装并绑定参数的语句，本身不是 SQL 入口。
+- 图形化 ER 图（用户可自由拖拽的节点连线画布）、可视化建模、图表。表间连接以**列表形态**的关系图管理（FR-MCP-7e），这是为了回答「什么连接什么」，不是为了画图。追踪页（FR-MCP-7f）同样只是查看与判断，它接收一个值、由服务端按关系图拼装并绑定参数的语句，本身不是 SQL 入口；它把结果画成**按深度分列的关系图**（一列一个深度、一表一方块、走过的 join 一条带列名标注的线，点方块在下方读那一步），这是只读的自动排版，不是可以手工拖拽连边的 ER 画布，也不做自动布局算法。场景（FR-MCP-7j）只是命名的表集合，不是画布上的分组框。
 - DDL（CREATE/ALTER/DROP）、事务编排、存储过程调试。
 - 数据库账号与权限管理、远程多人共享。
 
@@ -230,22 +230,23 @@
 | FR-MCP-6 | `explain_query` | 执行计划，按方言降级（Oracle 用 `EXPLAIN PLAN`，MySQL/PG 用 `EXPLAIN`） | P2 |
 | FR-MCP-7 | `get_ddl` | 取建表语句（0.6.0 加入） | P1 |
 | FR-MCP-7b | `list_edges` / `propose_relation` / `discover_relations` | 关系图：唯一的「什么连什么」来源。`discover_relations` 把目录里声明的外键导进图，`propose_relation` 记下目录没声明的 join，`list_edges` 列出全部边与状态 | P1 |
-| FR-MCP-7c | `trace_by_key` | 按值追踪：从一个值出发，沿**已确认**的边跨表走，逐步报告表、条件、SQL、命中行数、耗时与边来源；未确认的边只提示不跟随。「目标列无索引且表估计 ≥100 万行」的步骤不执行，返回 `needs_confirm` 并等 `confirm_slow`；行数或索引未知时不拦 | P1 |
+| FR-MCP-7c | `trace_by_key` | 按值追踪：从一个值出发，沿**已确认**的边跨表走，逐步报告表、条件、SQL、命中行数、耗时与边来源；未确认的边只提示不跟随。「目标列无索引且表估计 ≥100 万行」的步骤不执行，返回 `needs_confirm` 并等 `confirm_slow`；行数或索引未知时不拦。返回 `steps` 扁平数组（唯一真相）之外，另给 `nodes` 树（按 `parent` 挂 children）与 `outside`（场景外的表），同一张表只在最浅处展开一次（`repeated`） | P1 |
 | FR-MCP-7d | `feedback_relation` / `set_relation_condition` / `delete_edge` | 边的状态机：`ok` 确认（三次 + 无拒绝 + 扇出≤5 + 最近至少三次实测都 <200ms → `trusted`；索引只是加分项），`too_many`/`missing` 降为 `stale`，`irrelevant` 进黑名单；条件增删与删除边 | P1 |
 | FR-MCP-7e | 面板「关系图」页 | 数据源级边列表：状态角标、来源、确认次数、扇出、目标列有无索引、平均每步耗时；筛选 全部/待确认/已确认/已失效；按状态给出确认、带原因拒绝、加条件、重新打开、删除；已确认/自动信任的边可展开看确认记录。面板只调关系图工具，不接受 SQL | P1 |
-| FR-MCP-7f | 面板「追踪」页 | 只收一个**值**（可选入口表/列与方向），SQL 由服务端按关系图拼装并参数绑定；逐步展示序号、表、条件与绑定值、命中行数、耗时、关键列样例、边状态与扇出；断链/截断/警告/中断位置单独列出；`needs_confirm` 步骤给「仍然执行」按钮（带 `confirm_slow` 重跑）；每步可做四选一反馈（对 / 多了+原因 / 漏了 / 无关）并回写对应边。未跟随的 pending 边单列并指回关系图页 | P1 |
+| FR-MCP-7f | 面板「追踪」页 | 只收一个**值**（可选入口表/列与方向），SQL 由服务端按关系图拼装并参数绑定；默认画成**按深度分列的关系图**（左→右、一列一深度、一表一方块且标注命中行数、走过的 join 画成带「from 列 → to 列」标注的曲线，状态用颜色与虚线区分；遍历结果本质是 DAG，节点可有多父，所以不做要求单父的层级图 tree/treemap/sunburst，也不做可拖拽画布与自动布局）；**点方块在下方读那一步**（绑定值、命中的行且被绑定列高亮、那条 join 的 ✓/✗），不再另起一棵树；同一张表被第二条路径到达时再画一次但不重走；值出现在多处时给候选 chip；旧平铺列表保留为切换项；顶部可选**场景**限定范围；场景外的表单独列出并可一键纳入；连线带可信度角标与 ✓/✗ 反馈，底部有图例说明「反馈针对连线不是行」；`needs_confirm` 步骤给「仍然执行」按钮（带 `confirm_slow` 重跑）；断链/截断/警告/中断位置单独列出 | P1 |
 | FR-MCP-7g | `mine_relations` | 从审计日志挖掘 join：只读 `execute_sql`/`explain_query` 的语句，解析 `on` 等值对；父子方向由目录定（唯一/主键侧为父），判不出方向的进 `ambiguous` 不入图；导入为 `pending` + `audit_mined`，来源强弱 `fk > manual > audit_mined > inferred` 只升不降 | P1 |
 | FR-MCP-7h | `scan_code_relations` | 从 Spring Boot 源码树挖掘 join：只读 mapper XML 的 `select/insert/update/delete/sql`、`@Select/@Insert/@Update/@Delete`、MyBatis-Plus 的 `apply/last/inSql/exists/notExists/having` 片段，其余字符串字面量一律不读；跳过 `build`/`target`/`.git` 等目录；方向与 ambiguous 规则同上；每条边记 `file:line`；只读文件、不执行任何语句 | P1 |
 | FR-MCP-7i | 边的代价 | 每条边记目标列有无索引、表行数估计（PG/openGauss `pg_class.reltuples`、MySQL `information_schema.TABLES.TABLE_ROWS`、Oracle `ALL_TABLES.NUM_ROWS`，不跑 `count(*)`）与最近 N 次实测耗时；`propose_relation`/`feedback_relation` 从目录补索引与行数，每次追踪回写各步耗时；只把单列主键与索引首列算「有索引」。四个阈值（`slowMs`/`timingWindow`/`trustSamples`/`bigTableRows`）存在 `settings.json` 的 `cost` 里、在关系图页可改，Python 每次决策重读（改完下次追踪即生效）；`TRUST_FANOUT` 仍是常量 | P1 |
+| FR-MCP-7j | `list_scenes` / `save_scene` / `delete_scene` | 场景：某个数据源的一组**命名表集合**，存 `<runtime>/scenes/<source>.json`（与关系图分文件）。场景不拥有任何边——它只决定一次追踪可以读哪些表，所以删场景绝不会丢 join。`save_scene` 先按 `scene_id`、再按同名（忽略大小写）更新，都没有才新建；重复表折叠；上限 50 个场景 / 每个 500 张表。`trace_by_key` 传 `scene` 后只走集合内的表，越界的 join 不跟随、目标表进 `outside` 并附原因 | P1 |
 | FR-MCP-8 | `test_connection` | 用保存的源或内联连接串做一次真实登录探测 | P0 |
 | FR-MCP-9 | `session_scope` | **Host 侧原生工具**（非 MCP），限制本会话可见的数据源（0.9.0） | P1 |
 | FR-MCP-10 | instructions | 服务端说明：先看结构再查数、不要拼接用户输入、结果截断含义 | P1 |
 | FR-MCP-11 | 超时 | MCP 行 `toolCallTimeoutMs=60000`；Python 内 `timeout_ms` 上限 120s | P0 |
 | FR-MCP-12 | 并发 | 进程内串行；不同数据源不共享连接；单源连接池上限 4 | P0 |
 
-> 前十七项是 Python 服务发布的工具（`server/main.py` 的 `@mcp.tool()`），`session_scope`
+> 前二十项是 Python 服务发布的工具（`server/main.py` 的 `@mcp.tool()`），`session_scope`
 > 由 `src/tools.js` 注册在 Host 上 —— 它改的是 Host 的 `sessions.json`，Python 看不到，
-> 因此也只对 DSH 智能体生效。工具页可以逐个关掉前十七项，`session_scope` 故意不可关。
+> 因此也只对 DSH 智能体生效。工具页可以逐个关掉前二十项，`session_scope` 故意不可关。
 
 **方言要点（实现约束）**
 
