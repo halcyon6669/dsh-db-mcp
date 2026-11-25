@@ -2327,10 +2327,29 @@
         border: 1px solid var(--dsw-alias-border-l1);
         border-radius: 10px;
         background: var(--dsw-alias-bg-layer-2);
-        overflow-x: auto;
+      }
+      /* The picture keeps its own size and scrolls, so zooming never squeezes a
+         label: the browser scrolls a canvas instead of re-wrapping text. */
+      .dbmcp-trace-scroll {
+        overflow: auto;
+        max-height: 460px;
+      }
+      .dbmcp-trace-zoom {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        justify-content: flex-end;
+        margin-bottom: 6px;
+      }
+      .dbmcp-trace-zoom-value {
+        min-width: 48px;
+        font-variant-numeric: tabular-nums;
       }
       .dbmcp-ov-svg {
         display: block;
+        /* A box or a label is a pointer target; zooming out must not turn a click
+           into a mis-click on the neighbour. */
+        min-width: 1px;
       }
       .dbmcp-ov-head {
         font-size: 10px;

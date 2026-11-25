@@ -432,6 +432,9 @@ window.__ModuleLoader__.load({
         'trace.legendFeedback': '✓ and ✗ judge that join, not the rows.',
         'trace.appearsIn': 'This value lives in {n} places — start from:',
         'trace.overview': 'The shape of the walk, one column per depth — pick a box to read that step',
+        'trace.zoomIn': 'Zoom in',
+        'trace.zoomOut': 'Zoom out',
+        'trace.zoomReset': 'Reset to 100%',
         'notice.discovered': 'Imported the declared foreign keys.',
         'notice.mined': 'Mined the audit log for joins — they arrive as pending.',
         'notice.verdict': 'Recorded "{verdict}".',
@@ -861,6 +864,9 @@ window.__ModuleLoader__.load({
         'trace.legendFeedback': '✓ / ✗ 是对这条连线的反馈，不是对结果行的。',
         'trace.appearsIn': '这个值出现在 {n} 处，从这里出发：',
         'trace.overview': '这次追踪的形状，一列一个深度——点方块看那一步的细节',
+        'trace.zoomIn': '放大',
+        'trace.zoomOut': '缩小',
+        'trace.zoomReset': '复位到 100%',
         'notice.discovered': '已导入数据库声明的外键。',
         'notice.mined': '已从审计日志挖掘表间连接——它们以「待确认」状态进入关系图。',
         'notice.verdict': '已记录「{verdict}」。',
@@ -3266,10 +3272,29 @@ window.__ModuleLoader__.load({
         border: 1px solid var(--dsw-alias-border-l1);
         border-radius: 10px;
         background: var(--dsw-alias-bg-layer-2);
-        overflow-x: auto;
+      }
+      /* The picture keeps its own size and scrolls, so zooming never squeezes a
+         label: the browser scrolls a canvas instead of re-wrapping text. */
+      .dbmcp-trace-scroll {
+        overflow: auto;
+        max-height: 460px;
+      }
+      .dbmcp-trace-zoom {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        justify-content: flex-end;
+        margin-bottom: 6px;
+      }
+      .dbmcp-trace-zoom-value {
+        min-width: 48px;
+        font-variant-numeric: tabular-nums;
       }
       .dbmcp-ov-svg {
         display: block;
+        /* A box or a label is a pointer target; zooming out must not turn a click
+           into a mis-click on the neighbour. */
+        min-width: 1px;
       }
       .dbmcp-ov-head {
         font-size: 10px;
@@ -5440,6 +5465,10 @@ function groupTables(tables) {
       /* Which node the overview strip is pointing at — set by clicking a box up
          there, cleared when the walk is re-run. */
       const [traceFocus, setTraceFocus] = React.useState(0)
+      /* How much the graph is magnified. A walk that fans out into five lanes does
+         not fit any card, and shrinking the text to fit makes the labels unreadable,
+         so the picture keeps its own size and the reader scales it. */
+      const [traceZoom, setTraceZoom] = React.useState(1)
 
       const load = React.useCallback(async () => {
         setBusy(true)
@@ -5978,6 +6007,7 @@ function groupTables(tables) {
         setTraceOpen('')
         setTraceExpanded([])
         setTraceFocus(0)
+        setTraceZoom(1)
         try {
           const payload = await apiPost('/trace', {
             value,
@@ -8045,6 +8075,13 @@ function groupTables(tables) {
         return best
       }
 
+      /* How far the picture may be magnified. 40% fits a wide walk into a card,
+         250% makes a single label comfortable to read; past either end the picture
+         stops being a picture. */
+      const ZOOM_MIN = 0.4
+      const ZOOM_MAX = 2.5
+      const ZOOM_STEP = 0.2
+
       const traceOverview = () => {
         const nodes = (trace && trace.nodes) || []
         if (nodes.length === 0) return null
@@ -8206,18 +8243,63 @@ function groupTables(tables) {
           'div',
           { className: 'dbmcp-trace-overview' },
           h(
-            'svg',
-            {
-              className: 'dbmcp-ov-svg',
-              viewBox: `0 0 ${width} ${height}`,
-              style: { width: `${width}px`, height: `${height}px` },
-              role: 'img',
-              'aria-label': t('trace.overview'),
-            },
-            heads,
-            links,
-            labels,
-            boxes,
+            'div',
+            { className: 'dbmcp-trace-zoom' },
+            h(
+              'button',
+              {
+                type: 'button',
+                className: 'dbmcp-btn is-small is-plain',
+                disabled: traceZoom <= ZOOM_MIN,
+                title: t('trace.zoomOut'),
+                'aria-label': t('trace.zoomOut'),
+                onClick: () => setTraceZoom((value) => Math.max(ZOOM_MIN, Math.round((value - ZOOM_STEP) * 100) / 100)),
+              },
+              '−',
+            ),
+            h(
+              'button',
+              {
+                type: 'button',
+                className: 'dbmcp-btn is-small is-plain dbmcp-trace-zoom-value',
+                title: t('trace.zoomReset'),
+                'aria-label': t('trace.zoomReset'),
+                onClick: () => setTraceZoom(1),
+              },
+              `${Math.round(traceZoom * 100)}%`,
+            ),
+            h(
+              'button',
+              {
+                type: 'button',
+                className: 'dbmcp-btn is-small is-plain',
+                disabled: traceZoom >= ZOOM_MAX,
+                title: t('trace.zoomIn'),
+                'aria-label': t('trace.zoomIn'),
+                onClick: () => setTraceZoom((value) => Math.min(ZOOM_MAX, Math.round((value + ZOOM_STEP) * 100) / 100)),
+              },
+              '+',
+            ),
+          ),
+          h(
+            'div',
+            { className: 'dbmcp-trace-scroll' },
+            h(
+              'svg',
+              {
+                className: 'dbmcp-ov-svg',
+                viewBox: `0 0 ${width} ${height}`,
+                /* The viewBox keeps the drawing; only the rendered size changes, so
+                   zooming never re-lays out a lane or re-wraps a label. */
+                style: { width: `${Math.round(width * traceZoom)}px`, height: `${Math.round(height * traceZoom)}px` },
+                role: 'img',
+                'aria-label': t('trace.overview'),
+              },
+              heads,
+              links,
+              labels,
+              boxes,
+            ),
           ),
         )
       }

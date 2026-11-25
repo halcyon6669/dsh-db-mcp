@@ -68,6 +68,12 @@ report of each version in more detail.
   fewest crossings rather than in arrival order, and each join label sits in its own
   gutter so no curve can run through it. The flat list the page used to be is still
   one click away.
+- **The graph zooms instead of shrinking to fit.** A walk that fans out into five
+  lanes does not fit any card, and scaling the text down to fit makes the labels
+  unreadable. The picture keeps its own size behind a scroll box and the reader
+  scales it from 40% to 250%, with the percentage itself resetting to 100%. Zooming
+  changes only the rendered size — the viewBox is untouched, so no lane is re-laid
+  out and no label is re-wrapped.
 
 ### Changed
 

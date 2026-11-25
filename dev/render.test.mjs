@@ -1315,6 +1315,22 @@ check(
     /traceOrder\(traceLanes\(nodes\)\)/.test(traceCard),
 )
 check(
+  'trace page: the graph can be zoomed instead of shrunk to fit',
+  /const \[traceZoom, setTraceZoom\] = React\.useState\(1\)/.test(source) &&
+    /const ZOOM_MIN = 0\.4/.test(traceCard) &&
+    /const ZOOM_MAX = 2\.5/.test(traceCard) &&
+    /className: 'dbmcp-trace-zoom'/.test(traceCard) &&
+    /setTraceZoom\(1\)/.test(traceCard),
+)
+check(
+  'trace page: zooming resizes the picture, it does not re-lay it out',
+  /viewBox: `0 0 \$\{width\} \$\{height\}`/.test(traceCard) &&
+    /width: `\$\{Math\.round\(width \* traceZoom\)\}px`/.test(traceCard) &&
+    /className: 'dbmcp-trace-scroll'/.test(traceCard) &&
+    /Math\.round\(\(value \+ ZOOM_STEP\) \* 100\) \/ 100/.test(traceCard) &&
+    /Math\.round\(\(value - ZOOM_STEP\) \* 100\) \/ 100/.test(traceCard),
+)
+check(
   'trace page: the join label sits in its own gutter, clear of every curve',
   /const elbow = x2 - GUTTER/.test(traceCard) &&
     /L \$\{x2\} \$\{y2\}/.test(traceCard) &&

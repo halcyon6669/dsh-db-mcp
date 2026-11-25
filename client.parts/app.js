@@ -1920,6 +1920,10 @@ function groupTables(tables) {
       /* Which node the overview strip is pointing at — set by clicking a box up
          there, cleared when the walk is re-run. */
       const [traceFocus, setTraceFocus] = React.useState(0)
+      /* How much the graph is magnified. A walk that fans out into five lanes does
+         not fit any card, and shrinking the text to fit makes the labels unreadable,
+         so the picture keeps its own size and the reader scales it. */
+      const [traceZoom, setTraceZoom] = React.useState(1)
 
       const load = React.useCallback(async () => {
         setBusy(true)
@@ -2458,6 +2462,7 @@ function groupTables(tables) {
         setTraceOpen('')
         setTraceExpanded([])
         setTraceFocus(0)
+        setTraceZoom(1)
         try {
           const payload = await apiPost('/trace', {
             value,
@@ -4525,6 +4530,13 @@ function groupTables(tables) {
         return best
       }
 
+      /* How far the picture may be magnified. 40% fits a wide walk into a card,
+         250% makes a single label comfortable to read; past either end the picture
+         stops being a picture. */
+      const ZOOM_MIN = 0.4
+      const ZOOM_MAX = 2.5
+      const ZOOM_STEP = 0.2
+
       const traceOverview = () => {
         const nodes = (trace && trace.nodes) || []
         if (nodes.length === 0) return null
@@ -4686,18 +4698,63 @@ function groupTables(tables) {
           'div',
           { className: 'dbmcp-trace-overview' },
           h(
-            'svg',
-            {
-              className: 'dbmcp-ov-svg',
-              viewBox: `0 0 ${width} ${height}`,
-              style: { width: `${width}px`, height: `${height}px` },
-              role: 'img',
-              'aria-label': t('trace.overview'),
-            },
-            heads,
-            links,
-            labels,
-            boxes,
+            'div',
+            { className: 'dbmcp-trace-zoom' },
+            h(
+              'button',
+              {
+                type: 'button',
+                className: 'dbmcp-btn is-small is-plain',
+                disabled: traceZoom <= ZOOM_MIN,
+                title: t('trace.zoomOut'),
+                'aria-label': t('trace.zoomOut'),
+                onClick: () => setTraceZoom((value) => Math.max(ZOOM_MIN, Math.round((value - ZOOM_STEP) * 100) / 100)),
+              },
+              '−',
+            ),
+            h(
+              'button',
+              {
+                type: 'button',
+                className: 'dbmcp-btn is-small is-plain dbmcp-trace-zoom-value',
+                title: t('trace.zoomReset'),
+                'aria-label': t('trace.zoomReset'),
+                onClick: () => setTraceZoom(1),
+              },
+              `${Math.round(traceZoom * 100)}%`,
+            ),
+            h(
+              'button',
+              {
+                type: 'button',
+                className: 'dbmcp-btn is-small is-plain',
+                disabled: traceZoom >= ZOOM_MAX,
+                title: t('trace.zoomIn'),
+                'aria-label': t('trace.zoomIn'),
+                onClick: () => setTraceZoom((value) => Math.min(ZOOM_MAX, Math.round((value + ZOOM_STEP) * 100) / 100)),
+              },
+              '+',
+            ),
+          ),
+          h(
+            'div',
+            { className: 'dbmcp-trace-scroll' },
+            h(
+              'svg',
+              {
+                className: 'dbmcp-ov-svg',
+                viewBox: `0 0 ${width} ${height}`,
+                /* The viewBox keeps the drawing; only the rendered size changes, so
+                   zooming never re-lays out a lane or re-wraps a label. */
+                style: { width: `${Math.round(width * traceZoom)}px`, height: `${Math.round(height * traceZoom)}px` },
+                role: 'img',
+                'aria-label': t('trace.overview'),
+              },
+              heads,
+              links,
+              labels,
+              boxes,
+            ),
           ),
         )
       }
