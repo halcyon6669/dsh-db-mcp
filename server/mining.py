@@ -154,6 +154,21 @@ def _key(left: dict, right: dict) -> tuple[str, str, str, str]:
     return one[0], one[1], two[0], two[1]
 
 
+def _rank(seen: dict[tuple[str, str, str, str], int], limit: int) -> list[dict]:
+    """The counted pairs, most frequent first, in the shape every caller expects."""
+    ordered = sorted(seen.items(), key=lambda item: (-item[1], item[0]))
+    mined: list[dict] = []
+    for (ltable, lcolumn, rtable, rcolumn), hits in ordered[: max(1, limit)]:
+        mined.append(
+            {
+                "left": {"table": ltable, "column": lcolumn},
+                "right": {"table": rtable, "column": rcolumn},
+                "hits": hits,
+            }
+        )
+    return mined
+
+
 def candidates(rows, datasources=(), include_anonymous: bool = False, limit: int = 500) -> list[dict]:
     """Candidate column pairs mined from audit lines.
 
@@ -191,14 +206,4 @@ def candidates(rows, datasources=(), include_anonymous: bool = False, limit: int
         for left, right in _joins(sql):
             key = _key(left, right)
             seen[key] = seen.get(key, 0) + 1
-    ordered = sorted(seen.items(), key=lambda item: (-item[1], item[0]))
-    mined: list[dict] = []
-    for (ltable, lcolumn, rtable, rcolumn), hits in ordered[: max(1, limit)]:
-        mined.append(
-            {
-                "left": {"table": ltable, "column": lcolumn},
-                "right": {"table": rtable, "column": rcolumn},
-                "hits": hits,
-            }
-        )
-    return mined
+    return _rank(seen, limit)

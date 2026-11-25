@@ -197,6 +197,73 @@ def _inline_profile(kind: str, config: Any, read_only: Optional[bool]) -> dict:
     }
 
 
+def _unique_columns(
+    profile: dict,
+    connection,
+    table: str,
+    schema: Optional[str],
+    cache: dict[str, set[str]],
+) -> set[str]:
+    """The columns of `table` that are unique on their own.
+
+    Only a single-column key makes its column unique: `ledger(account_no, seq)`
+    has `account_no` repeating across `seq`, so taking every key column would call
+    it unique and leave a join that clearly points at `account` ambiguous.
+    """
+    key = str(table).casefold()
+    if key in cache:
+        return cache[key]
+    try:
+        info = engines.describe_table(profile, connection, table, schema)
+    except Exception:  # noqa: BLE001 - an unreadable table is just unknown
+        cache[key] = set()
+        return cache[key]
+    covered: set[str] = set()
+    primary = [name for name in (info.get("primaryKey") or []) if name]
+    if len(primary) == 1:
+        covered.add(primary[0])
+    for index in info.get("indexes") or []:
+        columns = [name for name in index.get("columns") or [] if name]
+        if bool(index.get("unique")) and len(columns) == 1:
+            covered.add(columns[0])
+    cache[key] = {name.casefold() for name in covered}
+    return cache[key]
+
+
+def _orient(profile: dict, connection, schema: Optional[str], pairs: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Decide which side of each pair is the parent, or report why it cannot.
+
+    An equality says the columns are equal, not who owns whom. The catalog
+    answers it: the side whose column is unique on its own is the parent (`to`),
+    the other side is the child (`from`). A pair where neither side looks unique,
+    or where both do, is reported instead of guessed into the graph.
+    """
+    found: list[dict] = []
+    ambiguous: list[dict] = []
+    cache: dict[str, set[str]] = {}
+    for item in pairs:
+        left = item["left"]
+        right = item["right"]
+        left_unique = str(left["column"]).casefold() in _unique_columns(profile, connection, left["table"], schema, cache)
+        right_unique = str(right["column"]).casefold() in _unique_columns(
+            profile, connection, right["table"], schema, cache
+        )
+        if left_unique == right_unique:
+            ambiguous.append({**item, "reason": "both unique" if left_unique else "neither unique"})
+            continue
+        parent, child = (left, right) if left_unique else (right, left)
+        found.append(
+            {
+                "table": child["table"],
+                "column": child["column"],
+                "refTable": parent["table"],
+                "refColumn": parent["column"],
+                "name": item.get("name") or f"seen {item['hits']} time(s)",
+            }
+        )
+    return found, ambiguous
+
+
 def _audited(fn):
     """Record one audit line per call, when this process owns the log.
 
@@ -452,55 +519,14 @@ def mine_relations(
         keys = [item for item in (profile.get("id"), profile.get("name")) if isinstance(item, str)]
         rows = audit.lines()
         mined = mining.candidates(rows, keys, include_anonymous=bool(profile.get("isDefault")), limit=limit)
+        for item in mined:
+            item["name"] = f"mined from {item['hits']} statement(s)"
         ambiguous: list[dict] = []
         found: list[dict] = []
         if mined:
             _profile, (connection, close) = _open(datasource)
             try:
-                unique_cache: dict[str, set[str]] = {}
-
-                def unique_columns(table: str) -> set[str]:
-                    key = str(table).casefold()
-                    if key not in unique_cache:
-                        try:
-                            info = engines.describe_table(profile, connection, table, schema)
-                        except Exception:  # noqa: BLE001 - an unreadable table is just unknown
-                            unique_cache[key] = set()
-                        else:
-                            # Only a single-column key makes its column unique on
-                            # its own. `ledger(account_no, seq)` has account_no
-                            # repeating across seq, so taking every key column
-                            # would call it unique and leave the mined join
-                            # ambiguous against the account it clearly points at.
-                            covered: set[str] = set()
-                            primary = [name for name in (info.get("primaryKey") or []) if name]
-                            if len(primary) == 1:
-                                covered.add(primary[0])
-                            for index in info.get("indexes") or []:
-                                columns = [name for name in index.get("columns") or [] if name]
-                                if bool(index.get("unique")) and len(columns) == 1:
-                                    covered.add(columns[0])
-                            unique_cache[key] = {name.casefold() for name in covered}
-                    return unique_cache[key]
-
-                for item in mined:
-                    left = item["left"]
-                    right = item["right"]
-                    left_unique = str(left["column"]).casefold() in unique_columns(left["table"])
-                    right_unique = str(right["column"]).casefold() in unique_columns(right["table"])
-                    if left_unique == right_unique:
-                        ambiguous.append({**item, "reason": "both unique" if left_unique else "neither unique"})
-                        continue
-                    parent, child = (left, right) if left_unique else (right, left)
-                    found.append(
-                        {
-                            "table": child["table"],
-                            "column": child["column"],
-                            "refTable": parent["table"],
-                            "refColumn": parent["column"],
-                            "name": f"mined from {item['hits']} statement(s)",
-                        }
-                    )
+                found, ambiguous = _orient(profile, connection, schema, mined)
             finally:
                 close()
         result = relations.import_edges(profile, found, source="audit_mined")
