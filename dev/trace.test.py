@@ -226,6 +226,27 @@ class TraceOnARealDatabase(_Walk):
         self.assertEqual([step["table"] for step in result["steps"]], ["t_order", "t_trans"])
         self.assertIn("depth_limit", [warning["code"] for warning in result["warnings"]])
 
+    def test_the_depth_cap_is_one_line_naming_what_it_hid(self):
+        """A cap is worth one line, and only for a table the walk never read.
+
+        A graph with a cycle puts every step at the cap, so a warning per capped
+        step would be several lines each naming a table already on screen.
+        """
+        self._chain()
+        result = self._trace("1", entry_table="t_order", entry_column="id", max_depth=1)
+        warnings = [warning for warning in result["warnings"] if warning["code"] == "depth_limit"]
+        self.assertEqual(len(warnings), 1)
+        message = warnings[0]["message"]
+        self.assertIn("t_line", message)
+        self.assertNotIn("t_trans", message)
+        self.assertIn("raise max_depth", message)
+
+    def test_a_depth_cap_that_hid_nothing_says_nothing(self):
+        """Deep enough to read everything: no cap warning at all."""
+        self._chain()
+        result = self._trace("1", entry_table="t_order", entry_column="id", max_depth=5)
+        self.assertNotIn("depth_limit", [warning["code"] for warning in result["warnings"]])
+
     def test_the_depth_cap_is_clamped(self):
         self._chain()
         result = self._trace("1", entry_table="t_order", entry_column="id", max_depth=99)

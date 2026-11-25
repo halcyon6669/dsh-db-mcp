@@ -321,6 +321,11 @@ connect". It starts at one column, then follows graph edges one hop at a time:
   breaks there. `warnings` carries `no_edges`, `no_entry`, `probe_timeout`,
   `probe_failed`, `step_failed`, `depth_limit`, and `step_limit`; `stoppedAt` names
   the table and reason for each dead end.
+- **The depth cap is one line, not one per table.** A graph with a cycle
+  (`order_item → sales_order → order_item`) puts every step at the cap, so a warning
+  per capped step would be five lines each naming a table already on screen. The cap
+  is reported once, and only for tables the walk never read: `max_depth 3 left 2
+  table(s) unread: category, stock_move; raise max_depth to read further`.
 - **A full scan asks first.** A join whose target column has no index and whose
   table the catalog estimates at a million rows or more is not run: the step comes
   back as `status: "needs_confirm"` with `sql` empty, `rows: 0`, and the cost it

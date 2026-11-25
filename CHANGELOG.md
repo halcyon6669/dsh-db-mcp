@@ -100,6 +100,11 @@ report of each version in more detail.
   every key column as a candidate parent, so `ledger(account_no, seq)` looked
   unique on `account_no` and a clear ledger→account join was dropped as "both
   unique". Only a single-column key counts.
+- **The depth cap is reported once, and only for what it hid.** A graph with a cycle
+  (`order_item → sales_order → order_item`) puts every step at the cap, so the walk
+  emitted one `depth_limit` warning per table it could have reached — five lines each
+  naming a table already on screen, with nothing to act on. The cap is now collected
+  during the walk and reported once, naming only the tables the walk never read.
 
 ## [1.1.0] - 2026-11-25
 

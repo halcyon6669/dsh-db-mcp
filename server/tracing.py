@@ -442,6 +442,11 @@ def trace(
     hit_tables: set[str] = set()
     visited_tables: set[str] = set()
     expanded: set[str] = set()
+    # Tables the depth cap kept out of the walk, collected while walking and judged
+    # once it ends: the report names only the ones still unread, so a cycle that
+    # makes every step sit at the cap does not produce five lines of noise.
+    capped: set[str] = set()
+    capped_names: list[str] = []
     rows_read = 0
     depth_reached = 0
 
@@ -653,13 +658,19 @@ def trace(
             continue
         expanded.add(_fold(table))
         if depth >= depth_limit:
-            if _incident(walkable, table):
-                warnings.append(
-                    {
-                        "code": "depth_limit",
-                        "message": f"{table} is at depth {depth}; raise max_depth to go further",
-                    }
-                )
+            # A depth cap is only worth reporting when it actually hid a table. In a
+            # graph with a cycle (order_item -> sales_order -> order_item) every step
+            # sits at the cap and raising it would walk the same tables again, so one
+            # warning per capped step would be five lines saying nothing happened.
+            # The tables are collected here and judged after the walk, because a table
+            # this step could not reach may still be reached from a sibling.
+            for other_edge, side, here, there in _incident(walkable, table):
+                if not _follows(side, heading):
+                    continue
+                other = there.get("table")
+                if other and _fold(other) not in capped:
+                    capped.add(_fold(other))
+                    capped_names.append(other)
             continue
 
         for other_edge, side, here, there in _incident(walkable, table):
@@ -719,6 +730,21 @@ def trace(
             {
                 "code": "step_limit",
                 "message": f"stopped after {MAX_STEPS} steps; narrow the value or lower max_depth",
+            }
+        )
+
+    # One line for the whole depth cap, and only for the tables the walk never read:
+    # "customer and region are still unread" is actionable, five lines that each name
+    # a table already on screen are noise.
+    unread = [name for name in capped_names if _fold(name) not in expanded]
+    if unread:
+        warnings.append(
+            {
+                "code": "depth_limit",
+                "message": (
+                    f"max_depth {depth_limit} left {len(unread)} table(s) unread: "
+                    f"{', '.join(unread)}; raise max_depth to read further"
+                ),
             }
         )
 
