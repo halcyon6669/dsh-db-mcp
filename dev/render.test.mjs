@@ -325,6 +325,23 @@ if (typeof readPanel !== 'function' || typeof writePanel !== 'function' || typeo
   delete globalThis.localStorage
 }
 
+/* Select-all works on what the search box and the filter chip left on screen,
+   not on every row in the file: a narrowed list must not quietly select sources
+   the reader cannot see. The rule runs inside MainPanel's closure, so it is
+   pinned in the source the way the other list-page rules are. */
+check(
+  'list page: select all takes the visible rows, never the hidden ones',
+  /const visibleIds = visibleSources\.map\(\(source\) => source\.id\)/.test(source) &&
+    /const allVisible = visibleIds\.length > 0 && visibleIds\.every\(\(id\) => selected\.includes\(id\)\)/.test(source) &&
+    /setSelected\(allVisible \? \[\] : visibleIds\.slice\(\)\)/.test(source),
+)
+check(
+  'list page: the select-all button says how many it will take',
+  /title: allVisible \? t\('sources\.selectNone'\) : fmt\(t\('sources\.selectAll'\), \{ n: visibleIds\.length \}\)/.test(source) &&
+    /disabled: visibleIds\.length === 0/.test(source) &&
+    /allVisible \? t\('sources\.selectNone'\) : fmt\(t\('sources\.selectAll'\), \{ n: visibleIds\.length \}\)/.test(source),
+)
+
 const schemaView = render('schema view', () =>
   SchemaView({ t, source: { id: 'chinook', name: 'Chinook', kind: 'sqlite' }, onBack: noop }),
 )

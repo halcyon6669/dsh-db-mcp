@@ -2974,6 +2974,20 @@ function groupTables(tables) {
         return sourceMatches(source, query)
       })
 
+      /* "All of them" means all of what is on screen: with a search or a chip
+         narrowing the list, selecting everything would touch rows the reader
+         cannot see. The button therefore takes the visible set as the selection
+         and gives it back when the whole of it is already checked, so what is
+         selected is always what was pointed at. With nothing narrowed that is
+         every source there is. */
+      const visibleIds = visibleSources.map((source) => source.id)
+      const allVisible = visibleIds.length > 0 && visibleIds.every((id) => selected.includes(id))
+
+      const toggleVisible = () => {
+        setPendingBulkDelete(false)
+        setSelected(allVisible ? [] : visibleIds.slice())
+      }
+
       const renderItem = (source) => {
         const probeInfo = source.lastProbe
         const failed = probeFailed(source)
@@ -5204,6 +5218,17 @@ function groupTables(tables) {
                     onWrite: toggleWrite,
                   }),
                   h('span', { className: 'dbmcp-list-spacer' }),
+                  h(
+                    'button',
+                    {
+                      type: 'button',
+                      className: 'dbmcp-btn is-small',
+                      disabled: visibleIds.length === 0,
+                      title: allVisible ? t('sources.selectNone') : fmt(t('sources.selectAll'), { n: visibleIds.length }),
+                      onClick: toggleVisible,
+                    },
+                    allVisible ? t('sources.selectNone') : fmt(t('sources.selectAll'), { n: visibleIds.length }),
+                  ),
                   h('span', { className: 'dbmcp-pill' }, t('sources.count').replace('{n}', String(sources.length))),
                   h('button', { type: 'button', className: 'dbmcp-btn is-small', disabled: busy, onClick: load }, t('action.refresh')),
                 ),

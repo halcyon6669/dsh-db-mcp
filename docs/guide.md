@@ -272,6 +272,10 @@ Every source carries an optional **group** label, editable under *More settings*
 - **Select** — each group header has a select-all box, so grouped sources join bulk
   work exactly like loose ones. A row itself is selected by its checkbox (the row body
   no longer toggles, so double-click stays free for renaming).
+- **Select all** — the button in the list header takes everything the search box and
+  the filter chip left on screen, and its label counts those rows; press it again to
+  clear. With nothing narrowed it is every source. Hidden rows are never dragged in,
+  so a search never quietly widens a bulk action.
 
 With a selection made, the bulk bar can test, flip read-only, move into a group, or
 delete (two-step confirmation).

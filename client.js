@@ -153,6 +153,8 @@ window.__ModuleLoader__.load({
         'sources.idChip': 'ID',
         'sources.idChipHint': 'this is the identifier every MCP tool takes as its datasource argument — click to copy',
         'sources.idCopied': 'copied',
+        'sources.selectAll': 'Select all {n}',
+        'sources.selectNone': 'Clear selection',
         'form.edit': 'Edit {name}',
         'form.name': 'Display name',
         'form.id': 'Identifier',
@@ -581,6 +583,8 @@ window.__ModuleLoader__.load({
         'sources.idChip': '标识符',
         'sources.idChipHint': '智能体调用 MCP 工具时，用 datasource 参数传这个标识符 · 点击复制',
         'sources.idCopied': '已复制',
+        'sources.selectAll': '全选 {n} 个',
+        'sources.selectNone': '取消全选',
         'form.edit': '编辑 {name}',
         'form.name': '显示名称',
         'form.id': '标识符',
@@ -6478,6 +6482,20 @@ function groupTables(tables) {
         return sourceMatches(source, query)
       })
 
+      /* "All of them" means all of what is on screen: with a search or a chip
+         narrowing the list, selecting everything would touch rows the reader
+         cannot see. The button therefore takes the visible set as the selection
+         and gives it back when the whole of it is already checked, so what is
+         selected is always what was pointed at. With nothing narrowed that is
+         every source there is. */
+      const visibleIds = visibleSources.map((source) => source.id)
+      const allVisible = visibleIds.length > 0 && visibleIds.every((id) => selected.includes(id))
+
+      const toggleVisible = () => {
+        setPendingBulkDelete(false)
+        setSelected(allVisible ? [] : visibleIds.slice())
+      }
+
       const renderItem = (source) => {
         const probeInfo = source.lastProbe
         const failed = probeFailed(source)
@@ -8708,6 +8726,17 @@ function groupTables(tables) {
                     onWrite: toggleWrite,
                   }),
                   h('span', { className: 'dbmcp-list-spacer' }),
+                  h(
+                    'button',
+                    {
+                      type: 'button',
+                      className: 'dbmcp-btn is-small',
+                      disabled: visibleIds.length === 0,
+                      title: allVisible ? t('sources.selectNone') : fmt(t('sources.selectAll'), { n: visibleIds.length }),
+                      onClick: toggleVisible,
+                    },
+                    allVisible ? t('sources.selectNone') : fmt(t('sources.selectAll'), { n: visibleIds.length }),
+                  ),
                   h('span', { className: 'dbmcp-pill' }, t('sources.count').replace('{n}', String(sources.length))),
                   h('button', { type: 'button', className: 'dbmcp-btn is-small', disabled: busy, onClick: load }, t('action.refresh')),
                 ),

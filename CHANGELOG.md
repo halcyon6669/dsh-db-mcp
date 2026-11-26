@@ -112,6 +112,12 @@ report of each version in more detail.
   less, and its recent steps all faster than 200ms — at least three measured ones, so
   an edge nobody timed stays `confirmed`. An unindexed column that is genuinely fast
   earns trust all the same, and an edge whose steps slow down falls back.
+- **Select all on the source list means all of what is shown.** Ticking a dozen rows for
+  a bulk action used to be a dozen clicks. The list header now has a button that takes
+  the rows the search box and the filter chip left visible, and says how many in its
+  label; pressing it again clears the selection. Rows hidden by a filter are never
+  pulled in, so narrowing the list narrowing the selection stays true; with nothing
+  narrowed the button is simply every source there is.
 
 ### Fixed
 
