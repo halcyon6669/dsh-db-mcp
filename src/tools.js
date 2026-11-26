@@ -122,6 +122,30 @@ export function renderResult(value) {
         .join('\n') || 'no datasources configured'
     );
   }
+  if (Array.isArray(value.scenes)) {
+    if (!value.scenes.length) {
+      return 'no scenes for this source — save one from the panel, or trace the whole graph';
+    }
+    const lines = [`${value.total ?? value.scenes.length} scene(s)`];
+    for (const scene of value.scenes) {
+      const tables = scene.tables || [];
+      lines.push('');
+      lines.push(`${scene.name}  — ${scene.tableCount ?? tables.length} table(s)${scene.note ? `  (${scene.note})` : ''}`);
+      lines.push(`  tables: ${tables.join(', ')}`);
+      const edges = scene.edges || [];
+      lines.push(edges.length ? '  confirmed joins:' : '  no confirmed join between its members yet');
+      for (const edge of edges) {
+        const frm = edge.from || {};
+        const to = edge.to || {};
+        lines.push(`    ${frm.table}.${frm.column} -> ${to.table}.${to.column}  [${edge.status}]`);
+      }
+      const isolated = scene.isolated || [];
+      if (isolated.length) lines.push(`  no join reaches: ${isolated.join(', ')}`);
+    }
+    lines.push('');
+    lines.push('pass the scene name as `scene` to trace_by_key to walk only these tables');
+    return lines.join('\n');
+  }
   if (typeof value.ddl === 'string' && value.ddl.trim()) {
     return value.ddl.trim();
   }
@@ -587,7 +611,14 @@ export function createBridge({
     disposeTools();
     disposers = tools.map((tool) => {
       const name = `${TOOL_PREFIX}${tool.name}`;
-      const description = `${tool.description || tool.name}\n\n(PostgreSQL/MySQL/Oracle/SQLite via the DSH Data sources panel; source is chosen with the \`datasource\` argument.)`;
+      const base = `${tool.description || tool.name}\n\n(PostgreSQL/MySQL/Oracle/SQLite via the DSH Data sources panel; source is chosen with the \`datasource\` argument.)`;
+      // A business question rarely means the whole graph: the saved sets say which
+      // tables the question spans, so look before walking.
+      const scenes =
+        tool.name === 'trace_by_key'
+          ? '\n\nA question about a business process (an order to its payment, a shipment to its warehouse) is usually narrower than the whole schema: call `list_scenes` first, and if one matches, pass its name as `scene` so the walk stays inside those tables. With no scene that fits, trace the whole graph.'
+          : '';
+      const description = `${base}${scenes}`;
       return service.register({
         name,
         description,

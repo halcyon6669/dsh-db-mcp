@@ -863,6 +863,20 @@ def list_scenes(datasource: Optional[str] = None) -> dict:
     question actually spans. It narrows a trace to that slice without touching the
     relation graph: edges belong to the graph, a scene only chooses which of them
     to walk. Deleting a scene therefore never loses a join.
+
+    Each scene also carries two derived fields, so a scene can be understood
+    before anything is queried:
+
+    * `edges` — the joins among its members whose status is `confirmed` or
+      `trusted`, i.e. exactly the ones a trace may follow. Each entry is
+      `{id, from: {table, column}, to: {table, column}, status}`. A join with only
+      one end inside the scene is not included.
+    * `isolated` — the member tables that no such join reaches. These are the
+      tables a walk would read and then stop at, so they are the ones worth
+      connecting next.
+
+    Both are read from the relation graph on every call and never stored with the
+    scene; deleting a scene still leaves every edge in place.
     """
     try:
         profile, _secrets = store.resolve(datasource)

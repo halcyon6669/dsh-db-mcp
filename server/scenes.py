@@ -26,6 +26,15 @@ SCHEMA_VERSION = 1
 SCENE_LIMIT = 50
 TABLE_LIMIT = 500
 
+# The two edge states a walk trusts. Repeated here rather than imported from
+# `tracing` because tracing imports this module; a scene's "confirmed" answer must
+# mean exactly what the walker will follow.
+LINK_STATUSES = ("confirmed", "trusted")
+
+
+def _fold(text) -> str:
+    return str(text or "").strip().casefold()
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
@@ -147,23 +156,79 @@ def _table_list(tables) -> list[str]:
     return chosen
 
 
-def list_scenes(profile: dict) -> dict:
+def list_scenes(profile: dict, with_links: bool = True) -> dict:
+    """Every scene of one datasource, with the joins its members already share.
+
+    A scene is only a table list, so on its own it says nothing about how those
+    tables connect — an agent reading it would still have to guess or look at the
+    whole graph. The two extra fields close that gap without giving the scene any
+    authority over edges: `edges` is a read-only projection of the relation graph
+    restricted to this scene's members, and `isolated` names the members that no
+    confirmed join reaches. Both are derived on every call, never stored.
+
+    `with_links=False` skips the graph read for callers that only need the list.
+    """
     doc = load(profile)
     scenes = doc.get("scenes") or []
+    edges = []
+    if with_links and scenes:
+        # Imported here rather than at module scope: relations is a larger module
+        # and this keeps the dependency one-way and lazy for the write paths.
+        import relations
+
+        edges = relations.load(profile).get("edges") or []
     return {
-        "scenes": [
-            {
-                "id": scene.get("id"),
-                "name": scene.get("name"),
-                "tables": list(scene.get("tables") or []),
-                "tableCount": len(scene.get("tables") or []),
-                "note": scene.get("note"),
-                "createdAt": scene.get("createdAt"),
-                "updatedAt": scene.get("updatedAt"),
-            }
-            for scene in scenes
-        ],
+        "scenes": [_described(scene, edges) for scene in scenes],
         "total": len(scenes),
+    }
+
+
+def _described(scene: dict, edges: list[dict]) -> dict:
+    """One scene plus the confirmed joins among its own members."""
+    tables = list(scene.get("tables") or [])
+    members = {_fold(name) for name in tables}
+    links = []
+    touched = set()
+    for edge in edges:
+        if str(edge.get("status") or "") not in LINK_STATUSES:
+            continue
+        frm = edge.get("from") or {}
+        to = edge.get("to") or {}
+        here = _fold(frm.get("table"))
+        there = _fold(to.get("table"))
+        # Both ends inside the scene: a join that leaves it is not a statement
+        # about how the members relate, and the trace would not walk it anyway.
+        if here not in members or there not in members:
+            continue
+        links.append(
+            {
+                "id": edge.get("id"),
+                "from": {"table": frm.get("table"), "column": frm.get("column")},
+                "to": {"table": to.get("table"), "column": to.get("column")},
+                "status": edge.get("status"),
+            }
+        )
+        touched.add(here)
+        touched.add(there)
+    links.sort(
+        key=lambda link: (
+            _fold(link["from"]["table"]),
+            _fold(link["from"]["column"]),
+            _fold(link["to"]["table"]),
+            _fold(link["to"]["column"]),
+        )
+    )
+    isolated = [name for name in tables if _fold(name) not in touched]
+    return {
+        "id": scene.get("id"),
+        "name": scene.get("name"),
+        "tables": tables,
+        "tableCount": len(tables),
+        "note": scene.get("note"),
+        "createdAt": scene.get("createdAt"),
+        "updatedAt": scene.get("updatedAt"),
+        "edges": links,
+        "isolated": isolated,
     }
 
 
