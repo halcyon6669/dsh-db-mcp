@@ -28,6 +28,7 @@ window.__ModuleLoader__.load({
       { id: 'create' },
       { id: 'import' },
       { id: 'graph' },
+      { id: 'scenes' },
       { id: 'trace' },
       { id: 'clients' },
       { id: 'runtime' },
@@ -40,6 +41,7 @@ window.__ModuleLoader__.load({
       if (id === 'create') return t('tab.create')
       if (id === 'import') return t('tab.import')
       if (id === 'graph') return t('tab.graph')
+      if (id === 'scenes') return t('tab.scenes')
       if (id === 'trace') return t('tab.trace')
       if (id === 'runtime') return t('tab.runtime')
       if (id === 'clients') return t('tab.clients')
@@ -53,6 +55,7 @@ window.__ModuleLoader__.load({
       if (mode === 'create' || mode === 'edit') return 'create'
       if (mode === 'import') return 'import'
       if (mode === 'graph') return 'graph'
+      if (mode === 'scenes') return 'scenes'
       if (mode === 'trace') return 'trace'
       if (mode === 'runtime') return 'runtime'
       if (mode === 'clients') return 'clients'
@@ -307,6 +310,7 @@ window.__ModuleLoader__.load({
         'tab.create': 'New data source',
         'tab.import': 'Import from DBeaver',
         'tab.graph': 'Relations',
+        'tab.scenes': 'Scenes',
         'tab.trace': 'Trace',
         'tab.runtime': 'Runtime',
         'tab.clients': 'Connect',
@@ -432,6 +436,52 @@ window.__ModuleLoader__.load({
         'trace.zoomIn': 'Zoom in',
         'trace.zoomOut': 'Zoom out',
         'trace.zoomReset': 'Reset to 100%',
+        'scene.saveAs': 'Save as a scene',
+        'scene.save': 'Save scene',
+        'scene.overwrite': 'Overwrite scene',
+        'scene.overwrites': 'A scene named "{name}" already exists — saving updates it.',
+        'scene.cancel': 'Cancel',
+        'scene.name': 'Scene name',
+        'scene.namePlaceholder': 'e.g. order to cash',
+        'scene.note': 'Note',
+        'scene.notePlaceholder': 'optional',
+        'scene.needName': 'Give the scene a name.',
+        'scene.needTables': 'This walk read no table that could be saved.',
+        'scene.saved': 'Saved the scene "{name}".',
+        'scene.fromWalk': '{n} table(s) from this walk',
+        'scene.title': 'Scenes',
+        'scene.hint': 'A scene is a named set of tables. It narrows a trace to that slice — it never owns a join, so deleting one leaves every edge in the graph.',
+        'scene.new': 'New scene',
+        'scene.noSources': 'Add a data source first; scenes belong to one datasource.',
+        'scene.listEmpty': 'No scene yet for this datasource.',
+        'scene.pickHint': 'Pick a scene on the left, or make a new one.',
+        'scene.newHint': 'Name it, add the tables a question spans, then save.',
+        'scene.tablesTitle': 'Member tables',
+        'scene.tablesEmpty': 'No table yet — add the ones this scene should cover.',
+        'scene.addTable': 'Add a table',
+        'scene.searchTables': 'Search tables…',
+        'scene.removeTable': 'Remove from the scene',
+        'scene.keepOne': 'A scene needs at least one table.',
+        'scene.catalogEmpty': 'This datasource listed no table.',
+        'scene.moreTables': '{n} more — search to narrow it down',
+        'scene.linksTitle': 'Confirmed joins between members',
+        'scene.linksEmpty': 'No confirmed join between these members yet.',
+        'scene.linksHint': 'Both ends are in the scene and the join is confirmed or trusted. Open one on the Relations page.',
+        'scene.isolatedTitle': 'Members with no confirmed join inside the scene',
+        'scene.isolatedHint': 'Each one is read and then the walk stops. The join belongs to the relation graph, never to the scene.',
+        'scene.noJoinAtAll': 'Nothing confirmed joins this table yet — inside the scene or outside it.',
+        'scene.joinsOutside': 'Its confirmed joins all lead out of the scene:',
+        'scene.adopt': 'Add {n} to the scene',
+        'scene.noCandidate': 'No column of this table shares a name with another member.',
+        'scene.useCandidate': 'Use {n}',
+        'scene.sameName': 'same column name',
+        'scene.addLink': 'Add a join',
+        'scene.delete': 'Delete scene',
+        'scene.deleteConfirm': 'Delete this scene?',
+        'scene.deleteNote': 'No connection is deleted — every join stays in the relation graph.',
+        'scene.deleteCancel': 'Keep it',
+        'scene.deleted': 'Deleted the scene "{name}".',
+        'scene.dirty': 'Unsaved changes',
         'notice.discovered': 'Imported the declared foreign keys.',
         'notice.mined': 'Mined the audit log for joins — they arrive as pending.',
         'notice.verdict': 'Recorded "{verdict}".',
@@ -736,6 +786,7 @@ window.__ModuleLoader__.load({
         'tab.create': '新建数据源',
         'tab.import': '从 DBeaver 导入',
         'tab.graph': '关系图',
+        'tab.scenes': '场景',
         'tab.trace': '追踪',
         'tab.runtime': '运行时诊断',
         'tab.clients': '接入其它客户端',
@@ -861,6 +912,52 @@ window.__ModuleLoader__.load({
         'trace.zoomIn': '放大',
         'trace.zoomOut': '缩小',
         'trace.zoomReset': '复位到 100%',
+        'scene.saveAs': '存为场景',
+        'scene.save': '保存场景',
+        'scene.overwrite': '覆盖同名场景',
+        'scene.overwrites': '已经有名为「{name}」的场景——保存会覆盖它。',
+        'scene.cancel': '取消',
+        'scene.name': '场景名',
+        'scene.namePlaceholder': '例如：订单到收款',
+        'scene.note': '备注',
+        'scene.notePlaceholder': '可选',
+        'scene.needName': '请给场景起个名字。',
+        'scene.needTables': '这次追踪没有读到可以存成场景的表。',
+        'scene.saved': '已保存场景「{name}」。',
+        'scene.fromWalk': '本次追踪共 {n} 张表',
+        'scene.title': '场景',
+        'scene.hint': '场景就是一组有名字的表，用来把一次追踪限定在这一片——它不拥有任何连接，所以删掉场景，关系图里的边一条都不会少。',
+        'scene.new': '新建场景',
+        'scene.noSources': '先加一个数据源；场景是属于某个数据源的。',
+        'scene.listEmpty': '这个数据源还没有场景。',
+        'scene.pickHint': '从左边选一个场景，或者新建一个。',
+        'scene.newHint': '起个名字，把这一个问题会涉及的表加进来，然后保存。',
+        'scene.tablesTitle': '成员表',
+        'scene.tablesEmpty': '还没有表——把场景要覆盖的表加进来。',
+        'scene.addTable': '添加表',
+        'scene.searchTables': '搜索表…',
+        'scene.removeTable': '从场景中移除',
+        'scene.keepOne': '一个场景至少要有 1 张表。',
+        'scene.catalogEmpty': '这个数据源没有列出任何表。',
+        'scene.moreTables': '还有 {n} 张——用搜索缩小范围',
+        'scene.linksTitle': '成员之间已确认的连接',
+        'scene.linksEmpty': '这些成员之间还没有已确认的连接。',
+        'scene.linksHint': '两端都在场景里、状态为已确认或自动信任的连接。点一条可以到关系图查看。',
+        'scene.isolatedTitle': '场景里没有已确认连接的成员',
+        'scene.isolatedHint': '读到这些表，追踪就停住了。连接属于关系图，不属于场景。',
+        'scene.noJoinAtAll': '这张表目前没有任何已确认的连接——场景内外都没有。',
+        'scene.joinsOutside': '它已确认的连接都指向场景外：',
+        'scene.adopt': '把 {n} 纳入场景',
+        'scene.noCandidate': '这张表的列名和其他成员都不一样。',
+        'scene.useCandidate': '用 {n}',
+        'scene.sameName': '列名相同',
+        'scene.addLink': '添加连接',
+        'scene.delete': '删除场景',
+        'scene.deleteConfirm': '确定删除这个场景？',
+        'scene.deleteNote': '不会删除任何连接——每一条 join 都还在关系图里。',
+        'scene.deleteCancel': '保留',
+        'scene.deleted': '已删除场景「{name}」。',
+        'scene.dirty': '未保存的改动',
         'notice.discovered': '已导入数据库声明的外键。',
         'notice.mined': '已从审计日志挖掘表间连接——它们以「待确认」状态进入关系图。',
         'notice.verdict': '已记录「{verdict}」。',
@@ -1491,6 +1588,200 @@ window.__ModuleLoader__.load({
       }
       .dbmcp-schema-main {
         min-width: 0;
+      }
+      /* The scene rail. Same box as the catalogue rail beside it, but the rows are
+         buttons — a scene is picked, not opened — so the scroll box lives here and
+         the page keeps its height no matter how many scenes are saved. */
+      .dbmcp-scene-list {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        max-height: 420px;
+        overflow: auto;
+      }
+      .dbmcp-scene-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        width: 100%;
+        padding: 6px 8px;
+        border: 1px solid transparent;
+        border-radius: 8px;
+        background: var(--dsw-alias-bg-base);
+        color: var(--dsw-alias-label-primary);
+        font: inherit;
+        font-size: 13px;
+        text-align: left;
+        cursor: pointer;
+        transition: background 100ms ease, border-color 100ms ease;
+      }
+      .dbmcp-scene-row:hover {
+        background: var(--dsw-alias-bg-layer-2);
+      }
+      .dbmcp-scene-row.is-active {
+        border-color: var(--dsw-alias-brand-primary);
+        background: var(--dsw-alias-bg-layer-2);
+      }
+      .dbmcp-scene-row .dbmcp-pill {
+        flex: 0 0 auto;
+      }
+      /* A scene name is typed by the reader, so it can be long; the count pill is
+         what must stay whole. */
+      .dbmcp-scene-name {
+        min-width: 0;
+        flex: 1 1 auto;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .dbmcp-scene-detail {
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+        min-width: 0;
+      }
+      .dbmcp-scene-block {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        min-width: 0;
+        padding-top: 12px;
+        border-top: 1px solid var(--dsw-alias-border-l1);
+      }
+      .dbmcp-scene-members {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      .dbmcp-scene-member {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        min-width: 0;
+        padding: 5px 8px;
+        border: 1px solid var(--dsw-alias-border-l1);
+        border-radius: 8px;
+        background: var(--dsw-alias-bg-layer-1);
+      }
+      .dbmcp-scene-member-name {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-family: var(--dsw-alias-font-mono);
+        font-size: 12px;
+        color: var(--dsw-alias-label-primary);
+      }
+      .dbmcp-scene-member .dbmcp-btn {
+        flex: 0 0 auto;
+      }
+      /* The catalogue picker: a search box and a wrap of candidate chips, scrolling
+         on its own so a wide schema does not push the detail panes off the page. */
+      .dbmcp-scene-picker {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        min-width: 0;
+        padding: 10px;
+        border: 1px solid var(--dsw-alias-border-l1);
+        border-radius: 10px;
+        background: var(--dsw-alias-bg-layer-1);
+      }
+      .dbmcp-scene-candidates {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        max-height: 180px;
+        overflow: auto;
+      }
+      .dbmcp-scene-links {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      /* A join row is a link into the Relations page, so it is a button that looks
+         like the edge rows there — path on the left, status chip on the right. */
+      .dbmcp-scene-link {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        width: 100%;
+        min-width: 0;
+        padding: 6px 8px;
+        border: 1px solid var(--dsw-alias-border-l1);
+        border-radius: 8px;
+        background: var(--dsw-alias-bg-base);
+        color: var(--dsw-alias-label-primary);
+        font: inherit;
+        text-align: left;
+        cursor: pointer;
+        transition: background 100ms ease, border-color 100ms ease;
+      }
+      .dbmcp-scene-link:hover {
+        background: var(--dsw-alias-bg-layer-2);
+        border-color: var(--dsw-alias-border-l2);
+      }
+      /* The path wraps instead of truncating: at a narrow width an ellipsis cut the
+         target column, which is the half of the join a reader came here to see. */
+      .dbmcp-scene-link .dbmcp-edge-path {
+        min-width: 0;
+        overflow-wrap: anywhere;
+        line-height: 1.35;
+      }
+      .dbmcp-scene-link .dbmcp-pill {
+        flex: 0 0 auto;
+      }
+      /* A member with no confirmed join stacks: its name and toggle on one line, then
+         what it does connect to, then the candidates the catalogue suggests. */
+      .dbmcp-scene-member.is-block {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 6px;
+      }
+      .dbmcp-scene-member-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        min-width: 0;
+      }
+      .dbmcp-scene-member-head .dbmcp-btn {
+        flex: 0 0 auto;
+      }
+      /* The adopt row: the names this table joins outside the scene, each one a
+         button that takes that table into the membership list. */
+      .dbmcp-scene-adopt {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px;
+      }
+      .dbmcp-scene-candidate {
+        font-family: var(--dsw-alias-font-mono);
+        font-size: 12px;
+        color: var(--dsw-alias-label-primary);
+      }
+      .dbmcp-scene-why {
+        font-size: 11px;
+        color: var(--dsw-alias-label-secondary);
+      }
+      .dbmcp-scene-actions {
+        align-items: center;
+        flex-wrap: wrap;
+      }
+      /* Deleting a scene is a second click and a sentence about what survives it;
+         the box is tinted with the error state so it does not read as routine. */
+      .dbmcp-scene-confirm {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        padding: 10px;
+        border: 1px solid color-mix(in srgb, var(--dsw-alias-state-error-primary) 45%, var(--dsw-alias-border-l1));
+        border-radius: 10px;
+        background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 6%, var(--dsw-alias-bg-base));
       }
       /* Sub-view header row: where you came from, which connection it is, and
          the identifier to hand to the agent — all on one line. */
@@ -3094,6 +3385,12 @@ window.__ModuleLoader__.load({
       .dbmcp-edge.is-rejected {
         border-left-color: var(--dsw-alias-state-error-primary);
       }
+      /* The row a link or the scene page jumped to: a ring, not a colour of its own,
+         so it cannot be mistaken for a status. */
+      .dbmcp-edge.is-focus {
+        outline: 2px solid var(--dsw-alias-brand-primary);
+        outline-offset: 2px;
+      }
       .dbmcp-edge-head {
         display: flex;
         align-items: center;
@@ -3206,6 +3503,25 @@ window.__ModuleLoader__.load({
         flex-direction: column;
         gap: 2px;
         padding: 6px 0;
+      }
+      .dbmcp-trace-save {
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin: 2px 0;
+      }
+      .dbmcp-trace-scene-form {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 8px;
+        align-items: end;
+        margin: 4px 0 2px;
+      }
+      /* The two field cells sit in the grid; the warning and the two buttons
+         take the full width so the form reads top-down in a narrow panel. */
+      .dbmcp-trace-scene-form > p,
+      .dbmcp-trace-scene-form > .dbmcp-inline {
+        grid-column: 1 / -1;
       }
       .dbmcp-trace-cut {
         color: var(--dsw-alias-state-warn-primary);
@@ -4946,6 +5262,62 @@ function groupTables(tables) {
       )
     }
 
+    function foldName(value) {
+      return String(value || '').trim().toLowerCase()
+    }
+
+    /* Which family a column type belongs to. Two columns can only be joined when
+       their families match: `order_no` as varchar and as integer are different
+       questions about the same order, and a join between them would compare text
+       to a number. Unknown types fall back to `any`, because refusing to suggest a
+       join is worse than suggesting one the reader can decline. */
+    function columnFamily(type) {
+      const text = String(type || '')
+        .trim()
+        .toLowerCase()
+      if (!text) return 'any'
+      if (/(char|text|clob|string|uuid|enum|jsonb?|xml)/.test(text)) return 'text'
+      if (/(int|serial|decimal|numeric|real|double|float|money)/.test(text)) return 'number'
+      if (/(timestamp|datetime|date|time|interval)/.test(text)) return 'date'
+      if (/bool/.test(text)) return 'bool'
+      if (/(bytea|blob|binary|bit)/.test(text)) return 'binary'
+      return 'any'
+    }
+
+    function typesJoin(left, right) {
+      const a = columnFamily(left)
+      const b = columnFamily(right)
+      return a === 'any' || b === 'any' || a === b
+    }
+
+    /* Join candidates for one member: a column of this table whose name also
+       appears on another member, with a type that can be compared. Same name is
+       the only evidence the panel has — it never reads rows to guess a
+       relationship — so the reason says exactly that and nothing more. */
+    function linkCandidates(columns, others, limit = 5) {
+      const found = []
+      for (const column of columns || []) {
+        const name = String((column && column.name) || '').trim()
+        if (!name) continue
+        const folded = foldName(name)
+        for (const other of others || []) {
+          const otherName = String((other && other.table) || '')
+          if (!otherName) continue
+          for (const partner of other.columns || []) {
+            if (foldName(partner && partner.name) !== folded) continue
+            if (!typesJoin(column.type, partner.type)) continue
+            found.push({
+              table: otherName,
+              column: String(partner.name || ''),
+              fromColumn: name,
+              reason: 'same',
+            })
+          }
+        }
+      }
+      return found.slice(0, Math.max(0, limit))
+    }
+
     function ImportView(props) {
       const t = props.t
       const [state, setState] = React.useState({ status: 'loading', data: null, error: null })
@@ -5599,6 +5971,11 @@ function groupTables(tables) {
       const [traceOpen, setTraceOpen] = React.useState('')
       const [traceScene, setTraceScene] = React.useState(() => String(savedPanel.traceScene || ''))
       const [scenes, setScenes] = React.useState([])
+      /* The walk just taken can be saved as a scene. The table list is the one
+         the walk actually read, so the scene records what the reader saw instead
+         of a second guess at which tables matter. The draft is transient: a name
+         is typed, the answer is stored, the form closes. */
+      const [traceSceneDraft, setTraceSceneDraft] = React.useState(null)
       /* The manual entry columns stay hidden until asked for: most walks start
          from "wherever the value lives", and two empty boxes over the form read
          as required fields. */
@@ -5637,6 +6014,36 @@ function groupTables(tables) {
         keepResult('traceZoom', value)
         setTraceZoomState(value)
       }
+      /* The Scenes page edits one scene at a time: `sceneEdit` is the draft on the
+         right, `scenePicked` the id of the row on the left. The draft is separate
+         from the list so typing a name does not rename the list entry until the
+         save button says so — a scene that is renamed by accident is not obvious
+         afterwards, because there is no undo. */
+      const [sceneSource, setSceneSource] = React.useState(() => String(savedPanel.sceneSource || ''))
+      const [sceneRows, setSceneRows] = React.useState([])
+      const [scenePicked, setScenePicked] = React.useState('')
+      /* A draft that is not a stored scene yet. It cannot be `scenePicked`:
+         that state is a row id, and a new scene has none until it is saved. */
+      const [sceneNew, setSceneNew] = React.useState(false)
+      const [sceneEdit, setSceneEdit] = React.useState(null)
+      const [sceneDirty, setSceneDirty] = React.useState(false)
+      const [sceneBusy, setSceneBusy] = React.useState(false)
+      const [sceneError, setSceneError] = React.useState(null)
+      const [sceneQuery, setSceneQuery] = React.useState('')
+      const [sceneCatalog, setSceneCatalog] = React.useState(null)
+      const [sceneCatalogError, setSceneCatalogError] = React.useState(null)
+      const [sceneAddOpen, setSceneAddOpen] = React.useState(false)
+      const [sceneDeleteAsk, setSceneDeleteAsk] = React.useState(false)
+      /* The edge list of the edited datasource, for the one thing the scene row
+         cannot answer: an "isolated" member may still be joined to tables that are
+         not in the scene. The scene shows that difference and offers to take the
+         other end in; the edges themselves stay where they live. */
+      const [sceneGraph, setSceneGraph] = React.useState(null)
+      /* Which member has its join candidates open, and the columns those
+         candidates are read from. One `describe_table` per member table, cached by
+         name: the catalogue is the only thing consulted, never a row. */
+      const [sceneLinkFor, setSceneLinkFor] = React.useState('')
+      const [sceneColumns, setSceneColumns] = React.useState({})
 
       const load = React.useCallback(async () => {
         setBusy(true)
@@ -6160,6 +6567,323 @@ function groupTables(tables) {
         if (tab !== 'trace') return
         void loadScenes()
       }, [tab, loadScenes])
+
+      /** The datasource the Scenes page edits: the pick, else the default. */
+      const sceneTarget = React.useMemo(() => {
+        if (sceneSource && sources.some((item) => item.id === sceneSource)) return sceneSource
+        const fallback = sources.find((item) => item.isDefault === true) || sources[0]
+        return fallback ? fallback.id : ''
+      }, [sceneSource, sources])
+
+      /** The same listing the trace page reads, but kept for the Scenes page.
+       *
+       * Each row already carries the joins among its members and the members no
+       * join reaches — the server derives both from the relation graph, so this
+       * page never has to guess at an edge to draw one. */
+      const loadSceneRows = React.useCallback(async () => {
+        if (!sceneTarget) {
+          setSceneRows([])
+          return
+        }
+        setSceneBusy(true)
+        setSceneError(null)
+        try {
+          const payload = await apiGet(`/scenes?datasource=${encodeURIComponent(sceneTarget)}`)
+          const rows = payload && payload.ok !== false && Array.isArray(payload.scenes) ? payload.scenes : []
+          setSceneRows(rows)
+          /* Re-seed the open draft from what came back, so the ids and the
+             derived fields on screen are the stored ones rather than a stale
+             copy of the row that was clicked. */
+          setScenePicked((current) => {
+            if (!current) return ''
+            return rows.some((scene) => scene.id === current) ? current : ''
+          })
+        } catch (error) {
+          setSceneRows([])
+          setSceneError(String((error && error.message) || error))
+        } finally {
+          setSceneBusy(false)
+        }
+      }, [sceneTarget])
+
+      React.useEffect(() => {
+        if (tab !== 'scenes') return
+        void loadSceneRows()
+      }, [tab, loadSceneRows])
+
+      /* The draft follows the picked row. A rename or a table change lives in
+         `sceneEdit` until Save, and `sceneDirty` is what tells the reader that
+         leaving the row would throw that away. A draft that is still new is left
+         alone: it has no row to follow. */
+      React.useEffect(() => {
+        if (sceneNew) return
+        if (!scenePicked) {
+          setSceneEdit(null)
+          setSceneDirty(false)
+          return
+        }
+        const row = sceneRows.find((scene) => scene.id === scenePicked) || null
+        setSceneEdit(row ? { id: row.id, name: row.name || '', note: row.note || '', tables: (row.tables || []).slice() } : null)
+        setSceneDirty(false)
+        setSceneDeleteAsk(false)
+        setSceneAddOpen(false)
+        setSceneLinkFor('')
+      }, [sceneNew, scenePicked, sceneRows])
+
+      /* The edges of the edited datasource, fetched only when a scene is open and
+         an isolated member would otherwise have no explanation. A read of the same
+         relation graph the Relations page shows — never a write. */
+      const loadSceneGraph = React.useCallback(async () => {
+        if (!sceneTarget) {
+          setSceneGraph(null)
+          return
+        }
+        try {
+          const payload = await apiGet(`/relations?datasource=${encodeURIComponent(sceneTarget)}`)
+          if (payload && payload.ok === false) {
+            setSceneGraph({ edges: [], counts: null, total: 0 })
+            return
+          }
+          setSceneGraph({
+            edges: Array.isArray(payload.edges) ? payload.edges : [],
+            counts: payload.counts || null,
+            total: payload.total || 0,
+          })
+        } catch {
+          setSceneGraph({ edges: [], counts: null, total: 0 })
+        }
+      }, [sceneTarget])
+
+      const sceneHasIsolated = Boolean(sceneEdit && sceneEdit.id && sceneRows.find((scene) => scene.id === sceneEdit.id && (scene.isolated || []).length))
+      React.useEffect(() => {
+        if (tab !== 'scenes' || !sceneHasIsolated) return
+        void loadSceneGraph()
+      }, [tab, sceneHasIsolated, loadSceneGraph])
+
+      /** The columns of one member table, read once and kept by name. */
+      const loadSceneColumns = React.useCallback(
+        async (table) => {
+          const name = String(table || '').trim()
+          if (!name || !sceneTarget) return
+          if (sceneColumns[name]) return
+          try {
+            const payload = await apiGet(
+              `/schema?datasource=${encodeURIComponent(sceneTarget)}&table=${encodeURIComponent(name)}`,
+            )
+            const columns = payload && Array.isArray(payload.columns) ? payload.columns : []
+            setSceneColumns((current) => (current[name] ? current : { ...current, [name]: columns }))
+          } catch {
+            setSceneColumns((current) => (current[name] ? current : { ...current, [name]: [] }))
+          }
+        },
+        [sceneTarget, sceneColumns],
+      )
+
+      /** The catalogue of the edited datasource: only table names, read through
+       * list_tables. Nothing here can run a statement. */
+      const loadSceneCatalog = React.useCallback(async () => {
+        if (!sceneTarget) {
+          setSceneCatalog(null)
+          return
+        }
+        try {
+          const payload = await apiGet(`/schema?datasource=${encodeURIComponent(sceneTarget)}`)
+          if (payload && payload.ok === false) {
+            setSceneCatalogError((payload.error && payload.error.message) || t('scene.catalogEmpty'))
+            setSceneCatalog([])
+            return
+          }
+          setSceneCatalogError(null)
+          setSceneCatalog(Array.isArray(payload.tables) ? payload.tables : [])
+        } catch (error) {
+          setSceneCatalogError(String((error && error.message) || error))
+          setSceneCatalog([])
+        }
+      }, [sceneTarget, t])
+
+      React.useEffect(() => {
+        if (tab !== 'scenes' || !sceneAddOpen) return
+        void loadSceneCatalog()
+      }, [tab, sceneAddOpen, loadSceneCatalog])
+
+      /** Patch the draft on screen; it is only written when Save is pressed. */
+      const patchScene = (changes) => {
+        setSceneEdit((current) => (current ? { ...current, ...changes } : current))
+        setSceneDirty(true)
+      }
+
+      const startNewScene = () => {
+        setScenePicked('')
+        setSceneNew(true)
+        setSceneEdit({ id: '', name: '', note: '', tables: [] })
+        setSceneDirty(true)
+        setSceneError(null)
+        setSceneDeleteAsk(false)
+        setSceneAddOpen(true)
+      }
+
+      /** One write path for create and update: `scene_id` makes it a rename,
+       * its absence lets save_scene match the name (and update that scene). */
+      const saveSceneDraft = async () => {
+        const draft = sceneEdit || {}
+        const name = String(draft.name || '').trim()
+        if (!name) {
+          setSceneError(t('scene.needName'))
+          return
+        }
+        if (!draft.tables || draft.tables.length === 0) {
+          setSceneError(t('scene.keepOne'))
+          return
+        }
+        setSceneBusy(true)
+        setSceneError(null)
+        try {
+          const payload = await apiPost('/scenes/save', {
+            datasource: sceneTarget,
+            scene_id: draft.id || undefined,
+            name,
+            /* An empty string, not omitted: the store treats a missing note as
+               "leave it alone", so a note could never be cleared from here. */
+            note: String(draft.note || '').trim(),
+            tables: draft.tables,
+          })
+          if (payload && payload.ok === false) {
+            const failure = payload.error || {}
+            setSceneError(`${failure.message || 'save_scene failed'}${failure.hint ? ` — ${failure.hint}` : ''}`)
+            return
+          }
+          const saved = (payload && payload.scene) || null
+          setNotice({ message: fmt(t('scene.saved'), { name }), isError: false })
+          setSceneNew(false)
+          await loadSceneRows()
+          setSceneDirty(false)
+          if (saved && saved.id) setScenePicked(saved.id)
+          /* The trace page keeps its own copy of the list. */
+          void loadScenes()
+        } catch (error) {
+          setSceneError(String((error && error.message) || error))
+        } finally {
+          setSceneBusy(false)
+        }
+      }
+
+      const deleteSceneDraft = async () => {
+        const draft = sceneEdit || {}
+        if (!draft.id) return
+        setSceneBusy(true)
+        setSceneError(null)
+        try {
+          const payload = await apiPost('/scenes/delete', { datasource: sceneTarget, scene_id: draft.id })
+          if (payload && payload.ok === false) {
+            const failure = payload.error || {}
+            setSceneError(`${failure.message || 'delete_scene failed'}${failure.hint ? ` — ${failure.hint}` : ''}`)
+            return
+          }
+          setNotice({ message: fmt(t('scene.deleted'), { name: draft.name }), isError: false })
+          setScenePicked('')
+          setSceneNew(false)
+          setSceneEdit(null)
+          setSceneDeleteAsk(false)
+          await loadSceneRows()
+          void loadScenes()
+        } catch (error) {
+          setSceneError(String((error && error.message) || error))
+        } finally {
+          setSceneBusy(false)
+        }
+      }
+
+      /** A member is a table name; removing one edits the draft, not the store. */
+      const addSceneTable = (table) => {
+        const name = String(table || '').trim()
+        if (!name) return
+        const current = (sceneEdit && sceneEdit.tables) || []
+        if (current.some((item) => String(item).toLowerCase() === name.toLowerCase())) return
+        patchScene({ tables: current.concat(name) })
+      }
+
+      const removeSceneTable = (table) => {
+        const wanted = String(table || '').toLowerCase()
+        const current = (sceneEdit && sceneEdit.tables) || []
+        patchScene({ tables: current.filter((item) => String(item).toLowerCase() !== wanted) })
+      }
+
+      /** Go to the Relations page with one join open.
+       *
+       * The scene page decides which member to connect; the graph is where that
+       * decision is written, so every "add a join" ends up here rather than in a
+       * second copy of the edge model. */
+      const openInGraph = (edgeId, preset) => {
+        remember('graphSource', setGraphSource)(sceneTarget)
+        remember('graphFilter', setGraphFilter)('all')
+        setGraphOpen(edgeId || '')
+        setGraphForm(preset || null)
+        setGraphCondition('')
+        setGraphReason('')
+        setView({ mode: 'graph' })
+        if (!edgeId || typeof document === 'undefined') return
+        /* The row is painted on the next frame, so the scroll waits for it
+           instead of guessing a delay that is right on one machine only. */
+        const settle = (left) => {
+          const host = document.getElementById(`dbmcp-edge-${edgeId}`)
+          if (host && typeof host.scrollIntoView === 'function') {
+            host.scrollIntoView({ block: 'center', behavior: 'smooth' })
+            return
+          }
+          if (left > 0) setTimeout(() => settle(left - 1), 40)
+        }
+        settle(12)
+      }
+
+      /** The join form, prefilled with the member that has no confirmed edge. The
+       * reader still fills the other end — the panel has no way to guess it. */
+      const addLinkFor = (table) => openInGraph('', { from_table: String(table || ''), from_column: '', to_table: '', to_column: '' })
+
+      /** A candidate the panel can prove from the catalogue: same column name on
+       * another member, a type that can be compared. Clicking one only fills the
+       * form — the join is still proposed and still starts out pending. */
+      const addJoinFrom = (candidate) =>
+        openInGraph('', {
+          from_table: String((sceneLinkFor && candidate && candidate.fromTable) || sceneLinkFor || ''),
+          from_column: String((candidate && candidate.fromColumn) || ''),
+          to_table: String((candidate && candidate.table) || ''),
+          to_column: String((candidate && candidate.column) || ''),
+        })
+
+      /** Take an outside table into the scene, so the join the reader just saw can
+       * be drawn between two members. It is an ordinary save of the membership
+       * list — no edge is written, and the join is untouched. */
+      const adoptIntoScene = async (table) => {
+        const draft = sceneEdit
+        const name = String(table || '').trim()
+        if (!draft || !name || !draft.id) return
+        const tables = (draft.tables || []).slice()
+        if (tables.some((item) => String(item).toLowerCase() === name.toLowerCase())) return
+        tables.push(name)
+        setSceneBusy(true)
+        setSceneError(null)
+        try {
+          const payload = await apiPost('/scenes/save', {
+            datasource: sceneTarget,
+            scene_id: draft.id,
+            name: String(draft.name || '').trim(),
+            note: String(draft.note || '').trim(),
+            tables,
+          })
+          if (payload && payload.ok === false) {
+            const failure = payload.error || {}
+            setSceneError(`${failure.message || 'save_scene failed'}${failure.hint ? ` — ${failure.hint}` : ''}`)
+            return
+          }
+          await loadSceneRows()
+          setSceneDirty(false)
+          void loadScenes()
+        } catch (error) {
+          setSceneError(String((error && error.message) || error))
+        } finally {
+          setSceneBusy(false)
+        }
+      }
 
       /** Follow one value; the panel never sends a statement, only a value.
        *
@@ -7609,9 +8333,15 @@ function groupTables(tables) {
       const renderEdge = (edge) => {
         const status = edge.status || 'pending'
         const open = graphOpen === edge.id
+        /* An opened row is also the row something jumped to, so it gets a focus ring:
+           on a page with thirteen edges, the record alone does not say which one. */
         return h(
           'div',
-          { key: edge.id, className: `dbmcp-edge is-${status}` },
+          {
+            key: edge.id,
+            id: `dbmcp-edge-${edge.id}`,
+            className: `dbmcp-edge is-${status}${open ? ' is-focus' : ''}`,
+          },
           h(
             'div',
             { className: 'dbmcp-edge-head' },
@@ -7761,6 +8491,456 @@ function groupTables(tables) {
             ? h('p', { className: 'dbmcp-hint' }, graphFilter === 'all' ? t('graph.empty') : t('graph.emptyFiltered'))
             : h('div', { className: 'dbmcp-edges' }, visible.map(renderEdge)),
           graph && graph.truncated ? h('p', { className: 'dbmcp-hint' }, fmt(t('graph.truncated'), { n: total })) : null,
+        )
+      }
+
+      /* Page C — the scenes.
+         A scene is a named set of tables, so this page edits a membership list and
+         nothing else. The joins a scene's members share are shown, because they are
+         what makes the set useful, but they are read from the relation graph and the
+         only way to change them is to go there: a scene that owned edges would make
+         deleting one a loss of work nobody could see. */
+      const renderScenes = () => {
+        const stored = scenePicked ? sceneRows.find((scene) => scene.id === scenePicked) || null : null
+        const draft = sceneEdit || null
+        const links = (stored && stored.edges) || []
+        const isolated = (stored && stored.isolated) || []
+        const members = (draft && draft.tables) || []
+        const needle = sceneQuery.trim().toLowerCase()
+        const catalogue = (sceneCatalog || []).filter(
+          (table) =>
+            tableMatches(table, needle) &&
+            !members.some((item) => String(item).toLowerCase() === String(table.name || '').toLowerCase()),
+        )
+        /* A wide schema lists hundreds of tables; twenty chips are enough to pick from
+           and the search box is right above them for the rest. */
+        const CATALOG_LIMIT = 20
+        const shown = catalogue.slice(0, CATALOG_LIMIT)
+        const hiddenCount = catalogue.length - shown.length
+        const sourcePick = sources.length
+          ? h(
+              'select',
+              {
+                className: 'dbmcp-input dbmcp-select',
+                value: sceneTarget,
+                onChange: (event) => {
+                  remember('sceneSource', setSceneSource)(event.target.value)
+                  setScenePicked('')
+                  setSceneNew(false)
+                  setSceneEdit(null)
+                  setView({ mode: 'scenes' })
+                },
+              },
+              sources.map((item) => h('option', { key: item.id, value: item.id }, item.name || item.id)),
+            )
+          : null
+
+        const railRows = sceneRows.length === 0
+          ? h('p', { className: 'dbmcp-hint' }, t('scene.listEmpty'))
+          : sceneRows.map((scene) =>
+              h(
+                'button',
+                {
+                  key: scene.id,
+                  type: 'button',
+                  className: scenePicked === scene.id ? 'dbmcp-scene-row is-active' : 'dbmcp-scene-row',
+                  'aria-label': `${scene.name} — ${fmt(t('trace.sceneTables'), { n: scene.tableCount })}`,
+                  onClick: () => {
+                    if (sceneDirty && !window.confirm(t('scene.dirty'))) return
+                    setSceneNew(false)
+                    setScenePicked(scene.id)
+                    setSceneError(null)
+                  },
+                },
+                h('span', { className: 'dbmcp-scene-name' }, scene.name),
+                h('span', { className: 'dbmcp-pill' }, fmt(t('trace.sceneTables'), { n: scene.tableCount })),
+              ),
+            )
+
+        const memberRows = members.length === 0
+          ? h('p', { className: 'dbmcp-hint' }, t('scene.tablesEmpty'))
+          : h(
+              'div',
+              { className: 'dbmcp-scene-members' },
+              members.map((table) =>
+                h(
+                  'div',
+                  { key: table, className: 'dbmcp-scene-member' },
+                  h('code', { className: 'dbmcp-scene-member-name' }, table),
+                  h(
+                    'button',
+                    {
+                      type: 'button',
+                      className: 'dbmcp-btn is-small',
+                      'aria-label': `${t('scene.removeTable')}: ${table}`,
+                      onClick: () => removeSceneTable(table),
+                    },
+                    t('scene.removeTable'),
+                  ),
+                ),
+              ),
+            )
+
+        const picker = !sceneAddOpen
+          ? null
+          : h(
+              'div',
+              { className: 'dbmcp-scene-picker' },
+              h('input', {
+                className: 'dbmcp-input',
+                value: sceneQuery,
+                placeholder: t('scene.searchTables'),
+                'aria-label': t('scene.searchTables'),
+                onChange: (event) => setSceneQuery(event.target.value),
+              }),
+              sceneCatalogError ? h('p', { className: 'dbmcp-hint dbmcp-edge-error' }, sceneCatalogError) : null,
+              catalogue.length === 0
+                ? h('p', { className: 'dbmcp-hint' }, sceneCatalog === null ? t('loading') : t('scene.catalogEmpty'))
+                : h(
+                    'div',
+                    { className: 'dbmcp-scene-candidates' },
+                    shown.map((table) =>
+                      h(
+                        'button',
+                        {
+                          key: `${table.schema || ''}.${table.name}`,
+                          type: 'button',
+                          className: 'dbmcp-btn is-small',
+                          'aria-label': `${t('scene.addTable')}: ${table.name}`,
+                          onClick: () => addSceneTable(table.name),
+                        },
+                        table.schema ? `${table.schema}.${table.name}` : table.name,
+                      ),
+                    ),
+                  ),
+              hiddenCount > 0 ? h('p', { className: 'dbmcp-hint' }, fmt(t('scene.moreTables'), { n: hiddenCount })) : null,
+            )
+
+        const linkRows = links.length === 0
+          ? h('p', { className: 'dbmcp-hint' }, t('scene.linksEmpty'))
+          : h(
+              'div',
+              { className: 'dbmcp-scene-links' },
+              links.map((edge) =>
+                h(
+                  'button',
+                  {
+                    key: edge.id || `${edge.from.table}.${edge.from.column}`,
+                    type: 'button',
+                    className: 'dbmcp-scene-link',
+                    'aria-label': `${edge.from.table}.${edge.from.column} → ${edge.to.table}.${edge.to.column}`,
+                    onClick: () => openInGraph(edge.id, null),
+                  },
+                  h(
+                    'code',
+                    { className: 'dbmcp-edge-path' },
+                    `${edge.from.table}.${edge.from.column}`,
+                    h('span', { className: 'dbmcp-edge-arrow' }, ' → '),
+                    `${edge.to.table}.${edge.to.column}`,
+                  ),
+                  h('span', { className: edgeStatusClass(edge.status) }, edgeStatusLabel(edge.status)),
+                ),
+              ),
+            )
+
+        /* Only members with nothing confirmed. The group disappears rather than
+           showing an empty box: "nothing left to connect" is not worth a heading.
+
+           Two things can leave a member here, and they ask for different work, so
+           they are shown apart: a table with no confirmed join at all (the reader
+           has to find one), and a table whose confirmed joins all leave the scene
+           (the join exists — the other end just is not a member yet, and taking it
+           in is one click). `isolated` itself stays exactly as the server derives
+           it; the difference is read here from the relation graph. */
+        const known = new Set(members.map((item) => foldName(item)))
+        const outsideOf = (table) => {
+          const folded = foldName(table)
+          const edges = (sceneGraph && sceneGraph.edges) || []
+          const names = []
+          for (const edge of edges) {
+            const status = String((edge && edge.status) || '')
+            if (status !== 'confirmed' && status !== 'trusted') continue
+            const from = (edge.from && edge.from.table) || ''
+            const to = (edge.to && edge.to.table) || ''
+            if (foldName(from) === folded && !known.has(foldName(to)) && to) names.push(String(to))
+            if (foldName(to) === folded && !known.has(foldName(from)) && from) names.push(String(from))
+          }
+          const seen = new Set()
+          return names.filter((name) => {
+            const key = foldName(name)
+            if (seen.has(key)) return false
+            seen.add(key)
+            return true
+          })
+        }
+        /* The candidates for one member: its own columns against every other
+           member's. The panel reads columns, never rows, and only ever shows the
+           first few — a wall of suggestions is another way of saying nothing. */
+        const candidatesFor = (table) => {
+          const own = sceneColumns[table]
+          if (!own || own.length === 0) return []
+          const others = members
+            .filter((item) => foldName(item) !== foldName(table))
+            .map((item) => ({ table: item, columns: sceneColumns[item] || [] }))
+            .filter((item) => item.columns.length > 0)
+          return linkCandidates(own, others).map((item) => ({ ...item, fromTable: table }))
+        }
+        const isolatedBlock = isolated.length === 0
+          ? null
+          : h(
+              'div',
+              { className: 'dbmcp-scene-block' },
+              h('p', { className: 'dbmcp-label' }, t('scene.isolatedTitle')),
+              h('p', { className: 'dbmcp-hint' }, t('scene.isolatedHint')),
+              h(
+                'div',
+                { className: 'dbmcp-scene-members' },
+                isolated.map((table) => {
+                  const outside = outsideOf(table)
+                  const open = foldName(sceneLinkFor) === foldName(table)
+                  const candidates = open ? candidatesFor(table) : []
+                  const loading = open && !sceneColumns[table]
+                  return h(
+                    'div',
+                    { key: table, className: 'dbmcp-scene-member is-block' },
+                    h(
+                      'div',
+                      { className: 'dbmcp-scene-member-head' },
+                      h('code', { className: 'dbmcp-scene-member-name' }, table),
+                      h(
+                        'button',
+                        {
+                          type: 'button',
+                          className: 'dbmcp-btn is-small',
+                          'aria-label': `${t('scene.addLink')}: ${table}`,
+                          'aria-expanded': open ? 'true' : 'false',
+                          onClick: () => {
+                            const next = open ? '' : table
+                            setSceneLinkFor(next)
+                            if (next) {
+                              void loadSceneColumns(next)
+                              for (const item of members) if (foldName(item) !== foldName(table)) void loadSceneColumns(item)
+                            }
+                          },
+                        },
+                        open ? t('scene.cancel') : t('scene.addLink'),
+                      ),
+                    ),
+                    h(
+                      'p',
+                      { className: 'dbmcp-hint' },
+                      outside.length === 0
+                        ? t('scene.noJoinAtAll')
+                        : `${t('scene.joinsOutside')} ${outside.slice(0, 3).join('、')}${outside.length > 3 ? '…' : ''}`,
+                    ),
+                    outside.length === 0
+                      ? null
+                      : h(
+                          'div',
+                          { className: 'dbmcp-scene-adopt' },
+                          outside.slice(0, 3).map((name) =>
+                            h(
+                              'button',
+                              {
+                                key: name,
+                                type: 'button',
+                                className: 'dbmcp-btn is-small',
+                                disabled: sceneBusy,
+                                'aria-label': `${fmt(t('scene.adopt'), { n: name })}`,
+                                onClick: () => void adoptIntoScene(name),
+                              },
+                              fmt(t('scene.adopt'), { n: name }),
+                            ),
+                          ),
+                        ),
+                    loading ? h('p', { className: 'dbmcp-hint' }, t('loading')) : null,
+                    open && !loading && candidates.length === 0
+                      ? h(
+                          'div',
+                          { className: 'dbmcp-scene-adopt' },
+                          h('p', { className: 'dbmcp-hint' }, t('scene.noCandidate')),
+                          h(
+                            'button',
+                            {
+                              type: 'button',
+                              className: 'dbmcp-btn is-small',
+                              'aria-label': `${t('scene.addLink')}: ${table}`,
+                              onClick: () => addLinkFor(table),
+                            },
+                            t('scene.addLink'),
+                          ),
+                        )
+                      : null,
+                    candidates.length === 0
+                      ? null
+                      : h(
+                          'div',
+                          { className: 'dbmcp-scene-candidates' },
+                          candidates.map((item) =>
+                            h(
+                              'button',
+                              {
+                                key: `${item.table}.${item.column}`,
+                                type: 'button',
+                                className: 'dbmcp-btn is-small',
+                                'aria-label': `${fmt(t('scene.useCandidate'), { n: `${item.table}.${item.column}` })}`,
+                                onClick: () => addJoinFrom(item),
+                              },
+                              h('code', { className: 'dbmcp-scene-candidate' }, `${item.table}.${item.column}`),
+                              h('span', { className: 'dbmcp-scene-why' }, t('scene.sameName')),
+                            ),
+                          ),
+                        ),
+                  )
+                }),
+              ),
+            )
+
+        const deleteBlock = !draft || !draft.id
+          ? null
+          : !sceneDeleteAsk
+            ? h(
+                'div',
+                { className: 'dbmcp-inline' },
+                h(
+                  'button',
+                  {
+                    type: 'button',
+                    className: 'dbmcp-btn is-small is-danger',
+                    disabled: sceneBusy,
+                    onClick: () => setSceneDeleteAsk(true),
+                  },
+                  t('scene.delete'),
+                ),
+              )
+            : h(
+                'div',
+                { className: 'dbmcp-scene-confirm' },
+                h('p', { className: 'dbmcp-label' }, t('scene.deleteConfirm')),
+                h('p', { className: 'dbmcp-hint' }, t('scene.deleteNote')),
+                h(
+                  'div',
+                  { className: 'dbmcp-inline' },
+                  h(
+                    'button',
+                    {
+                      type: 'button',
+                      className: 'dbmcp-btn is-small is-danger',
+                      disabled: sceneBusy,
+                      onClick: () => void deleteSceneDraft(),
+                    },
+                    t('scene.delete'),
+                  ),
+                  h('button', { type: 'button', className: 'dbmcp-btn is-small', onClick: () => setSceneDeleteAsk(false) }, t('scene.deleteCancel')),
+                ),
+              )
+
+        const detail = !draft
+          ? h('p', { className: 'dbmcp-hint' }, sceneRows.length === 0 ? t('scene.newHint') : t('scene.pickHint'))
+          : h(
+              'div',
+              { className: 'dbmcp-scene-detail' },
+              h(
+                'div',
+                { className: 'dbmcp-trace-grid' },
+                h(
+                  'label',
+                  { className: 'dbmcp-cell' },
+                  h('span', { className: 'dbmcp-label' }, t('scene.name')),
+                  h('input', {
+                    className: 'dbmcp-input',
+                    value: draft.name,
+                    placeholder: t('scene.namePlaceholder'),
+                    onChange: (event) => patchScene({ name: event.target.value }),
+                  }),
+                ),
+                h(
+                  'label',
+                  { className: 'dbmcp-cell' },
+                  h('span', { className: 'dbmcp-label' }, t('scene.note')),
+                  h('input', {
+                    className: 'dbmcp-input',
+                    value: draft.note,
+                    placeholder: t('scene.notePlaceholder'),
+                    onChange: (event) => patchScene({ note: event.target.value }),
+                  }),
+                ),
+              ),
+              h(
+                'div',
+                { className: 'dbmcp-inline dbmcp-scene-actions' },
+                h(
+                  'button',
+                  {
+                    type: 'button',
+                    className: 'dbmcp-btn is-small is-primary',
+                    disabled: sceneBusy || (!sceneDirty && Boolean(draft.id)),
+                    onClick: () => void saveSceneDraft(),
+                  },
+                  t('scene.save'),
+                ),
+                sceneDirty ? h('span', { className: 'dbmcp-pill' }, t('scene.dirty')) : null,
+                deleteBlock,
+              ),
+              sceneError ? h('p', { className: 'dbmcp-hint dbmcp-edge-error' }, sceneError) : null,
+              h(
+                'div',
+                { className: 'dbmcp-scene-block' },
+                h('p', { className: 'dbmcp-label' }, t('scene.tablesTitle')),
+                memberRows,
+                h(
+                  'div',
+                  { className: 'dbmcp-inline' },
+                  h(
+                    'button',
+                    { type: 'button', className: 'dbmcp-btn is-small', onClick: () => setSceneAddOpen(!sceneAddOpen) },
+                    sceneAddOpen ? t('scene.cancel') : t('scene.addTable'),
+                  ),
+                ),
+                picker,
+              ),
+              draft.id
+                ? h(
+                    'div',
+                    { className: 'dbmcp-scene-block' },
+                    h('p', { className: 'dbmcp-label' }, t('scene.linksTitle')),
+                    h('p', { className: 'dbmcp-hint' }, t('scene.linksHint')),
+                    linkRows,
+                  )
+                : null,
+              draft.id ? isolatedBlock : null,
+            )
+
+        return h(
+          Card,
+          {
+            title: t('scene.title'),
+            aside: sceneBusy ? h('span', { className: 'dbmcp-pill' }, t('graph.busy')) : h('span', { className: 'dbmcp-pill' }, String(sceneRows.length)),
+            actions: h(
+              'div',
+              { className: 'dbmcp-inline' },
+              h('button', { type: 'button', className: 'dbmcp-btn is-small', disabled: !sceneTarget, onClick: startNewScene }, t('scene.new')),
+              h('button', { type: 'button', className: 'dbmcp-btn is-small', disabled: sceneBusy || !sceneTarget, onClick: () => void loadSceneRows() }, t('action.refresh')),
+            ),
+          },
+          h('p', { className: 'dbmcp-hint' }, t('scene.hint')),
+          sources.length === 0
+            ? h('p', { className: 'dbmcp-hint' }, t('scene.noSources'))
+            : h(
+                'div',
+                { className: 'dbmcp-schema-wrap' },
+                h(
+                  'div',
+                  { className: 'dbmcp-schema' },
+                  h(
+                    'div',
+                    { className: 'dbmcp-schema-side' },
+                    sourcePick,
+                    h('div', { className: 'dbmcp-scene-list' }, railRows),
+                  ),
+                  h('div', { className: 'dbmcp-schema-main' }, detail),
+                ),
+              ),
         )
       }
 
@@ -8031,6 +9211,50 @@ function groupTables(tables) {
           }
           await loadScenes()
           await runTrace()
+        } catch (error) {
+          setTraceError(String((error && error.message) || error))
+        } finally {
+          setTraceBusy(false)
+        }
+      }
+
+      /** Save the walk just taken as a scene: the tables it actually read.
+       *
+       * A scene of the same name is updated rather than duplicated — that is
+       * `save_scene`'s own rule — so the form asks before writing over it, and
+       * the confirmation is part of the same control that saves. */
+      const saveTraceAsScene = async (name, tables, note) => {
+        const wanted = String(name || '').trim()
+        if (!wanted) {
+          setTraceError(t('scene.needName'))
+          return
+        }
+        if (!tables || tables.length === 0) {
+          setTraceError(t('scene.needTables'))
+          return
+        }
+        setTraceBusy(true)
+        setTraceError(null)
+        try {
+          const payload = await apiPost('/scenes/save', {
+            datasource: traceTarget,
+            name: wanted,
+            /* Sent as a string even when empty: an omitted note means "leave
+               the stored one alone", which is not what typing nothing means. */
+            note: String(note || '').trim(),
+            tables,
+          })
+          if (payload && payload.ok === false) {
+            const failure = payload.error || {}
+            const hint = failure.hint ? ` — ${failure.hint}` : ''
+            setTraceError(`${failure.message || 'save_scene failed'}${hint}`)
+            return
+          }
+          const saved = (payload && payload.scene) || null
+          await loadScenes()
+          if (saved && saved.id) remember('traceScene', setTraceScene)(saved.id)
+          setTraceSceneDraft(null)
+          setNotice({ message: fmt(t('scene.saved'), { name: wanted }), isError: false })
         } catch (error) {
           setTraceError(String((error && error.message) || error))
         } finally {
@@ -8353,6 +9577,23 @@ function groupTables(tables) {
         const entry = (trace && trace.entry) || null
         const candidates = (entry && Array.isArray(entry.candidates)) ? entry.candidates : []
         const sceneOn = Boolean(traceScene)
+        /* What "save as a scene" records: the tables this walk actually read.
+           A table reached from two parents is still one member. */
+        const traceSceneTables = []
+        const traceSceneSeen = new Set()
+        steps.forEach((step) => {
+          const name = String((step && step.table) || '')
+          const key = name.toLowerCase()
+          if (!name || traceSceneSeen.has(key)) return
+          traceSceneSeen.add(key)
+          traceSceneTables.push(name)
+        })
+        /* save_scene updates a scene of the same name instead of adding a
+           second one, so the form says so before the button is pressed. */
+        const draftName = traceSceneDraft ? String(traceSceneDraft.name || '').trim().toLowerCase() : ''
+        const draftOverwrite =
+          Boolean(draftName) &&
+          scenes.some((item) => String(item.name || '').trim().toLowerCase() === draftName)
         const directions = [
           { id: 'both', label: t('trace.dirBoth') },
           { id: 'down', label: t('trace.dirDown') },
@@ -8537,6 +9778,87 @@ function groupTables(tables) {
                 ),
                 summary.needsConfirm
                   ? h('p', { className: 'dbmcp-hint dbmcp-edge-why' }, fmt(t('trace.needsConfirmSome'), { n: summary.needsConfirm }))
+                  : null,
+                h(
+                  'div',
+                  { className: 'dbmcp-inline dbmcp-trace-save' },
+                  /* The button opens the form and then steps aside: the form carries
+                     its own Cancel, and two of them read as two different actions. */
+                  traceSceneDraft
+                    ? null
+                    : h(
+                        'button',
+                        {
+                          type: 'button',
+                          className: 'dbmcp-btn is-small',
+                          disabled: traceBusy || !traceTarget,
+                          'aria-label': t('scene.saveAs'),
+                          onClick: () =>
+                            setTraceSceneDraft({ name: String((entry && entry.table) || ''), note: '' }),
+                        },
+                        t('scene.saveAs'),
+                      ),
+
+                  traceSceneDraft
+                    ? h(
+                        'span',
+                        { className: 'dbmcp-hint' },
+                        fmt(t('scene.fromWalk'), { n: traceSceneTables.length }),
+                      )
+                    : null,
+                ),
+                traceSceneDraft
+                  ? h(
+                      'div',
+                      { className: 'dbmcp-trace-scene-form' },
+                      h(
+                        'label',
+                        { className: 'dbmcp-cell' },
+                        h('span', { className: 'dbmcp-label' }, t('scene.name')),
+                        h('input', {
+                          className: 'dbmcp-input',
+                          value: traceSceneDraft.name,
+                          placeholder: t('scene.namePlaceholder'),
+                          'aria-label': t('scene.name'),
+                          onChange: (event) => setTraceSceneDraft({ ...traceSceneDraft, name: event.target.value }),
+                        }),
+                      ),
+                      h(
+                        'label',
+                        { className: 'dbmcp-cell' },
+                        h('span', { className: 'dbmcp-label' }, t('scene.note')),
+                        h('input', {
+                          className: 'dbmcp-input',
+                          value: traceSceneDraft.note,
+                          placeholder: t('scene.notePlaceholder'),
+                          'aria-label': t('scene.note'),
+                          onChange: (event) => setTraceSceneDraft({ ...traceSceneDraft, note: event.target.value }),
+                        }),
+                      ),
+                      draftOverwrite
+                        ? h('p', { className: 'dbmcp-hint dbmcp-edge-why' }, fmt(t('scene.overwrites'), { name: traceSceneDraft.name }))
+                        : null,
+                      h(
+                        'div',
+                        { className: 'dbmcp-inline' },
+                        h(
+                          'button',
+                          {
+                            type: 'button',
+                            className: 'dbmcp-btn is-small is-primary',
+                            disabled: traceBusy,
+                            'aria-label': t('scene.save'),
+                            onClick: () => void saveTraceAsScene(traceSceneDraft.name, traceSceneTables, traceSceneDraft.note),
+                          },
+                          draftOverwrite ? t('scene.overwrite') : t('scene.save'),
+                        ),
+                        h(
+                          'button',
+                          { type: 'button', className: 'dbmcp-btn is-small', onClick: () => setTraceSceneDraft(null) },
+                          t('scene.cancel'),
+                        ),
+                      ),
+                    )
                   : null,
               )
             : null,
@@ -8823,6 +10145,7 @@ function groupTables(tables) {
           ),
           tab !== 'graph' ? null : renderGraph(),
           tab !== 'graph' ? null : renderCost(),
+          tab !== 'scenes' ? null : renderScenes(),
           tab !== 'trace' ? null : renderTrace(),
           tab !== 'clients' ? null : renderClients(),
           tab !== 'tools' ? null : renderTools(),
@@ -8971,6 +10294,11 @@ function groupTables(tables) {
         groupTables,
         tableMatches,
         connectionMatches,
+        /* Scene join suggestions: pure, so the offline tests can check every case. */
+        foldName,
+        columnFamily,
+        typesJoin,
+        linkCandidates,
         localClock,
         localStamp,
         TextInput,

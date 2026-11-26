@@ -24,6 +24,7 @@ window.__ModuleLoader__.load({
       { id: 'create' },
       { id: 'import' },
       { id: 'graph' },
+      { id: 'scenes' },
       { id: 'trace' },
       { id: 'clients' },
       { id: 'runtime' },
@@ -36,6 +37,7 @@ window.__ModuleLoader__.load({
       if (id === 'create') return t('tab.create')
       if (id === 'import') return t('tab.import')
       if (id === 'graph') return t('tab.graph')
+      if (id === 'scenes') return t('tab.scenes')
       if (id === 'trace') return t('tab.trace')
       if (id === 'runtime') return t('tab.runtime')
       if (id === 'clients') return t('tab.clients')
@@ -49,6 +51,7 @@ window.__ModuleLoader__.load({
       if (mode === 'create' || mode === 'edit') return 'create'
       if (mode === 'import') return 'import'
       if (mode === 'graph') return 'graph'
+      if (mode === 'scenes') return 'scenes'
       if (mode === 'trace') return 'trace'
       if (mode === 'runtime') return 'runtime'
       if (mode === 'clients') return 'clients'

@@ -553,6 +553,200 @@
       .dbmcp-schema-main {
         min-width: 0;
       }
+      /* The scene rail. Same box as the catalogue rail beside it, but the rows are
+         buttons — a scene is picked, not opened — so the scroll box lives here and
+         the page keeps its height no matter how many scenes are saved. */
+      .dbmcp-scene-list {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        max-height: 420px;
+        overflow: auto;
+      }
+      .dbmcp-scene-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        width: 100%;
+        padding: 6px 8px;
+        border: 1px solid transparent;
+        border-radius: 8px;
+        background: var(--dsw-alias-bg-base);
+        color: var(--dsw-alias-label-primary);
+        font: inherit;
+        font-size: 13px;
+        text-align: left;
+        cursor: pointer;
+        transition: background 100ms ease, border-color 100ms ease;
+      }
+      .dbmcp-scene-row:hover {
+        background: var(--dsw-alias-bg-layer-2);
+      }
+      .dbmcp-scene-row.is-active {
+        border-color: var(--dsw-alias-brand-primary);
+        background: var(--dsw-alias-bg-layer-2);
+      }
+      .dbmcp-scene-row .dbmcp-pill {
+        flex: 0 0 auto;
+      }
+      /* A scene name is typed by the reader, so it can be long; the count pill is
+         what must stay whole. */
+      .dbmcp-scene-name {
+        min-width: 0;
+        flex: 1 1 auto;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .dbmcp-scene-detail {
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+        min-width: 0;
+      }
+      .dbmcp-scene-block {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        min-width: 0;
+        padding-top: 12px;
+        border-top: 1px solid var(--dsw-alias-border-l1);
+      }
+      .dbmcp-scene-members {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      .dbmcp-scene-member {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        min-width: 0;
+        padding: 5px 8px;
+        border: 1px solid var(--dsw-alias-border-l1);
+        border-radius: 8px;
+        background: var(--dsw-alias-bg-layer-1);
+      }
+      .dbmcp-scene-member-name {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-family: var(--dsw-alias-font-mono);
+        font-size: 12px;
+        color: var(--dsw-alias-label-primary);
+      }
+      .dbmcp-scene-member .dbmcp-btn {
+        flex: 0 0 auto;
+      }
+      /* The catalogue picker: a search box and a wrap of candidate chips, scrolling
+         on its own so a wide schema does not push the detail panes off the page. */
+      .dbmcp-scene-picker {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        min-width: 0;
+        padding: 10px;
+        border: 1px solid var(--dsw-alias-border-l1);
+        border-radius: 10px;
+        background: var(--dsw-alias-bg-layer-1);
+      }
+      .dbmcp-scene-candidates {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        max-height: 180px;
+        overflow: auto;
+      }
+      .dbmcp-scene-links {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      /* A join row is a link into the Relations page, so it is a button that looks
+         like the edge rows there — path on the left, status chip on the right. */
+      .dbmcp-scene-link {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        width: 100%;
+        min-width: 0;
+        padding: 6px 8px;
+        border: 1px solid var(--dsw-alias-border-l1);
+        border-radius: 8px;
+        background: var(--dsw-alias-bg-base);
+        color: var(--dsw-alias-label-primary);
+        font: inherit;
+        text-align: left;
+        cursor: pointer;
+        transition: background 100ms ease, border-color 100ms ease;
+      }
+      .dbmcp-scene-link:hover {
+        background: var(--dsw-alias-bg-layer-2);
+        border-color: var(--dsw-alias-border-l2);
+      }
+      /* The path wraps instead of truncating: at a narrow width an ellipsis cut the
+         target column, which is the half of the join a reader came here to see. */
+      .dbmcp-scene-link .dbmcp-edge-path {
+        min-width: 0;
+        overflow-wrap: anywhere;
+        line-height: 1.35;
+      }
+      .dbmcp-scene-link .dbmcp-pill {
+        flex: 0 0 auto;
+      }
+      /* A member with no confirmed join stacks: its name and toggle on one line, then
+         what it does connect to, then the candidates the catalogue suggests. */
+      .dbmcp-scene-member.is-block {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 6px;
+      }
+      .dbmcp-scene-member-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        min-width: 0;
+      }
+      .dbmcp-scene-member-head .dbmcp-btn {
+        flex: 0 0 auto;
+      }
+      /* The adopt row: the names this table joins outside the scene, each one a
+         button that takes that table into the membership list. */
+      .dbmcp-scene-adopt {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px;
+      }
+      .dbmcp-scene-candidate {
+        font-family: var(--dsw-alias-font-mono);
+        font-size: 12px;
+        color: var(--dsw-alias-label-primary);
+      }
+      .dbmcp-scene-why {
+        font-size: 11px;
+        color: var(--dsw-alias-label-secondary);
+      }
+      .dbmcp-scene-actions {
+        align-items: center;
+        flex-wrap: wrap;
+      }
+      /* Deleting a scene is a second click and a sentence about what survives it;
+         the box is tinted with the error state so it does not read as routine. */
+      .dbmcp-scene-confirm {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        padding: 10px;
+        border: 1px solid color-mix(in srgb, var(--dsw-alias-state-error-primary) 45%, var(--dsw-alias-border-l1));
+        border-radius: 10px;
+        background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 6%, var(--dsw-alias-bg-base));
+      }
       /* Sub-view header row: where you came from, which connection it is, and
          the identifier to hand to the agent — all on one line. */
       .dbmcp-view-bar {
@@ -2155,6 +2349,12 @@
       .dbmcp-edge.is-rejected {
         border-left-color: var(--dsw-alias-state-error-primary);
       }
+      /* The row a link or the scene page jumped to: a ring, not a colour of its own,
+         so it cannot be mistaken for a status. */
+      .dbmcp-edge.is-focus {
+        outline: 2px solid var(--dsw-alias-brand-primary);
+        outline-offset: 2px;
+      }
       .dbmcp-edge-head {
         display: flex;
         align-items: center;
@@ -2267,6 +2467,25 @@
         flex-direction: column;
         gap: 2px;
         padding: 6px 0;
+      }
+      .dbmcp-trace-save {
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin: 2px 0;
+      }
+      .dbmcp-trace-scene-form {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 8px;
+        align-items: end;
+        margin: 4px 0 2px;
+      }
+      /* The two field cells sit in the grid; the warning and the two buttons
+         take the full width so the form reads top-down in a narrow panel. */
+      .dbmcp-trace-scene-form > p,
+      .dbmcp-trace-scene-form > .dbmcp-inline {
+        grid-column: 1 / -1;
       }
       .dbmcp-trace-cut {
         color: var(--dsw-alias-state-warn-primary);
