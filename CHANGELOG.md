@@ -121,6 +121,12 @@ report of each version in more detail.
 
 ### Fixed
 
+- **The self-test no longer reads this machine's DBeaver.** Its DBeaver check pointed
+  the scan at the real `%APPDATA%\DBeaverData`, so deleting the sample connection in
+  the editor turned `npm test` red for a reason that had nothing to do with the code.
+  The suite now writes a throwaway DBeaver home (a workspace with one SQLite
+  connection) and hands it to `createHost` as `dbeaverRoots`; the scan and the import
+  route use those roots when they get them, and fall back to the real ones otherwise.
 - **A table outside `public` is found by name.** A datasource that does not pin a
   schema used to send every single-table read to `search_path`, so on openGauss a
   table in `sales` came back as "does not exist" while the relation graph insisted

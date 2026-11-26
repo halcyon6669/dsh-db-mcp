@@ -7,7 +7,7 @@
  *
  * It never touches <DSH_HOME>/db-mcp; pass --dir=<path> to keep the output.
  */
-import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -17,13 +17,48 @@ const keep = process.argv.includes('--keep')
 const explicit = process.argv.find((arg) => arg.startsWith('--dir='))
 const dir = explicit ? explicit.slice(6) : await mkdtemp(join(tmpdir(), 'dbmcp-selftest-'))
 
-const host = createHost({ dir, config: { probeTimeoutMs: 5000 } })
+// The DBeaver half of this suite reads a DBeaver home. Pointing it at the real
+// one would make the run depend on which connections happen to be saved in the
+// editor on this machine — deleting the sample connection would turn the suite
+// red for a reason that has nothing to do with the code. So the suite writes
+// its own home, with the same file layout DBeaver uses.
+const dbeaverHome = await mkdtemp(join(tmpdir(), 'dbmcp-dbeaver-'))
+const sqliteFile = join(dbeaverHome, 'sample.db')
+{
+  const { DatabaseSync } = await import('node:sqlite')
+  const db = new DatabaseSync(sqliteFile)
+  db.exec('create table artist (id integer primary key, name text); create table album (id integer primary key, title text)')
+  db.prepare('insert into artist (name) values (?)').run('Ada')
+  db.close()
+  const dbeaverWorkspace = join(dbeaverHome, 'workspace6', 'General', '.dbeaver')
+  await mkdir(dbeaverWorkspace, { recursive: true })
+  await writeFile(
+    join(dbeaverWorkspace, 'data-sources.json'),
+    JSON.stringify({
+      folders: {},
+      connections: {
+        'dbeaver-sample-database-sqlite-1': {
+          provider: 'sqlite',
+          driver: 'sqlite_jdbc',
+          name: 'DBeaver Sample Database (SQLite)',
+          configuration: {
+            database: sqliteFile,
+            url: `jdbc:sqlite:${sqliteFile}`,
+            configurationType: 'MANUAL',
+            type: 'dev',
+          },
+        },
+      },
+    }),
+  )
+}
+
+const host = createHost({ dir, dbeaverRoots: [dbeaverHome], config: { probeTimeoutMs: 5000 } })
 const server = createServer((req, res) => host.handle(req, res))
 await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
 const base = `http://127.0.0.1:${server.address().port}`
 
 const results = []
-const sqliteFile = join(process.env.APPDATA || '', 'DBeaverData', 'workspace6', '.metadata', 'sample-database-sqlite-1', 'Chinook.db')
 function check(name, condition, detail) {
   results.push({ name, ok: Boolean(condition), detail })
   console.log(`${condition ? 'ok  ' : 'FAIL'} ${name}${detail ? ` — ${detail}` : ''}`)
@@ -54,7 +89,7 @@ try {
     id: 'chinook',
     name: 'Chinook (SQLite)',
     kind: 'sqlite',
-    config: { file: join(process.env.APPDATA || '', 'DBeaverData', 'workspace6', '.metadata', 'sample-database-sqlite-1', 'Chinook.db') },
+    config: { file: sqliteFile },
     password: 'p@ss',
   })
   check('save creates', created.status === 200 && created.body.datasource?.id === 'chinook', JSON.stringify(created.body.error || ''))
@@ -783,6 +818,7 @@ try {
     console.log(`runtime dir: ${dir}`)
   } else {
     await rm(dir, { recursive: true, force: true })
+    await rm(dbeaverHome, { recursive: true, force: true })
   }
   // Let libuv unwind the sockets and timers before the process exits: exiting
   // straight after a failure trips an assertion inside win/async.c.

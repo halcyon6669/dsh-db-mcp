@@ -1013,7 +1013,10 @@ async function scanDBeaver(options = {}) {
       },
     );
   }
-  const roots = dbeaverRoots();
+  // A caller may hand in the roots it wants scanned: the self-test points this
+  // at a throwaway DBeaver home so it never depends on what happens to be saved
+  // in the editor on this machine.
+  const roots = Array.isArray(options.roots) ? options.roots : dbeaverRoots();
   const files = [];
   for (const root of roots) {
     const entries = await listDir(root);
@@ -1169,6 +1172,11 @@ export function createHost(options = {}) {
   // agent config files on this machine.
   const targetsOf = options.clientTargets || clientTargets;
   const legacyFilesOf = options.legacyVscodeFiles || legacyVscodeFiles;
+  // Same idea for DBeaver: a test hands in its own home so the scan reads the
+  // connections it wrote, not whatever the editor happens to hold here.
+  const dbeaverRootsOf = Array.isArray(options.dbeaverRoots)
+    ? options.dbeaverRoots
+    : null;
   const registryFile = join(dir, REGISTRY_FILE);
   const secretsFile = join(dir, SECRETS_FILE);
 
@@ -2425,7 +2433,7 @@ export function createHost(options = {}) {
         registryError: listing.error,
         secretsFile,
         keyFile: join(dir, SECRET_KEY_FILE),
-        dbeaverRoots: dbeaverRoots(),
+        dbeaverRoots: dbeaverRootsOf || dbeaverRoots(),
       },
       datasources: listing.datasources,
       groups: registry.groups || [],
@@ -3062,6 +3070,7 @@ export function createHost(options = {}) {
     const scan = await scanDBeaver({
       withSecrets: true,
       existing: registry.datasources,
+      ...(dbeaverRootsOf ? { roots: dbeaverRootsOf } : {}),
     });
     const available = scan.sources.flatMap((source) =>
       source.connections
@@ -3207,7 +3216,10 @@ export function createHost(options = {}) {
           const registry = await readRegistry();
           return sendJson(response, 200, {
             ok: true,
-            ...(await scanDBeaver({ existing: registry.datasources })),
+            ...(await scanDBeaver({
+              existing: registry.datasources,
+              ...(dbeaverRootsOf ? { roots: dbeaverRootsOf } : {}),
+            })),
           });
         }
         if (route === "/schema") {
