@@ -340,10 +340,15 @@ connect". It starts at one column, then follows graph edges one hop at a time:
   Each node carries what the panel needs to render it without re-reading `steps`:
   `condition` (with the bound `binds`), `sql`, and `sample`. `steps` is still the flat
   list and the only source of truth — the graph is a reading of it, and the panel's
-  graph and flat list are both built from `steps`.
-- **A table is expanded once.** When the walk reaches a table it already expanded at a
-  shallower depth, that step is marked `repeated` and its children are not walked
-  again; its rows are still reported, and `summary.repeated` counts them.
+  graph is built from `steps`. Every node has exactly one parent, so the graph is a
+  tree and the panel can lay it out without crossing a line.
+- **A table is walked once.** When the walk would reach a table it already read, it
+  skips that candidate: the rows were fetched upstream, and a second node would only
+  repeat them. A table therefore appears at most once in `steps` and in `nodes`, and
+  there is no `repeated` flag or `summary.repeated` counter. A step reached straight
+  from its own table is still a genuine continuation — a self-referencing key
+  (`manager_id -> employee.id`) reads new rows on every hop — so that one is walked;
+  a table that comes back after a detour through other tables is not.
 - **A scene narrows what may be read.** Passing `scene` restricts the walk to the
   tables that scene names. A join leading out of the set is not followed: the table is
   recorded under `outside` with the join and the reason, and `summary.outside` counts

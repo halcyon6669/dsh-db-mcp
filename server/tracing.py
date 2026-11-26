@@ -310,7 +310,6 @@ def _nodes(steps) -> list[dict]:
             "rows": step.get("rows"),
             "status": step.get("status"),
             "truncated": step.get("truncated"),
-            "repeated": step.get("repeated", False),
             "inside": step.get("inside", True),
             "ms": step.get("ms"),
             "fanout": step.get("fanout"),
@@ -411,7 +410,6 @@ def trace(
                 "steps": 0,
                 "depthReached": 0,
                 "needsConfirm": 0,
-                "repeated": 0,
                 "outside": 0,
             },
             "nodes": [],
@@ -436,7 +434,6 @@ def trace(
 
     steps: list[dict] = []
     stopped: list[dict] = []
-    repeated: list[dict] = []
     outside: list[dict] = []
     seen: set[tuple[str, str, str]] = set()
     hit_tables: set[str] = set()
@@ -460,7 +457,6 @@ def trace(
                 "edge": None,
                 "side": None,
                 "parent": None,
-                "path": frozenset(),
             }
         ]
     )
@@ -490,15 +486,20 @@ def trace(
             if here == _fold(table):
                 extra = edge["condition"]
 
-        info = describe(table)
+        # A table the walk already read is not read or reported again. Its rows
+        # were fetched upstream, so a second box would only repeat data the reader
+        # already holds; the walk goes on along the other branches instead.
+        #
+        # The one exception is a table reached straight from itself: a
+        # self-referencing key (a manager_id pointing at its own table) reads new
+        # rows on every hop, so it is a continuation of the same chain rather than
+        # the same table showing up twice. Only the immediate parent counts, so a
+        # table that comes back after a detour through other tables is skipped.
+        parent = steps[node["parent"] - 1]["table"] if node["parent"] else None
+        if _fold(table) in expanded and _fold(parent) != _fold(table):
+            continue
 
-        # A table already expanded elsewhere in the tree is reported once more with
-        # its rows, but not walked again: the same table reached from three orders
-        # would otherwise branch into the same subtree three times and tell the
-        # reader nothing new. A table reached again along its own chain (a
-        # self-reference climbing a hierarchy) is a genuine continuation, so an
-        # ancestor repeats rather than counts as a revisit.
-        revisit = _fold(table) in expanded and _fold(table) not in node["path"]
+        info = describe(table)
 
         # An unindexed column on a big table turns one hop into a full scan. That
         # is a cost the operator should agree to, not one a trace spends on their
@@ -530,7 +531,6 @@ def trace(
                     "ms": 0,
                     "note": "this step would scan the whole table",
                     "cost": cost,
-                    "repeated": False,
                     "inside": True,
                 }
             )
@@ -637,7 +637,6 @@ def trace(
             "fanout": fanout,
             "ms": step_ms,
             "note": None,
-            "repeated": revisit,
             "inside": inside is None or _fold(table) in inside,
         }
         if status == "empty":
@@ -645,16 +644,9 @@ def trace(
             stopped.append({"table": table, "reason": f"no row held the value in {column}"})
         elif found["truncated"]:
             step["note"] = f"stopped at {row_limit} rows; the value has more matches than that"
-        elif revisit:
-            step["note"] = (
-                f"already expanded at a shallower depth; its children are not walked again"
-            )
-            repeated.append({"table": table, "column": column, "rows": len(rows)})
         steps.append(step)
 
         if not rows:
-            continue
-        if revisit:
             continue
         expanded.add(_fold(table))
         if depth >= depth_limit:
@@ -721,7 +713,6 @@ def trace(
                     "edge": other_edge,
                     "side": side,
                     "parent": step["index"],
-                    "path": node["path"] | {_fold(table)},
                 }
             )
 
@@ -797,7 +788,6 @@ def trace(
             "steps": len(steps),
             "depthReached": depth_reached,
             "needsConfirm": sum(1 for step in steps if step.get("status") == NEEDS_CONFIRM),
-            "repeated": len(repeated),
             "outside": len(outside),
         },
         "nodes": _nodes(steps),

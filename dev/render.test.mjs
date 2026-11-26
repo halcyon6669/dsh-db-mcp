@@ -1127,7 +1127,7 @@ check(
 
 // Page B — the trace result. The page must take a value and nothing else that
 // could look like a statement, and every step must be judgeable.
-const traceCard = source.slice(source.indexOf('const traceCondition ='), source.indexOf('let body'))
+const traceCard = source.slice(source.indexOf('const traceStepDirection ='), source.indexOf('let body'))
 const traceLogic = source.slice(source.indexOf('const traceTarget ='), source.indexOf('const [textPolicyDraft'))
 check('trace page: it is its own tab', /tab !== 'trace' \? null : renderTrace\(\)/.test(source))
 check(
@@ -1152,25 +1152,30 @@ check(
 )
 check('trace page: a blank value is refused before the walk', /trace\.needValue/.test(traceLogic))
 check(
-  'trace page: a step reads as its order, its table and its rows',
-  /dbmcp-trace-index/.test(traceCard) && /step\.table/.test(traceCard) && /trace\.rows/.test(traceCard),
+  'trace page: a step reads as its depth, its table and its rows',
+  /dbmcp-trace-mark/.test(traceCard) && /node\.table/.test(traceCard) && /trace\.rows/.test(traceCard),
 )
 check(
   'trace page: a broken chain says so in the step',
   /status === 'empty'/.test(traceCard) && /trace\.chainBreaks/.test(source),
 )
-check('trace page: a capped step is marked', /step\.truncated/.test(traceCard) && /trace\.truncated/.test(source))
+check('trace page: a capped step is marked', /node\.truncated/.test(traceCard) && /trace\.truncated/.test(source))
 check(
   'trace page: each step shows the edge it travelled',
-  /edgeStatusClass\(edge\.status\)/.test(traceCard) && /edgeSourceLabel\(edge\.source\)/.test(traceCard),
+  /edge\.from\.table/.test(traceCard) &&
+    /edge\.to\.column/.test(traceCard) &&
+    /edgeStatusClass\(edge\.status\)/.test(traceCard),
 )
 check(
   'trace page: each step carries the four judgements',
-  /pick\('ok'\)/.test(traceCard) && /pick\('too_many', 'not_unique'\)/.test(traceCard) && /pick\('missing'\)/.test(traceCard) && /pick\('irrelevant'\)/.test(traceCard),
+  /judgeStep\(edge\.id, 'ok'\)/.test(traceCard) &&
+    /judgeStep\(edge\.id, 'too_many', 'not_unique'\)/.test(traceCard) &&
+    /judgeStep\(edge\.id, 'missing'\)/.test(traceCard) &&
+    /judgeStep\(edge\.id, 'irrelevant'\)/.test(traceCard),
 )
 check(
   'trace page: judging a step feeds the edge behind it',
-  /judgeStep\(edge\.id, verdict, reason\)/.test(traceCard) && /edge_id: edgeId/.test(source),
+  /judgeStep\(edge\.id,/.test(traceCard) && /edge_id: edgeId/.test(source),
 )
 check(
   'trace page: pending edges are listed but not walked',
@@ -1206,25 +1211,22 @@ check(
 )
 check(
   'trace page: each step reports how long it took',
-  /trace\.stepMs/.test(traceCard) && /step\.ms/.test(traceCard),
+  /trace\.stepMs/.test(traceCard) && /node\.ms/.test(traceCard),
 )
 check(
   'trace page: the summary counts the steps it refused',
   /summary\.needsConfirm/.test(traceCard) && /trace\.needsConfirmSome/.test(source),
 )
 
-/* The walk is read as one picture: the graph is the view, and the step you pick
-   in it is read underneath. The flat list is still one click away for anyone who
-   prefers the order the walk ran in. Both come from the same `steps`. */
+/* The walk is read as one picture: the graph is the view — there is no second
+   view to switch to — and the step you pick in it is read underneath. */
 check(
-  'trace page: the graph is the default reading',
-  /useState\('tree'\)/.test(source) &&
-    /traceView === 'tree' \? traceOverview\(\) : null/.test(traceCard) &&
-    /t\('trace\.viewGraph'\)/.test(traceCard),
-)
-check(
-  'trace page: the flat list is still one click away',
-  /trace\.viewGraph/.test(source) && /trace\.viewFlat/.test(source) && /steps\.map\(renderTraceFlat\)/.test(traceCard),
+  'trace page: the graph is the only reading',
+  /steps\.length > 0 \? traceOverview\(\) : null/.test(traceCard) &&
+    !/renderTraceFlat/.test(source) &&
+    !/traceView/.test(source) &&
+    !/trace\.viewGraph/.test(source) &&
+    !/trace\.viewFlat/.test(source),
 )
 check(
   'trace page: the step picked in the graph is read under it, not in a second tree',
@@ -1239,11 +1241,13 @@ check(
   /trace\.root/.test(source) && /trace\.changeEntry/.test(source) && /traceDetailNode/.test(traceCard),
 )
 check(
-  'trace page: a repeated table is folded, not walked again',
-  /node\.repeated/.test(traceCard) &&
-    /trace\.repeatedNote/.test(source) &&
-    /dbmcp-trace-node is-/.test(traceCard) &&
-    /node\.repeated \? 'repeat'/.test(traceCard),
+  'trace page: a table already read upstream is not drawn a second time',
+  /dbmcp-trace-node is-/.test(traceCard) &&
+    !/node\.repeated/.test(source) &&
+    !/trace\.repeatedNote/.test(source) &&
+    !/is-repeat/.test(source) &&
+    !/dbmcp-trace-index/.test(source) &&
+    !/dbmcp-trace-cell/.test(source),
 )
 check(
   'trace page: rows expand under the picked step',
@@ -1305,15 +1309,71 @@ check(
   'trace page: joins leave the parent on separate rows, not one smeared point',
   /const fanout = \{\}/.test(traceCard) &&
     /taken\[node\.parent\] = order \+ 1/.test(traceCard) &&
-    /const spread = Math\.min\(/.test(traceCard),
+    /* The exits divide the box height, so the tenth child is as distinct as the
+       second; a fixed step collapsed everything past the third onto one point. */
+    /const inner = BOX_H - 8/.test(traceCard) &&
+    /const offset = count > 1 \? 4 \+ \(inner \/ \(count - 1\)\) \* order : BOX_H \/ 2/.test(traceCard),
 )
+/* The lanes must be ordered so no two joins cross. Every step has one parent in
+   the lane to its left, so ordering each lane by its parent's row is enough — and
+   that is a property worth running, not just reading. */
+const layoutSrc = source.slice(
+  source.indexOf('const traceOrder = (lanes) =>'),
+  source.indexOf('/* How far the picture may be magnified'),
+)
+const traceOrder = new Function(`${layoutSrc}\nreturn traceOrder`)()
+const width = (lane) => lane.map((node) => node.index)
+const crossings = (lanes) => {
+  let count = 0
+  const rows = {}
+  lanes.forEach((lane) => lane.forEach((node, row) => { rows[node.index] = row }))
+  for (let depth = 1; depth < lanes.length; depth += 1) {
+    const pairs = lanes[depth].filter((node) => rows[node.parent] !== undefined)
+    for (let a = 0; a < pairs.length; a += 1) {
+      for (let b = a + 1; b < pairs.length; b += 1) {
+        if (rows[pairs[a].parent] > rows[pairs[b].parent]) count += 1
+      }
+    }
+  }
+  return count
+}
 check(
-  'trace page: joins are ordered to draw the fewest crossings, not arrival order',
+  'trace page: joins are ordered so none of them cross, not by arrival order',
   /const traceOrder = \(lanes\) =>/.test(traceCard) &&
-    /const crossings = \(state\) =>/.test(traceCard) &&
-    /const score = crossings\(current\)/.test(traceCard) &&
+    !/const crossings = \(state\) =>/.test(traceCard) &&
+    !/barycenter|barycentre/i.test(traceCard) &&
     /traceOrder\(traceLanes\(nodes\)\)/.test(traceCard),
 )
+{
+  // Arrival order is breadth first, so two branch's children interleave:
+  // lane 2 arrives 4,6,5,7 where 4/5 hang off 2 and 6/7 off 3 — one crossing.
+  const lanes = [
+    [{ index: 1, parent: null }],
+    [{ index: 2, parent: 1 }, { index: 3, parent: 1 }],
+    [
+      { index: 4, parent: 2 },
+      { index: 6, parent: 3 },
+      { index: 5, parent: 2 },
+      { index: 7, parent: 3 },
+    ],
+  ]
+  const ordered = traceOrder(lanes)
+  check(
+    'trace page: the ordering really leaves zero crossings',
+    crossings(ordered) === 0,
+    `expected 0, got ${crossings(ordered)} in ${width(ordered[1])} / ${width(ordered[2])}`,
+  )
+  check(
+    'trace page: siblings keep the order the walk reached them in',
+    width(ordered[1]).join(',') === '2,3' && width(ordered[2]).join(',') === '4,5,6,7',
+    `${width(ordered[1]).join(',')} / ${width(ordered[2]).join(',')}`,
+  )
+  check(
+    'trace page: ordering a lane does not mutate the one it was given',
+    width(lanes[1]).join(',') === '2,3' && width(lanes[2]).join(',') === '4,6,5,7',
+    `${width(lanes[1]).join(',')} / ${width(lanes[2]).join(',')}`,
+  )
+}
 check(
   'trace page: the graph can be zoomed instead of shrunk to fit',
   /const \[traceZoom, setTraceZoom\] = React\.useState\(1\)/.test(source) &&

@@ -185,10 +185,11 @@ depth, left to right, one box per table the walk reached, and every join drawn a
 line labelled with the pair of columns it compares — so the shape of the walk is the
 whole view instead of a picture next to a list. Clicking a box reads that step
 underneath it: the values it was bound to, its rows with the bound column
-highlighted, and the ✓/✗ judgement for the join that carried it there. A table
-reached twice is drawn once more but not walked again, and a value that lives in
-several places offers those places as starting chips. The older flat list is one
-click away. A **scene** narrows a walk to a named set of tables: joins
+highlighted, and the ✓/✗ judgement for the join that carried it there. Each lane is
+laid out by where its parents sat in the lane to the left, so no two joins cross. A
+table the walk already read is not drawn again — its rows came from upstream, and a
+second box would only repeat them. A value that lives in several places offers those
+places as starting chips. A **scene** narrows a walk to a named set of tables: joins
 leading out of the set are not followed, the tables they would reach are listed
 outside it, and one button folds a table into the scene and re-runs. A join whose
 target column has no index and whose table looks large is not run: that step comes

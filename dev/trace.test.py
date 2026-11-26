@@ -549,7 +549,7 @@ class ScenesNarrowTheWalk(_Walk):
 
 
 class TheTreeShape(_Walk):
-    """`nodes` mirrors `steps`, indented; `repeated` folds a duplicate subtree."""
+    """`nodes` mirrors `steps`, indented; a table already read is not repeated."""
 
     def _edge(self, from_table, from_column, to_table, to_column, status="confirmed"):
         super()._edge(from_table, from_column, to_table, to_column, status)
@@ -597,17 +597,17 @@ class TheTreeShape(_Walk):
         self.assertEqual(grandchild["table"], "t_line")
         self.assertEqual(grandchild["depth"], 2)
 
-    def test_a_table_reached_twice_is_expanded_once(self):
+    def test_a_table_reached_twice_is_reported_once(self):
+        """A table the walk already read is not reported again: its rows were
+        fetched upstream, so a second box would only repeat them."""
         self._fan()
         result = self._trace("1", entry_table="t_order", entry_column="id", direction="down")
         shared = [step for step in result["steps"] if step["table"] == "t_shared"]
-        self.assertGreaterEqual(len(shared), 1)
-        repeated = [step for step in shared if step["repeated"]]
-        self.assertTrue(repeated, "the second reach of t_shared must say it is a repeat")
-        self.assertIn("already expanded", repeated[0]["note"])
-        self.assertIn("repeated", result["summary"])
+        self.assertEqual(len(shared), 1)
+        self.assertNotIn("repeated", result["summary"])
+        self.assertNotIn("repeated", shared[0])
 
-    def test_a_repeat_is_not_walked_again(self):
+    def test_a_table_already_read_is_not_walked_a_second_time(self):
         self._fan()
         result = self._trace("1", entry_table="t_order", entry_column="id", direction="down")
         rows = {
@@ -615,6 +615,24 @@ class TheTreeShape(_Walk):
             for step in result["steps"]
         }
         self.assertEqual(len(rows), len(set(rows)))
+        tables = [step["table"] for step in result["steps"]]
+        self.assertEqual(len(tables), len(set(tables)))
+
+    def test_a_table_that_comes_back_after_a_detour_is_not_reported_again(self):
+        """A -> B -> A is not a continuation: the second A holds no rows the
+        reader does not already have.
+
+        A cycle through other tables used to be excepted because A was an
+        ancestor on the path, so a walk that left t_order, read t_trans and
+        came back reported t_order a second time.
+        """
+        self._chain()
+        # One more edge back into t_trans, so the walk can return to t_order.
+        self._edge("t_order", "id", "t_trans", "id")
+        result = self._trace("1", entry_table="t_order", entry_column="id", direction="both", max_depth=6)
+        tables = [step["table"] for step in result["steps"]]
+        self.assertEqual(tables.count("t_order"), 1, tables)
+        self.assertIn("t_trans", tables, "the walk must still go on along the cycle")
 
     def test_a_node_carries_what_the_panel_needs_to_read_it(self):
         """The panel shows the bound values and the sample rows off the node, so
@@ -632,14 +650,14 @@ class TheTreeShape(_Walk):
             [str(item) for item in child["condition"]["binds"]], [str(root["sample"]["rows"][0][0])]
         )
 
-    def test_the_summary_counts_the_repeats_and_the_outside_tables(self):
+    def test_the_summary_counts_the_tables_outside_the_scene(self):
         self._fan()
         scene = scenes.save_scene(self.profile, "no shared", ["t_order", "t_left", "t_right"])["scene"]
         result = self._trace(
             "1", entry_table="t_order", entry_column="id", direction="down", scene=scene["id"]
         )
         self.assertGreaterEqual(result["summary"]["outside"], 1)
-        self.assertIsInstance(result["summary"]["repeated"], int)
+        self.assertNotIn("repeated", result["summary"])
 
 
 class TraceShape(unittest.TestCase):
@@ -703,7 +721,6 @@ class TraceShape(unittest.TestCase):
                 "steps",
                 "depthReached",
                 "needsConfirm",
-                "repeated",
                 "outside",
             },
         )

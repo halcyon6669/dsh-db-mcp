@@ -2268,30 +2268,9 @@
         gap: 2px;
         padding: 6px 0;
       }
-      .dbmcp-trace-index {
-        font-variant-numeric: tabular-nums;
-        color: var(--dsw-alias-label-secondary);
-      }
-      .dbmcp-trace-step .dbmcp-edge-head {
-        align-items: baseline;
-      }
       .dbmcp-trace-cut {
         color: var(--dsw-alias-state-warn-primary);
         border-color: var(--dsw-alias-state-warn-primary);
-      }
-      .dbmcp-trace-sample {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 8px;
-        margin: 2px 0;
-      }
-      .dbmcp-trace-cell {
-        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-        font-size: 12px;
-        color: var(--dsw-alias-label-primary);
-        background: var(--dsw-alias-bg-layer-2);
-        border-radius: 4px;
-        padding: 1px 6px;
       }
       .dbmcp-trace-judge {
         display: flex;
@@ -2406,11 +2385,6 @@
         stroke: var(--dsw-alias-state-error-primary);
         stroke-dasharray: 2 2;
       }
-      .dbmcp-ov-node.is-repeat {
-        fill: transparent;
-        stroke: var(--dsw-alias-border-l1);
-        stroke-dasharray: 3 3;
-      }
       .dbmcp-ov-node.is-focus {
         stroke: var(--dsw-alias-brand-primary);
         stroke-width: 2;
@@ -2449,10 +2423,6 @@
       .dbmcp-trace-node.is-pending {
         border-style: dashed;
         border-color: var(--dsw-alias-state-warn-primary);
-      }
-      .dbmcp-trace-node.is-repeat {
-        border-style: dashed;
-        background: transparent;
       }
       .dbmcp-trace-node.is-focus {
         border-color: var(--dsw-alias-brand-primary);
@@ -2549,7 +2519,6 @@
         flex-wrap: wrap;
         row-gap: 4px;
       }
-      .dbmcp-trace-views,
       .dbmcp-trace-dirs {
         gap: 4px;
       }

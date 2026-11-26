@@ -1904,10 +1904,6 @@ function groupTables(tables) {
       const [traceBusy, setTraceBusy] = React.useState(false)
       const [traceError, setTraceError] = React.useState(null)
       const [traceOpen, setTraceOpen] = React.useState('')
-      /* The walk can be read two ways: as a path tree, where the indent is the
-         parent link, or as a flat list, where the order is the order it ran.
-         The tree is the default because a join walk is a shape, not a list. */
-      const [traceView, setTraceView] = React.useState('tree')
       const [traceScene, setTraceScene] = React.useState('')
       const [scenes, setScenes] = React.useState([])
       /* The manual entry columns stay hidden until asked for: most walks start
@@ -4035,68 +4031,14 @@ function groupTables(tables) {
          walk is what the reader has to judge — so every step carries the feedback
          buttons for the edge that carried it there.
 
-         A walk is a shape, so the default reading is a tree: the indent is the
-         parent link the server reported, and the edge line above each node is the
-         join that carried the value there. The flat list is kept as the second
-         reading, because sometimes you want to see the order it ran. */
+         A walk is a shape, so it is read as one: the lanes are the depths the
+         server reported, and the edge between two boxes is the join that carried
+         the value there. A box opens the rows behind that step. */
 
       /** Which way the value travelled over this edge to reach this node. */
       const traceStepDirection = (edge, table) => {
         if (!edge || !edge.to || !table) return 'down'
         return String(edge.to.table || '').toLowerCase() === String(table).toLowerCase() ? 'up' : 'down'
-      }
-
-      const traceCondition = (step) => {
-        const condition = step.condition || {}
-        const binds = (condition.binds || []).map((item) => String(item))
-        const shown = binds.length > 3 ? `${binds.slice(0, 3).join(', ')}, …` : binds.join(', ')
-        const column = condition.column ? `${condition.column} in (${shown})` : ''
-        return condition.extra ? `${column} ${t('trace.and')} ${condition.extra}` : column
-      }
-
-      const traceSample = (step) => {
-        const sample = step.sample || {}
-        const columns = sample.columns || []
-        const rows = sample.rows || []
-        if (columns.length === 0 || rows.length === 0) return null
-        const first = rows[0] || []
-        return h(
-          'p',
-          { className: 'dbmcp-hint dbmcp-trace-sample' },
-          columns.map((column, index) =>
-            h('span', { key: `${column}:${index}`, className: 'dbmcp-trace-cell' }, `${column}=${first[index] === null || first[index] === undefined ? '∅' : String(first[index])}`),
-          ),
-        )
-      }
-
-      const traceStepActions = (step) => {
-        const edge = step.edge || null
-        if (!edge) return null
-        const open = traceOpen === `${step.index}`
-        const pick = (verdict, reason) => {
-          void judgeStep(edge.id, verdict, reason)
-        }
-        return h(
-          'div',
-          { className: 'dbmcp-trace-judge' },
-          h(
-            'div',
-            { className: 'dbmcp-inline' },
-            h('button', { type: 'button', className: 'dbmcp-btn is-small', onClick: () => pick('ok') }, t('trace.judgeOk')),
-            h('button', { type: 'button', className: 'dbmcp-btn is-small', onClick: () => setTraceOpen(open ? '' : `${step.index}`) }, open ? t('trace.judgeCancel') : t('trace.judgeWrong')),
-          ),
-          open
-            ? h(
-                'div',
-                { className: 'dbmcp-inline dbmcp-trace-reasons' },
-                h('button', { type: 'button', className: 'dbmcp-btn is-small', onClick: () => pick('too_many', 'not_unique') }, t('graph.reasonNotUnique')),
-                h('button', { type: 'button', className: 'dbmcp-btn is-small', onClick: () => pick('too_many', 'wrong_column') }, t('graph.reasonWrongColumn')),
-                h('button', { type: 'button', className: 'dbmcp-btn is-small', onClick: () => pick('too_many', 'needs_condition') }, t('graph.reasonNeedsCondition')),
-                h('button', { type: 'button', className: 'dbmcp-btn is-small is-plain', onClick: () => pick('missing') }, t('trace.judgeMissing')),
-                h('button', { type: 'button', className: 'dbmcp-btn is-small is-danger', onClick: () => pick('irrelevant') }, t('trace.judgeIrrelevant')),
-              )
-            : null,
-        )
       }
 
       /** The chip that explains how much this join is trusted.
@@ -4187,7 +4129,7 @@ function groupTables(tables) {
           'div',
           {
             key: `n${node.index}`,
-            className: `dbmcp-trace-node is-${slow ? 'pending' : status === 'empty' ? 'stale' : status === 'error' ? 'rejected' : node.repeated ? 'repeat' : 'confirmed'}`,
+            className: `dbmcp-trace-node is-${slow ? 'pending' : status === 'empty' ? 'stale' : status === 'error' ? 'rejected' : 'confirmed'}`,
           },
           h(
             'div',
@@ -4199,7 +4141,6 @@ function groupTables(tables) {
             ),
             h('code', { className: 'dbmcp-trace-name' }, node.table),
             h('span', { className: 'dbmcp-pill' }, fmt(t('trace.rows'), { n: rows })),
-            node.repeated ? h('span', { className: 'dbmcp-pill' }, '↻') : null,
             node.truncated ? h('span', { className: 'dbmcp-pill dbmcp-trace-cut' }, t('trace.truncated')) : null,
             slow ? h('span', { className: edgeStatusClass('pending') }, t('trace.needsConfirmChip')) : null,
             node.index === 1
@@ -4294,7 +4235,6 @@ function groupTables(tables) {
               )
             : null,
           slow ? null : node.note ? h('p', { className: 'dbmcp-hint dbmcp-trace-note' }, node.note) : null,
-          node.repeated ? h('p', { className: 'dbmcp-hint dbmcp-trace-note' }, t('trace.repeatedNote')) : null,
           slow || rows === 0
             ? null
             : h(
@@ -4318,71 +4258,6 @@ function groupTables(tables) {
                   : null,
               ),
           open ? traceRows(node) : null,
-        )
-      }
-
-      /** The second reading: the same steps in the order they ran, no indent. */
-      const renderTraceFlat = (step) => {
-        const status = step.status || 'hit'
-        const edge = step.edge || null
-        const slow = status === 'needs_confirm'
-        return h(
-          'div',
-          { key: `f${step.index}`, className: `dbmcp-edge dbmcp-trace-step is-${slow ? 'pending' : status === 'empty' ? 'stale' : status === 'error' ? 'rejected' : 'confirmed'}` },
-          h(
-            'div',
-            { className: 'dbmcp-edge-head' },
-            h(
-              'code',
-              { className: 'dbmcp-edge-path' },
-              h('span', { className: 'dbmcp-trace-index' }, `${step.index}.`),
-              ' ',
-              h('span', null, step.table),
-            ),
-            h(
-              'span',
-              { className: 'dbmcp-inline' },
-              step.truncated ? h('span', { className: 'dbmcp-pill dbmcp-trace-cut' }, t('trace.truncated')) : null,
-              slow ? h('span', { className: edgeStatusClass('pending') }, t('trace.needsConfirmChip')) : null,
-              edge ? h('span', { className: edgeStatusClass(edge.status) }, edgeStatusLabel(edge.status)) : null,
-            ),
-          ),
-          h('p', { className: 'dbmcp-hint dbmcp-edge-meta' }, traceCondition(step)),
-          h(
-            'p',
-            { className: 'dbmcp-hint dbmcp-edge-meta' },
-            slow
-              ? t('trace.needsConfirm')
-              : status === 'empty'
-                ? t('trace.chainBreaks')
-                : status === 'error'
-                  ? t('trace.stepFailed')
-                  : fmt(t('trace.rows'), { n: step.rows }),
-            slow ? '' : edge ? ` · ${edgeSourceLabel(edge.source)}` : '',
-            slow ? '' : typeof step.fanout === 'number' ? ` · ${fmt(t('graph.fanout'), { value: step.fanout.toFixed(1) })}` : '',
-            slow ? '' : typeof step.ms === 'number' ? ` · ${fmt(t('trace.stepMs'), { ms: step.ms })}` : '',
-          ),
-          slow
-            ? h(
-                'div',
-                { className: 'dbmcp-inline dbmcp-trace-judge' },
-                h(
-                  'button',
-                  {
-                    type: 'button',
-                    className: 'dbmcp-btn is-small',
-                    disabled: traceBusy,
-                    onClick: () => {
-                      void runTrace(true)
-                    },
-                  },
-                  t('trace.continueAnyway'),
-                ),
-              )
-            : null,
-          slow ? null : traceSample(step),
-          step.note && !slow ? h('p', { className: 'dbmcp-hint dbmcp-edge-why' }, step.note) : null,
-          slow ? null : traceStepActions(step),
         )
       }
 
@@ -4461,73 +4336,32 @@ function groupTables(tables) {
       }
 
       /**
-       * Sugiyama's third step, which every layered drawing engine does (dagre
-       * calls it `order`): put each lane in the order that draws the fewest
-       * crossings, by repeatedly sorting a lane on the average row of the nodes
-       * it connects to in the neighbouring lane — down, then up — and keeping
-       * whichever sweep scored best. Arrival order, which is what a BFS hands
-       * us, is exactly the order that draws the most crossings.
+       * The rows inside each lane, in the order that draws no crossings.
+       *
+       * Every step has exactly one parent, and a parent always sits one lane to
+       * the left, so two edges can only cross when their boxes sit in the opposite
+       * order to the boxes they hang off. Sorting each lane once, top-down, by the
+       * row its parent occupies therefore leaves nothing to cross: by the time a
+       * lane is sorted the lane it hangs off is already final, and children of the
+       * same parent keep the order the walk reached them in. Arrival order, which
+       * is what a breadth-first walk hands us, is exactly the order that draws the
+       * most crossings.
        */
       const traceOrder = (lanes) => {
-        const crossings = (state) => {
-          let total = 0
-          for (let depth = 1; depth < state.length; depth += 1) {
-            const rows = {}
-            state[depth].forEach((node, row) => { rows[node.index] = row })
-            const pairs = []
-            state[depth].forEach((node) => {
-              if (node.parent === null || node.parent === undefined) return
-              const from = state[depth - 1].findIndex((other) => other.index === node.parent)
-              if (from < 0) return
-              pairs.push([from, rows[node.index]])
+        const ordered = lanes.map((lane) => lane.slice())
+        for (let depth = 1; depth < ordered.length; depth += 1) {
+          const above = {}
+          ordered[depth - 1].forEach((node, row) => { above[node.index] = row })
+          ordered[depth] = ordered[depth]
+            .map((node, row) => ({ node, row, weight: above[node.parent] }))
+            .sort((left, right) => {
+              const a = left.weight === undefined ? left.row : left.weight
+              const b = right.weight === undefined ? right.row : right.weight
+              return a === b ? left.row - right.row : a - b
             })
-            for (let i = 0; i < pairs.length; i += 1) {
-              for (let j = i + 1; j < pairs.length; j += 1) {
-                if ((pairs[i][0] - pairs[j][0]) * (pairs[i][1] - pairs[j][1]) < 0) total += 1
-              }
-            }
-          }
-          return total
+            .map((item) => item.node)
         }
-        /* A node with no neighbour to average falls back to where it already
-           sits, so the sort only moves what it has evidence about. */
-        const sortLane = (lane, weightOf) => lane
-          .map((node, row) => ({ node, row, weight: weightOf(node) }))
-          .sort((left, right) => {
-            const a = left.weight === null ? left.row : left.weight
-            const b = right.weight === null ? right.row : right.weight
-            return a === b ? left.row - right.row : a - b
-          })
-          .map((item) => item.node)
-        let best = lanes.map((lane) => lane.slice())
-        let bestScore = crossings(best)
-        let current = best.map((lane) => lane.slice())
-        for (let pass = 0; pass < 4 && bestScore > 0; pass += 1) {
-          for (let depth = 1; depth < current.length; depth += 1) {
-            const above = {}
-            current[depth - 1].forEach((node, row) => { above[node.index] = row })
-            current[depth] = sortLane(current[depth], (node) => (
-              node.parent !== null && node.parent !== undefined && above[node.parent] !== undefined
-                ? above[node.parent]
-                : null
-            ))
-          }
-          for (let depth = current.length - 2; depth >= 0; depth -= 1) {
-            const below = {}
-            current[depth + 1].forEach((node, row) => { below[node.index] = row })
-            current[depth] = sortLane(current[depth], (node) => {
-              const kids = (node.children || []).filter((child) => below[child.index] !== undefined)
-              if (kids.length === 0) return null
-              return kids.reduce((sum, child) => sum + below[child.index], 0) / kids.length
-            })
-          }
-          const score = crossings(current)
-          if (score < bestScore) {
-            bestScore = score
-            best = current.map((lane) => lane.slice())
-          }
-        }
-        return best
+        return ordered
       }
 
       /* How far the picture may be magnified. 40% fits a wide walk into a card,
@@ -4593,7 +4427,7 @@ function groupTables(tables) {
             if (!here) return
             const name = String(node.table || '')
             const short = name.length > 20 ? `${name.slice(0, 19)}…` : name
-            const status = node.repeated ? 'repeat' : node.status || 'hit'
+            const status = node.status || 'hit'
             const focused = node.index === current
             boxes.push(
               h(
@@ -4625,9 +4459,7 @@ function groupTables(tables) {
                 h(
                   'text',
                   { className: 'dbmcp-ov-sub', x: here.x + BOX_W / 2, y: here.y + 31, textAnchor: 'middle' },
-                  node.repeated
-                    ? `${fmt(t('trace.rows'), { n: node.rows || 0 })} · ↻`
-                    : fmt(t('trace.rows'), { n: node.rows || 0 }),
+                  fmt(t('trace.rows'), { n: node.rows || 0 }),
                 ),
                 h('title', null, `${node.table} · ${fmt(t('trace.rows'), { n: node.rows || 0 })}`),
               ),
@@ -4639,10 +4471,14 @@ function groupTables(tables) {
             const order = taken[node.parent] || 0
             taken[node.parent] = order + 1
             const count = fanout[node.parent] || 1
-            const spread = Math.min(BOX_H - 10, 8 * Math.max(count - 1, 0))
-            const offset = count > 1 ? (BOX_H / 2 - 4) - (spread / (count - 1)) * order : BOX_H / 2
+            /* Spread the exits evenly down the box's right edge. A fixed step
+               crowded every exit past the third onto the same point, which is the
+               smear this is meant to avoid; dividing the box height by the number
+               of exits keeps them distinct however many there are. */
+            const inner = BOX_H - 8
+            const offset = count > 1 ? 4 + (inner / (count - 1)) * order : BOX_H / 2
             const x1 = parent.x + BOX_W
-            const y1 = parent.y + Math.max(4, Math.min(BOX_H - 4, offset))
+            const y1 = parent.y + offset
             /* The curve ends in the gutter, then a straight stub enters the box:
                the label lives above the stub, and the only line in that band is
                the stub itself, so nothing can cross the text. */
@@ -4822,31 +4658,7 @@ function groupTables(tables) {
         )
         return h(
           Card,
-          {
-            title: t('trace.title'),
-            aside: h(
-              'div',
-              { className: 'dbmcp-inline dbmcp-trace-views' },
-              h(
-                'button',
-                {
-                  type: 'button',
-                  className: `dbmcp-btn is-small${traceView === 'tree' ? ' is-primary' : ''}`,
-                  onClick: () => setTraceView('tree'),
-                },
-                t('trace.viewGraph'),
-              ),
-              h(
-                'button',
-                {
-                  type: 'button',
-                  className: `dbmcp-btn is-small${traceView === 'flat' ? ' is-primary' : ''}`,
-                  onClick: () => setTraceView('flat'),
-                },
-                t('trace.viewFlat'),
-              ),
-            ),
-          },
+          { title: t('trace.title') },
           h('p', { className: 'dbmcp-hint' }, t('trace.hint')),
           sources.length === 0
             ? h('p', { className: 'dbmcp-hint' }, t('trace.noSources'))
@@ -4980,8 +4792,8 @@ function groupTables(tables) {
                   : null,
               )
             : null,
-          steps.length > 0 && traceView === 'tree' ? traceOverview() : null,
-          steps.length > 0 && traceView === 'tree'
+          steps.length > 0 ? traceOverview() : null,
+          steps.length > 0
             ? h(
                 'div',
                 { className: 'dbmcp-trace-detail', id: 'dbmcp-trace-detail' },
@@ -4990,9 +4802,6 @@ function groupTables(tables) {
                   sceneOn,
                 ),
               )
-            : null,
-          steps.length > 0 && traceView === 'flat'
-            ? h('div', { className: 'dbmcp-edges' }, steps.map(renderTraceFlat))
             : null,
           outside.length > 0
             ? h(

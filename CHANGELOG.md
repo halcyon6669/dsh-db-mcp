@@ -54,9 +54,10 @@ report of each version in more detail.
   under every node. `steps` stays the flat list and the only source of truth — the
   graph is a reading of it. Each node also carries its `condition` (with the bound
   `binds`), `sql` and `sample`, so a reader can render a step without re-reading
-  `steps`. A table reached again at a deeper depth is marked `repeated` and its
-  children are not walked twice, so a cycle walks each table once instead of fanning
-  out forever. The entry probe reports every candidate it tried with its row count
+  `steps`. A table the walk already read is not reported a second time: its rows came
+  from upstream, so a repeat would only show the same data twice. The walk skips such
+  a candidate instead, which also means a cycle walks every table exactly once instead
+  of fanning out forever. The entry probe reports every candidate it tried with its row count
   (`entry.candidates[].matches`), so a value that lives in several places can be
   started from the one that was meant.
 - **The Trace tab draws that graph.** The walk is no longer a list of steps: it is one
@@ -64,10 +65,10 @@ report of each version in more detail.
   join drawn as a line labelled with the pair of columns it compares — so the shape of
   the walk is the whole view instead of a picture next to a list. Clicking a box reads
   that step underneath it: the values it was bound to, its rows with the bound column
-  highlighted, and the ✓/✗ judgement for the join. Lanes are ordered to draw the
-  fewest crossings rather than in arrival order, and each join label sits in its own
-  gutter so no curve can run through it. The flat list the page used to be is still
-  one click away.
+  highlighted, and the ✓/✗ judgement for the join. Each lane is ordered by where its
+  parents landed in the lane to the left, so no two joins cross and each join label
+  sits in its own gutter where no curve can run through it. The graph is the only
+  view of a walk — the flat list is gone.
 - **The graph zooms instead of shrinking to fit.** A walk that fans out into five
   lanes does not fit any card, and scaling the text down to fit makes the labels
   unreadable. The picture keeps its own size behind a scroll box and the reader
@@ -77,6 +78,15 @@ report of each version in more detail.
 
 ### Changed
 
+- **The Trace tab has one view, and it does not cross itself.** The flat list and the
+  Graph / Flat switch are gone: a walk is read as the graph and nothing else. Because a
+  table is now reported once, the graph is a tree — every box hangs off exactly one
+  parent one lane to the left — so laying each lane out in the order its parents sit in
+  is enough to leave zero crossings. The barycentre passes that tried to minimise
+  crossings for a multi-parent DAG are gone with them.
+- **`trace_by_key` no longer reports `repeated`.** The `repeated` flag on a step and
+  `summary.repeated` are gone, and a step or node for a table the walk already read is
+  no longer emitted at all.
 - **An index is no longer a condition for trust.** An edge becomes `trusted` after
   three confirmations, with no rejection left standing, an average fanout of 5 or
   less, and its recent steps all faster than 200ms — at least three measured ones, so
