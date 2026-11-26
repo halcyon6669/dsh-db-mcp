@@ -3536,7 +3536,9 @@ export function createHost(options = {}) {
           name: trimmed(payload.name),
           tables: Array.isArray(payload.tables) ? payload.tables : [],
           datasource: trimmed(payload.datasource) || undefined,
-          note: trimmed(payload.note) || undefined,
+          // An empty string is forwarded as such: the store only replaces a
+          // note that was actually sent, so this is how a note is cleared.
+          note: typeof payload.note === "string" ? payload.note.trim() : undefined,
           scene_id: trimmed(payload.scene_id) || undefined,
         });
         return sendJson(response, result.status, result.body);

@@ -303,3 +303,39 @@ Below the tree there is nothing to switch: reads are never limited by schema, an
 neither are writes on a source that is not read-only. The only per-source choice is
 whether it may change the shape of the database — see
 *[DDL](safety.md#ddl)*.
+
+## Scenes
+
+A scene is a name for a set of tables — "order to cash" — so a walk can be scoped to
+the tables you mean without narrowing the relation graph itself. **Scenes** in the tab
+bar opens the list for the selected source: name and table count on the left, the
+scene on the right. The list scrolls on its own, so a hundred scenes do not stretch
+the page.
+
+The right-hand pane edits the set:
+
+- **Name and note** are edited in place and written when you press **Save**. A scene
+  is not saved until then, so a rename can be abandoned.
+- **Members** are added from the source's own catalogue with a search box, and each
+  one can be removed. A scene needs at least one table.
+- **Joins between members** are listed as `a.col → b.col` with their status; pressing
+  one opens the Relations page on that edge. Only `confirmed` and `trusted` joins with
+  both ends inside the scene are listed — a join that leaves the scene says nothing
+  about how its members relate.
+- **Members with no confirmed join** get their own group, each with **Add a connection**
+  that opens the Relations form with that table filled in. The group disappears when
+  every member is connected. The group also tells the two cases apart: a table with no
+  confirmed join at all, and one whose joins all lead *out* of the scene — the latter
+  offers **Add {table} to the scene**, which writes the membership list only, never an
+  edge. Opening **Add a connection** also offers up to five target columns from other
+  members, matched by name and a compatible type from the catalogue and labelled
+  `table.column` with the reason "same column name"; choosing one fills the relation
+  form, where saving still creates a *pending* edge. Where no column matches, the plain
+  form is still one click away. The join is written to the relation graph, never to the
+  scene: deleting a scene deletes the name and the table list and leaves every edge
+  where it was — the confirmation says so before it happens.
+
+The same set is what `trace_by_key` accepts as `scene`; a walk then stays inside those
+tables and reports every table it could not enter under `outside`. An agent can read a
+scene before it queries: `list_scenes` returns each scene's `edges` and `isolated`
+members, so the shape of the set is visible without guessing.

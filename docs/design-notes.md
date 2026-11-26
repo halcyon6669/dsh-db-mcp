@@ -138,6 +138,7 @@
 | FR-UI-7 | 页面只有「数据源管理」一个视图，无查询/编辑入口 | P0 |
 | FR-UI-8 | 面板记住上次的位置：当前标签、搜索词、筛选胶囊、折叠的分组、关系图与追踪页的输入、以及没填完的「新建数据源」草稿，都存在浏览器一个 `localStorage` 键（`dsh-db-mcp:panel`）里。重开面板回到原标签、输入还在；记住的标签若已不存在则退回列表；草稿里的口令永远不写入，带口令的连接串也不写入；`localStorage` 不可用时只是丢掉记忆，不影响页面 | P1 |
 | FR-UI-9 | 上次的结果也留下：追踪一次走出来的图、关系图那次读到的边，连同选中的那一步、折叠的行和缩放，都存在模块内存里，重开面板回到原样；结果**不**写入 `localStorage`——它是服务端可再算一遍的派生数据，且带着表里的行，不该待在同源脚本都能读的存储里；整页刷新后从空开始 | P1 |
+| FR-UI-10 | 面板「场景」页（在「关系图」与「追踪」之间）：左边是场景列表（名称 + 表数量，独立滚动），右边是选中场景的**成员表清单**——名称与备注就地编辑、按保存才写入；成员从当前数据源的目录里搜索添加、可移除；列出成员之间 `confirmed`/`trusted` 且两端都在集合内的边（`a.col → b.col` + 状态，点击跳到关系图定位那条边）；没有已确认边的成员单独成组并给「添加连接」，走关系图现成的表单（写进关系图，不写进场景），组为空则不显示；删除场景要二次确认，确认文案明说不会删任何连接。追踪页的摘要旁另有「存为场景」，把这次实际读到的表存成一个集合，同名时提示将覆盖 | P1 |
 
 ### 4.2 数据源管理（FR-DS）
 
@@ -239,7 +240,7 @@
 | FR-MCP-7g | `mine_relations` | 从审计日志挖掘 join：只读 `execute_sql`/`explain_query` 的语句，解析 `on` 等值对；父子方向由目录定（唯一/主键侧为父），判不出方向的进 `ambiguous` 不入图；导入为 `pending` + `audit_mined`，来源强弱 `fk > manual > audit_mined > inferred` 只升不降 | P1 |
 | FR-MCP-7h | `scan_code_relations` | 从 Spring Boot 源码树挖掘 join：只读 mapper XML 的 `select/insert/update/delete/sql`、`@Select/@Insert/@Update/@Delete`、MyBatis-Plus 的 `apply/last/inSql/exists/notExists/having` 片段，其余字符串字面量一律不读；跳过 `build`/`target`/`.git` 等目录；方向与 ambiguous 规则同上；每条边记 `file:line`；只读文件、不执行任何语句 | P1 |
 | FR-MCP-7i | 边的代价 | 每条边记目标列有无索引、表行数估计（PG/openGauss `pg_class.reltuples`、MySQL `information_schema.TABLES.TABLE_ROWS`、Oracle `ALL_TABLES.NUM_ROWS`，不跑 `count(*)`）与最近 N 次实测耗时；`propose_relation`/`feedback_relation` 从目录补索引与行数，每次追踪回写各步耗时；只把单列主键与索引首列算「有索引」。四个阈值（`slowMs`/`timingWindow`/`trustSamples`/`bigTableRows`）存在 `settings.json` 的 `cost` 里、在关系图页可改，Python 每次决策重读（改完下次追踪即生效）；`TRUST_FANOUT` 仍是常量 | P1 |
-| FR-MCP-7j | `list_scenes` / `save_scene` / `delete_scene` | 场景：某个数据源的一组**命名表集合**，存 `<runtime>/scenes/<source>.json`（与关系图分文件）。场景不拥有任何边——它只决定一次追踪可以读哪些表，所以删场景绝不会丢 join。`save_scene` 先按 `scene_id`、再按同名（忽略大小写）更新，都没有才新建；重复表折叠；上限 50 个场景 / 每个 500 张表。`trace_by_key` 传 `scene` 后只走集合内的表，越界的 join 不跟随、目标表进 `outside` 并附原因 | P1 |
+| FR-MCP-7j | `list_scenes` / `save_scene` / `delete_scene` | 场景：某个数据源的一组**命名表集合**，存 `<runtime>/scenes/<source>.json`（与关系图分文件）。场景不拥有任何边——它只决定一次追踪可以读哪些表，所以删场景绝不会丢 join。`save_scene` 先按 `scene_id`、再按同名（忽略大小写）更新，都没有才新建；重复表折叠；上限 50 个场景 / 每个 500 张表。`trace_by_key` 传 `scene` 后只走集合内的表，越界的 join 不跟随、目标表进 `outside` 并附原因。`list_scenes` 每次读关系图，给每个场景附上**两端都在集合内**的 `confirmed`/`trusted` 边（`edges`）和一条这样的边都没有的成员（`isolated`）——两者都是派生值，不写进场景文件，这样智能体在查询前就能看懂这个集合怎么连 | P1 |
 | FR-MCP-8 | `test_connection` | 用保存的源或内联连接串做一次真实登录探测 | P0 |
 | FR-MCP-9 | `session_scope` | **Host 侧原生工具**（非 MCP），限制本会话可见的数据源（0.9.0） | P1 |
 | FR-MCP-10 | instructions | 服务端说明：先看结构再查数、不要拼接用户输入、结果截断含义 | P1 |

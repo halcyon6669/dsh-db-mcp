@@ -44,7 +44,7 @@ are `GET`; every mutation is `POST` (the same-origin check compares `Origin` wit
 | `POST /relations/delete` | remove one edge (`{ edge_id, datasource? }`) |
 | `POST /relations/mine` | mine joins out of the audit log (`{ datasource?, schema?, limit? }`) |
 | `POST /relations/scan` | mine joins out of a project's source tree (`{ root, datasource?, schema?, limit? }`) |
-| `GET /scenes?datasource=…` | the scenes of one datasource: `{ scenes, total }` |
+| `GET /scenes?datasource=…` | the scenes of one datasource: `{ scenes, total }`; each scene also carries `edges` and `isolated` (see `list_scenes` above) |
 | `POST /scenes/save` | create or update a scene (`{ name, tables, datasource?, note?, scene_id? }`) |
 | `POST /scenes/delete` | remove one scene (`{ scene_id, datasource? }`) — the edges stay |
 | `POST /trace` | follow one value across tables (`{ value, datasource?, entry_table?, entry_column?, scene?, max_depth?, max_rows_per_table?, direction?, confirm_slow? }`) — a read-only walk, never a SQL entry point; `scene` narrows it to that scene's tables and reports the rest under `outside`; `confirm_slow` allows a step that would scan a whole table |
@@ -119,7 +119,7 @@ memory before `max_rows` trims it; writes keep the ordinary cursor.
 | `set_relation_condition` | `edge_id`, `condition?`, `datasource?` | `{ edge, changed }` — an empty `condition` clears it |
 | `delete_edge` | `edge_id`, `datasource?` | `{ deleted, counts }` |
 | `trace_by_key` | `value`, `datasource?`, `entry_table?`, `entry_column?`, `scene?`, `max_depth=3`, `max_rows_per_table=20`, `direction=both`, `confirm_slow=false` | `{ value, direction, elapsedMs, scene, entry, summary, nodes, steps, outside, pending, warnings, stoppedAt }` — walks only `confirmed` and `trusted` edges; `scene` narrows the walk to that scene's tables and reports the rest under `outside`; `nodes` is the same walk as a parent/child tree; `confirm_slow` allows a step that would scan a whole table; see below |
-| `list_scenes` | `datasource?` | `{ scenes: [{ id, name, tables, tableCount, note, createdAt, updatedAt }], total }` — a scene is a named set of tables, nothing more |
+| `list_scenes` | `datasource?` | `{ scenes: [{ id, name, tables, tableCount, note, createdAt, updatedAt, edges, isolated }], total }` — a scene is a named set of tables, nothing more; `edges` are the confirmed/trusted joins between its members (`{ id, from: { table, column }, to: { table, column }, status }`, read from the relation graph, never stored) and `isolated` lists the members no such join reaches |
 | `save_scene` | `name`, `tables`, `datasource?`, `note?`, `scene_id?` | `{ scene, created }` — updates the scene with that `scene_id`, else the one with that name, else creates one; a scene holds no joins, so deleting one never loses an edge |
 | `delete_scene` | `scene_id`, `datasource?` | `{ deleted }` — removes the table set only; the relation graph keeps every edge |
 | `sample_rows` | `table`, `datasource?`, `limit=20`, `schema?` | `{ columns, rows, rowCount, truncated }` |
@@ -363,6 +363,15 @@ cash" without narrowing the graph itself. `list_scenes`, `save_scene` and
 `delete_scene` manage them; `save_scene` updates by `scene_id` first, then by name
 (case-insensitively), and creates only when neither matches. Duplicate tables collapse,
 and the limits are 50 scenes per datasource and 500 tables per scene.
+
+A scene holds a membership list and nothing else — no edges, ever. The edges its
+members share are read out of the relation graph on every `list_scenes` call and
+returned as `edges` (only `confirmed` or `trusted` joins whose *both* ends are in the
+scene, each `{ id, from: { table, column }, to: { table, column }, status }`), with
+`isolated` naming the members no such join reaches. Both fields are derived, so they
+are never written to the scene file, and removing a scene leaves every edge in the
+graph untouched. That is why the panel's scene page sends "add a join" to the
+Relations page instead of offering a second place to type one.
 
 ### How an edge earns trust
 

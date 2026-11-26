@@ -75,6 +75,26 @@ report of each version in more detail.
   scales it from 40% to 250%, with the percentage itself resetting to 100%. Zooming
   changes only the rendered size — the viewBox is untouched, so no lane is re-laid
   out and no label is re-wrapped.
+- **A walk can be saved as a scene.** The Trace tab offers **Save as a scene** beside
+  the summary: it names the walk (default: the entry table) and stores the tables it
+  actually read, so the same scope can be picked next time instead of narrowed by
+  hand. A scene of that name is overwritten rather than duplicated, and the form says
+  so before the save.
+- **A Scenes tab, for the set itself.** Scenes in the tab bar edits a scene as what it
+  is — a membership list: name and note, member tables added from the source's own
+  catalogue with a search box, the confirmed joins between members as `a.col → b.col`
+  (pressing one opens that edge in the Relations tab), and a separate group for members
+  no confirmed join reaches, each with **Add a connection** that opens the Relations
+  form. Deleting a scene asks twice and says in the confirmation that no connection is
+  deleted, because a scene owns none.
+- **`list_scenes` tells you how a scene connects.** Each scene now carries `edges` (the
+  `confirmed`/`trusted` joins whose both ends are members, as `{ id, from, to, status }`)
+  and `isolated` (the members no such join reaches). Both are read from the relation
+  graph on every call and never written to the scene file, so an agent can see the
+  shape of a scene before it walks one. The tool result renders those fields as text —
+  tables, confirmed joins and stranded members — and the published `trace_by_key`
+  description tells the agent to check `list_scenes` first when a question describes a
+  business process, passing a matching scene's name as `scene`.
 
 ### Changed
 
@@ -118,6 +138,22 @@ report of each version in more detail.
   label; pressing it again clears the selection. Rows hidden by a filter are never
   pulled in, so narrowing the list narrowing the selection stays true; with nothing
   narrowed the button is simply every source there is.
+- **A stranded scene member says why, and offers the next step.** The isolated group no
+  longer treats two different situations alike: a table with no confirmed join at all
+  reads differently from one whose joins all lead to tables outside the scene, which
+  now offers a one-click **Add {table} to the scene** that saves the membership list
+  (never an edge). Opening **Add a connection** on a member also offers up to five
+  target columns from other members, matched by name and a compatible type from the
+  catalogue — each labelled `table.column` with the reason "same column name" — and
+  only writes a pending edge when a suggestion is clicked. Where no column matches, the
+  old add-join form is still one click away.
+- **The Scenes page was looked at in a browser, both themes.** A screenshot pass over
+  the picked scene, a new draft, the walk's save-as-scene form and a relation jump
+  caught three things a source-level test cannot: join paths were cut off at 420px and
+  now wrap, the table picker showed every table in a wide schema at once and now shows
+  twenty with a count of the rest, and the save-as-scene form had two *Cancel* buttons
+  — the opener now steps aside once the form is open. Jumping to a join also marks its
+  row as focused.
 
 ### Fixed
 
