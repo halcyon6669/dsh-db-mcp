@@ -236,7 +236,8 @@ if (panel) {
 // minimal one is installed for these checks and removed afterwards; the
 // storage layer must work with whatever the browser hands it.
 const { readPanel, writePanel, forgetPanel, draftForStorage, rawForStorage, createDraftFrom } = mod.__test
-if (typeof readPanel !== 'function' || typeof writePanel !== 'function') {
+const { keepResult, readResult } = mod.__test
+if (typeof readPanel !== 'function' || typeof writePanel !== 'function' || typeof keepResult !== 'function') {
   check('panel memory: exported for testing', false, 'storage helpers missing')
 } else {
   check('panel memory: no storage means an empty memory, not a crash', JSON.stringify(readPanel()) === '{}')
@@ -294,6 +295,33 @@ if (typeof readPanel !== 'function' || typeof writePanel !== 'function') {
   )
   forgetPanel('createDraft')
   check('panel memory: forgetting one slice keeps the rest', readPanel().tab === 'no-such-tab' && !('createDraft' in readPanel()))
+
+  /* A result is kept in the module's memory, never in the browser store: it is
+     derived data that carries somebody's rows. These checks pin both halves of
+     that rule — the last answer comes back, and no row is ever written down. */
+  keepResult('trace', { steps: [{ table: 't_order', rows: 1 }], summary: { steps: 1 } })
+  const kept = readResult('trace')
+  check(
+    'panel memory: the last answer survives the panel being reopened',
+    kept && kept.steps.length === 1 && kept.summary.steps === 1,
+  )
+  check(
+    'panel memory: an empty answer clears the last one instead of keeping it',
+    (keepResult('trace', null), readResult('trace') === null),
+  )
+  check(
+    'panel memory: results are never written to the browser store',
+    ![...bag.values()].some((value) => value.includes('t_order')) &&
+      !('trace' in readPanel()) &&
+      !('graph' in readPanel()),
+  )
+  check(
+    'panel memory: both result pages seed themselves from memory',
+    /const \[graph, setGraphState\] = React\.useState\(\(\) => readResult\('graph'\)\)/.test(source) &&
+      /const \[trace, setTraceState\] = React\.useState\(\(\) => readResult\('trace'\)\)/.test(source) &&
+      !/const \[trace, setTrace\] = React\.useState\(null\)/.test(source) &&
+      !/const \[graph, setGraph\] = React\.useState\(null\)/.test(source),
+  )
   delete globalThis.localStorage
 }
 
@@ -1319,7 +1347,7 @@ check(
   /trace\.showRowsN/.test(source) &&
     /traceRows\(node\)/.test(traceCard) &&
     /is-bound/.test(traceCard) &&
-    /const \[traceFolded, setTraceFolded\] = React\.useState\(\[\]\)/.test(source) &&
+    /const \[traceFolded, setTraceFoldedState\] = React\.useState\(\(\) => \{/.test(source) &&
     /const open = !traceFolded\.includes\(node\.index\)/.test(traceCard) &&
     !/traceExpanded/.test(source),
 )
@@ -1446,7 +1474,7 @@ check(
 }
 check(
   'trace page: the graph can be zoomed instead of shrunk to fit',
-  /const \[traceZoom, setTraceZoom\] = React\.useState\(1\)/.test(source) &&
+  /const \[traceZoom, setTraceZoomState\] = React\.useState\(\(\) => \{/.test(source) &&
     /const ZOOM_MIN = 0\.4/.test(traceCard) &&
     /const ZOOM_MAX = 2\.5/.test(traceCard) &&
     /className: 'dbmcp-trace-zoom'/.test(traceCard) &&
@@ -1457,8 +1485,8 @@ check(
   /viewBox: `0 0 \$\{width\} \$\{height\}`/.test(traceCard) &&
     /width: `\$\{Math\.round\(width \* traceZoom\)\}px`/.test(traceCard) &&
     /className: 'dbmcp-trace-scroll'/.test(traceCard) &&
-    /Math\.round\(\(value \+ ZOOM_STEP\) \* 100\) \/ 100/.test(traceCard) &&
-    /Math\.round\(\(value - ZOOM_STEP\) \* 100\) \/ 100/.test(traceCard),
+    /Math\.round\(\(traceZoom \+ ZOOM_STEP\) \* 100\) \/ 100/.test(traceCard) &&
+    /Math\.round\(\(traceZoom - ZOOM_STEP\) \* 100\) \/ 100/.test(traceCard),
 )
 check(
   'trace page: the join label sits in its own gutter, clear of every curve',

@@ -501,6 +501,15 @@ stored only when it carries no password. Storage access is wrapped, so private
 mode or a frame that refuses `localStorage` simply loses the memory instead of
 breaking the page. Saving the new source clears its remembered draft.
 
+The answers on the page are remembered too, but they never go into the browser
+store. A walk on the Trace page and the edge list on the Relations page are kept
+in the module's own memory, so closing the panel and opening it again returns to
+the same graph, the same picked step and the same zoom, with the rows still
+folded the way they were left. A result is derived data the server can produce
+again, and it carries table rows — somebody's amounts and names — which is why
+it is not written down: a full page reload starts from an empty page, and the
+walk is one click away.
+
 `logs/audit.jsonl` — one JSON object per tool call; rotates to `audit.1.jsonl` at
 512 KiB:
 

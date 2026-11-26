@@ -3808,6 +3808,30 @@ window.__ModuleLoader__.load({
       forgetPanel('createRaw')
     }
 
+    /* ---------------------------------------------------------------------
+     * Keeping the last answer.
+     *
+     * The inputs live in the browser store; the *results* do not. A result is
+     * derived data the server can produce again, and it carries table rows —
+     * somebody's amounts and names — which have no business sitting in a
+     * browser store that any script on the origin can read. They live in this
+     * module's memory instead: the panel is unmounted and re-created inside the
+     * same loaded bundle, so a walk that was just run is still on screen when
+     * the panel is reopened, without a copy of the rows being written down.
+     * A full page reload starts from an empty page again, which is also the
+     * honest answer: the connection may be gone by then.
+     * ------------------------------------------------------------------- */
+    const panelResults = { trace: null, graph: null }
+
+    /** Hold one page's last answer, in memory only. */
+    function keepResult(name, value) {
+      panelResults[name] = value || null
+    }
+
+    function readResult(name) {
+      return panelResults[name] || null
+    }
+
     /** Sidebar icon: a stacked-database glyph drawn with currentColor. */
     function SidebarIcon(props) {
       const size = props && typeof props.size === 'number' ? props.size : 20
@@ -5537,7 +5561,14 @@ function groupTables(tables) {
       const [clientBusy, setClientBusy] = React.useState('')
       /* Page A — the relation graph. One datasource at a time, every edge it
          knows, and the four verdicts that move an edge between states. */
-      const [graph, setGraph] = React.useState(null)
+      /* The last answer of each page survives the panel being unmounted, but
+         only in memory — see keepResult: rows are not written to the browser
+         store, only the inputs are. */
+      const [graph, setGraphState] = React.useState(() => readResult('graph'))
+      const setGraph = (value) => {
+        keepResult('graph', value)
+        setGraphState(value)
+      }
       const [graphBusy, setGraphBusy] = React.useState(false)
       const [graphError, setGraphError] = React.useState(null)
       const [graphSource, setGraphSource] = React.useState(() => String(savedPanel.graphSource || ''))
@@ -5554,7 +5585,11 @@ function groupTables(tables) {
       const [traceColumn, setTraceColumn] = React.useState(() => String(savedPanel.traceColumn || ''))
       const [traceDirection, setTraceDirection] = React.useState(() => String(savedPanel.traceDirection || 'both'))
       const [traceSource, setTraceSource] = React.useState(() => String(savedPanel.traceSource || ''))
-      const [trace, setTrace] = React.useState(null)
+      const [trace, setTraceState] = React.useState(() => readResult('trace'))
+      const setTrace = (value) => {
+        keepResult('trace', value)
+        setTraceState(value)
+      }
       const [traceBusy, setTraceBusy] = React.useState(false)
       const [traceError, setTraceError] = React.useState(null)
       const [traceOpen, setTraceOpen] = React.useState('')
@@ -5566,15 +5601,38 @@ function groupTables(tables) {
       const [traceManual, setTraceManual] = React.useState(() => savedPanel.traceManual === true)
       /* Nodes arrive open: the rows are how a step is checked, so a reader who
          picked a box should not have to click again to see what it read. The set
-         therefore holds the folded ones instead of the open ones. */
-      const [traceFolded, setTraceFolded] = React.useState([])
+         therefore holds the folded ones instead of the open ones. It is kept
+         with the walk it belongs to, so reopening the panel returns to the same
+         step rather than to the first one. */
+      const [traceFolded, setTraceFoldedState] = React.useState(() => {
+        const saved = readResult('traceFolded')
+        return Array.isArray(saved) ? saved : []
+      })
+      const setTraceFolded = (value) => {
+        keepResult('traceFolded', value)
+        setTraceFoldedState(value)
+      }
       /* Which node the overview strip is pointing at — set by clicking a box up
          there, cleared when the walk is re-run. */
-      const [traceFocus, setTraceFocus] = React.useState(0)
+      const [traceFocus, setTraceFocusState] = React.useState(() => {
+        const saved = readResult('traceFocus')
+        return typeof saved === 'number' ? saved : 0
+      })
+      const setTraceFocus = (value) => {
+        keepResult('traceFocus', value)
+        setTraceFocusState(value)
+      }
       /* How much the graph is magnified. A walk that fans out into five lanes does
          not fit any card, and shrinking the text to fit makes the labels unreadable,
          so the picture keeps its own size and the reader scales it. */
-      const [traceZoom, setTraceZoom] = React.useState(1)
+      const [traceZoom, setTraceZoomState] = React.useState(() => {
+        const saved = readResult('traceZoom')
+        return typeof saved === 'number' ? saved : 1
+      })
+      const setTraceZoom = (value) => {
+        keepResult('traceZoom', value)
+        setTraceZoomState(value)
+      }
 
       const load = React.useCallback(async () => {
         setBusy(true)
@@ -7773,8 +7831,10 @@ function groupTables(tables) {
       }
 
       const toggleTraceRows = (index) => {
-        setTraceFolded((current) =>
-          current.includes(index) ? current.filter((item) => item !== index) : current.concat(index),
+        /* The wrapper setter takes a value, not an updater — it also keeps the
+           last answer, so it must see the finished list rather than a function. */
+        setTraceFolded(
+          traceFolded.includes(index) ? traceFolded.filter((item) => item !== index) : traceFolded.concat(index),
         )
       }
 
@@ -8213,7 +8273,7 @@ function groupTables(tables) {
                 disabled: traceZoom <= ZOOM_MIN,
                 title: t('trace.zoomOut'),
                 'aria-label': t('trace.zoomOut'),
-                onClick: () => setTraceZoom((value) => Math.max(ZOOM_MIN, Math.round((value - ZOOM_STEP) * 100) / 100)),
+                onClick: () => setTraceZoom(Math.max(ZOOM_MIN, Math.round((traceZoom - ZOOM_STEP) * 100) / 100)),
               },
               '−',
             ),
@@ -8236,7 +8296,7 @@ function groupTables(tables) {
                 disabled: traceZoom >= ZOOM_MAX,
                 title: t('trace.zoomIn'),
                 'aria-label': t('trace.zoomIn'),
-                onClick: () => setTraceZoom((value) => Math.min(ZOOM_MAX, Math.round((value + ZOOM_STEP) * 100) / 100)),
+                onClick: () => setTraceZoom(Math.min(ZOOM_MAX, Math.round((traceZoom + ZOOM_STEP) * 100) / 100)),
               },
               '+',
             ),
@@ -8909,6 +8969,9 @@ function groupTables(tables) {
         draftForStorage,
         rawForStorage,
         createDraftFrom,
+        /* Results are memory-only, and the tests need to see that they are. */
+        keepResult,
+        readResult,
       },
       apply(ctx) {
         localeService = ctx.locale

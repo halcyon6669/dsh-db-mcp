@@ -27,9 +27,10 @@ already knows, saved passwords included, and skip typing anything.
 - **Do not prepare a Python environment.** No venv to create, no `pip install` to
   run by hand: the panel finds an interpreter, builds `.venv` and installs the driver
   packages from **Runtime → Install / repair dependencies**.
-- **Do not start over when you come back.** The panel reopens on the tab you left and
-  with the search box, the Trace inputs and a half-typed new source still filled —
-  positions and drafts live in the browser, never passwords.
+- **Do not start over when you come back.** The panel reopens on the tab you left, with
+  the search box, the Trace inputs and a half-typed new source still filled, and the last
+  walk or relation graph still on screen — positions and drafts live in the browser, never
+  passwords, and the rows of a result stay in memory instead of being written down.
 
 ## How it works, on one page
 

@@ -86,6 +86,13 @@ report of each version in more detail.
   same text. A remembered tab that no longer exists falls back to the list, a draft is
   stored with its password blanked, a pasted connection string is kept only when it
   carries no password, and storage that is unavailable simply drops the memory.
+- **The last answer comes back too.** Inputs were only half of it: closing the panel also
+  lost the walk on the Trace page and the edges on the Relations page. Both are now kept
+  in the module's memory, so reopening returns to the same graph, the same picked step,
+  the same folded rows and the same zoom. They are deliberately *not* written to
+  `localStorage` — a result is derived data the server can produce again and it carries
+  table rows, which do not belong in a store any script on the origin can read. A full
+  page reload starts empty, which is also when the connection may be gone.
 - **The Trace tab has one view, and it does not cross itself.** The flat list and the
   Graph / Flat switch are gone: a walk is read as the graph and nothing else. Because a
   table is now reported once, the graph is a tree — every box hangs off exactly one
