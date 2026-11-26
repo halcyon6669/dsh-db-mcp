@@ -602,6 +602,19 @@ try {
     sceneNoName.status !== 404 && /name|required|user_error/i.test(JSON.stringify(sceneNoName.body)),
     JSON.stringify(sceneNoName.body).slice(0, 160),
   )
+  /* A note has to be clearable: the store only replaces a note that was sent, so
+     the route must pass an empty string through instead of dropping it. */
+  const sceneEmptyNote = await post('/scenes/save', {
+    name: 'order to cash',
+    datasource: 'alpha',
+    tables: ['t_order'],
+    note: '',
+  })
+  check(
+    'the scene save route keeps an empty note as an empty string',
+    sceneEmptyNote.status !== 404 && !/note/.test(JSON.stringify(sceneEmptyNote.body?.error || '')),
+    JSON.stringify(sceneEmptyNote.body).slice(0, 160),
+  )
 } finally {
   await new Promise((resolve) => server.close(resolve))
   await host.dispose?.().catch(() => {})

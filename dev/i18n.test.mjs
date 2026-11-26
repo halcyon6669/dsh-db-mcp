@@ -60,6 +60,15 @@ const strayCjk = lines
   .filter((entry) => entry.number < zhStartLine || entry.number > zhEndLine)
 check('no hard-coded Chinese outside the zh dictionary', strayCjk.length === 0, strayCjk.map((entry) => `${entry.number}`).join(','))
 
+// The Scenes tab is a whole page of its own copy. The generic checks above would
+// accept an English sentence pasted into the zh dictionary, so the scene keys are
+// held to their own rule: present in both, and the Chinese one actually Chinese.
+const sceneKeys = [...en].filter((key) => key === 'tab.scenes' || key.startsWith('scene.'))
+const valueOf = (block, key) => (block.match(new RegExp(`'${key.replace(/\./g, '\\.')}':\\s*'([^']*)'`)) || [])[1]
+const sceneZh = sceneKeys.filter((key) => !/[\u4e00-\u9fff]/.test(valueOf(zhBlock, key) || ''))
+check('scenes: the tab and its copy are defined in both languages', sceneKeys.length >= 25 && sceneKeys.every((key) => zh.has(key)), `${sceneKeys.length} keys`)
+check('scenes: every scene string is translated, not copied', sceneZh.length === 0, sceneZh.join(', '))
+
 for (const locale of ['en', 'zh']) {
   const raw = readFileSync(join(root, 'locale', `${locale}.json`))
   check(`${locale}.json has no BOM`, raw[0] !== 0xef)

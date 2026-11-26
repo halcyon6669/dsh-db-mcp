@@ -5,7 +5,7 @@
  *
  *   node dev/mcp.test.mjs
  */
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { homedir } from 'node:os'
@@ -90,6 +90,17 @@ try {
     names.join(', '),
   )
   check('list_relations is gone', !names.includes('list_relations'), names.join(', '))
+
+  // A business question should start at the saved scenes. The guidance is
+  // attached to the published tool description in src/tools.js (the DSH agent
+  // catalog), not to the raw Python server's tools this client sees.
+  const toolsSource = readFileSync(join(packageDir, 'src', 'tools.js'), 'utf8')
+  check(
+    'trace_by_key says to look at scenes first',
+    /list_scenes/.test(toolsSource) &&
+      /pass its name as `scene`/.test(toolsSource) &&
+      /trace_by_key/.test(toolsSource.slice(toolsSource.indexOf('const scenes ='))),
+  )
 
   const sources = await client.callTool('list_datasources', {})
   check('list_datasources ok', sources.parsed?.ok === true, sources.text?.slice(0, 300))

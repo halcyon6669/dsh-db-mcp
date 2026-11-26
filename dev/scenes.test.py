@@ -250,6 +250,113 @@ class DeletingScenes(unittest.TestCase):
         self.assertEqual(getattr(caught.exception, "code", None), "user_error")
 
 
+class SceneLinks(unittest.TestCase):
+    """What a listing says about how a scene's own tables connect.
+
+    A scene is a table list, so on its own it cannot answer "how do these tables
+    join". The listing projects the relation graph onto the scene instead: the
+    confirmed joins among members, and the members no such join reaches. Neither is
+    stored with the scene, so this class also checks the projection is derived.
+    """
+
+    def setUp(self):
+        self.saved = os.environ.get("DB_MCP_RUNTIME")
+        self.tmp = tempfile.TemporaryDirectory()
+        os.environ["DB_MCP_RUNTIME"] = self.tmp.name
+        self.profile = source()
+
+    def tearDown(self):
+        if self.saved is None:
+            os.environ.pop("DB_MCP_RUNTIME", None)
+        else:
+            os.environ["DB_MCP_RUNTIME"] = self.saved
+        self.tmp.cleanup()
+
+    def _confirm(self, frm, frm_column, to, to_column):
+        """One confirmed join, the way the Relations page leaves it."""
+        import relations
+
+        proposed = relations.propose(self.profile, frm, frm_column, to, to_column)
+        relations.feedback(self.profile, proposed["edge"]["id"], "ok")
+        return proposed["edge"]["id"]
+
+    def test_a_confirmed_join_between_members_is_reported(self):
+        self._confirm("t_order", "id", "t_trans", "order_id")
+        scenes.save_scene(self.profile, "order to cash", ["t_order", "t_trans"])
+        scene = scenes.list_scenes(self.profile)["scenes"][0]
+        self.assertEqual(len(scene["edges"]), 1)
+        edge = scene["edges"][0]
+        self.assertEqual(edge["from"], {"table": "t_order", "column": "id"})
+        self.assertEqual(edge["to"], {"table": "t_trans", "column": "order_id"})
+        self.assertIn(edge["status"], ("confirmed", "trusted"))
+
+    def test_a_join_leaving_the_scene_is_not_reported(self):
+        self._confirm("t_order", "id", "t_trans", "order_id")
+        scenes.save_scene(self.profile, "orders only", ["t_order"])
+        scene = scenes.list_scenes(self.profile)["scenes"][0]
+        self.assertEqual(scene["edges"], [])
+
+    def test_a_pending_join_is_not_reported_and_leaves_both_ends_isolated(self):
+        import relations
+
+        relations.propose(self.profile, "t_order", "id", "t_trans", "order_id")
+        scenes.save_scene(self.profile, "order to cash", ["t_order", "t_trans"])
+        scene = scenes.list_scenes(self.profile)["scenes"][0]
+        self.assertEqual(scene["edges"], [])
+        self.assertEqual(sorted(scene["isolated"]), ["t_order", "t_trans"])
+
+    def test_isolated_names_only_the_unconnected_members(self):
+        self._confirm("t_order", "id", "t_trans", "order_id")
+        scenes.save_scene(
+            self.profile,
+            "order to cash",
+            ["t_order", "t_trans", "t_stock"],
+        )
+        scene = scenes.list_scenes(self.profile)["scenes"][0]
+        self.assertEqual(scene["isolated"], ["t_stock"])
+
+    def test_a_member_that_only_joins_outwards_is_still_isolated(self):
+        # The one confirmed join points at a table outside the scene, so it says
+        # nothing about how the members relate.
+        self._confirm("t_order", "id", "t_customer", "id")
+        scenes.save_scene(self.profile, "orders and stock", ["t_order", "t_stock"])
+        scene = scenes.list_scenes(self.profile)["scenes"][0]
+        self.assertEqual(scene["edges"], [])
+        self.assertEqual(scene["isolated"], ["t_order", "t_stock"])
+
+    def test_table_names_match_without_case(self):
+        self._confirm("T_ORDER", "ID", "T_TRANS", "ORDER_ID")
+        scenes.save_scene(self.profile, "order to cash", ["t_order", "t_trans"])
+        scene = scenes.list_scenes(self.profile)["scenes"][0]
+        self.assertEqual(len(scene["edges"]), 1)
+        self.assertEqual(scene["isolated"], [])
+
+    def test_the_links_are_not_written_into_the_scene_file(self):
+        self._confirm("t_order", "id", "t_trans", "order_id")
+        scenes.save_scene(self.profile, "order to cash", ["t_order", "t_trans"])
+        stored = json.loads(scenes.path_of(self.profile).read_text(encoding="utf-8"))
+        self.assertNotIn("edges", stored["scenes"][0])
+        self.assertNotIn("isolated", stored["scenes"][0])
+
+    def test_deleting_the_scene_leaves_the_join_in_the_graph(self):
+        import relations
+
+        self._confirm("t_order", "id", "t_trans", "order_id")
+        saved = scenes.save_scene(self.profile, "order to cash", ["t_order", "t_trans"])
+        scenes.delete_scene(self.profile, saved["scene"]["id"])
+        self.assertEqual(len(relations.load(self.profile)["edges"]), 1)
+
+    def test_the_links_are_derived_not_stored(self):
+        # Reading the listing twice from different graph states proves the fields
+        # come from the graph rather than from anything written next to the scene.
+        scenes.save_scene(self.profile, "order to cash", ["t_order", "t_trans"])
+        before = scenes.list_scenes(self.profile)["scenes"][0]
+        self._confirm("t_order", "id", "t_trans", "order_id")
+        after = scenes.list_scenes(self.profile)["scenes"][0]
+        self.assertEqual(before["edges"], [])
+        self.assertEqual(len(after["edges"]), 1)
+
+
 class Limits(unittest.TestCase):
     def setUp(self):
         self.saved = os.environ.get("DB_MCP_RUNTIME")

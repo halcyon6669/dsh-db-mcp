@@ -180,10 +180,10 @@ if (panel) {
   const header = collect(panel, (node) => node.type === 'h1')
   check('main panel: title rendered', header.length === 1)
   const tabs = collect(panel, (node) => node.type === 'button' && node.props.role === 'tab')
-  check('main panel: nine tabs', tabs.length === 9, String(tabs.length))
+  check('main panel: ten tabs', tabs.length === 10, String(tabs.length))
   check(
     'main panel: first tab is active',
-    tabs.length === 9 && tabs[0].props['aria-selected'] === true && tabs[1].props['aria-selected'] === false,
+    tabs.length === 10 && tabs[0].props['aria-selected'] === true && tabs[1].props['aria-selected'] === false,
   )
   check(
     'main panel: the tools tab is its own step',
@@ -202,7 +202,7 @@ if (panel) {
   )
   check(
     'main panel: the tabs line up left to right',
-    tabs.length === 9 && tabs.map((node) => texts(node).join('')).join(',') === order.map((id) => `tab.${id}`).join(','),
+    tabs.length === 10 && tabs.map((node) => texts(node).join('')).join(',') === order.map((id) => `tab.${id}`).join(','),
     tabs.map((node) => texts(node).join('')).join(','),
   )
   const back = collect(panel, (node) => node.type === 'button' && node.props.className === 'dbmcp-back')
@@ -342,6 +342,118 @@ check(
     /allVisible \? t\('sources\.selectNone'\) : fmt\(t\('sources\.selectAll'\), \{ n: visibleIds\.length \}\)/.test(source),
 )
 
+check(
+  'trace page: saving a walk as a scene sends the note the form asked for',
+  /const saveTraceAsScene = async \(name, tables, note\) => \{/.test(source) &&
+    /note: String\(note \|\| ''\)\.trim\(\),/.test(source) &&
+    /saveTraceAsScene\(traceSceneDraft\.name, traceSceneTables, traceSceneDraft\.note\)/.test(source),
+)
+check(
+  'trace page: a walk that names an existing scene says it will overwrite it',
+  /const draftOverwrite =/.test(source) &&
+    /t\('scene\.overwrites'\)/.test(source) &&
+    /draftOverwrite \? t\('scene\.overwrite'\) : t\('scene\.save'\)/.test(source),
+)
+
+/* The Scenes tab edits a membership list and nothing else. These rules are the
+   ones a future reader would break by accident — writing an edge into the scene
+   file, deleting the scene together with its joins, or hiding the panel's only
+   way to connect two members — so they are pinned in the source. */
+const sceneCard = source.slice(source.indexOf('const renderScenes = () =>'), source.indexOf('const renderTrace = () =>'))
+const sceneLogic = source.slice(source.indexOf('const loadSceneRows ='), source.indexOf('const renderScenes = () =>'))
+check('scenes page: it is its own tab between relations and the walk', /tab !== 'scenes' \? null : renderScenes\(\)/.test(source))
+check(
+  'scenes page: the tab sits between relations and the walk',
+  (() => {
+    const order = mod.__test.TABS.map((tab) => tab.id)
+    return order.indexOf('scenes') + 1 === order.indexOf('trace') && order.indexOf('scenes') - 1 === order.indexOf('graph')
+  })(),
+  mod.__test.TABS.map((tab) => tab.id).join(','),
+)
+check(
+  'scenes page: adding a join goes to the relation graph, never into the scene',
+  /const openInGraph = \(edgeId, preset\) => \{/.test(source) &&
+    /setView\(\{ mode: 'graph' \}\)/.test(source) &&
+    /setGraphForm\(preset \|\| null\)/.test(source) &&
+    /apiPost\('\/scenes\/save', \{[^}]*tables/s.test(sceneLogic) &&
+    !/apiPost\('\/relations\/propose'/.test(sceneLogic),
+)
+check(
+  'scenes page: deleting says the joins stay',
+  /t\('scene\.deleteNote'\)/.test(sceneCard) && /'scene\.deleteNote'/.test(source),
+)
+check(
+  'scenes page: the isolated group is absent when no member is stranded',
+  /const isolatedBlock = isolated\.length === 0\s*\n?\s*\? null/.test(sceneCard),
+)
+check(
+  'scenes page: a rename keeps the id so it cannot fork a second scene',
+  /scene_id: draft\.id \|\| undefined/.test(sceneLogic) && /name,/.test(sceneLogic),
+)
+check(
+  'scenes page: the rail scrolls instead of stretching the page',
+  /\.dbmcp-scene-list \{[\s\S]{0,220}max-height: 420px;[\s\S]{0,80}overflow: auto;/.test(source),
+)
+check(
+  'scenes page: a new draft is not cleared by the row it is not following',
+  /const \[sceneNew, setSceneNew\] = React\.useState\(false\)/.test(source) &&
+    /if \(sceneNew\) return/.test(sceneLogic) &&
+    /setSceneNew\(true\)/.test(source),
+)
+check(
+  'scenes page: a cleared note is sent as an empty string, so it can be removed',
+  /note: String\(draft\.note \|\| ''\)\.trim\(\),/.test(sceneLogic) &&
+    !/note: String\(draft\.note \|\| ''\)\.trim\(\) \|\| undefined/.test(sceneLogic),
+)
+check(
+  'scenes page: a join opens the row it names on the relation graph',
+  /id: `dbmcp-edge-\$\{edge\.id\}`/.test(source) &&
+    /document\.getElementById\(`dbmcp-edge-\$\{edgeId\}`\)/.test(source) &&
+    /scrollIntoView\(\{ block: 'center', behavior: 'smooth' \}\)/.test(source) &&
+    /setGraphOpen\(edgeId \|\| ''\)/.test(source),
+)
+check(
+  'scenes page: every scene button names itself for a screen reader',
+  /'aria-label': `\$\{scene\.name\} — \$\{fmt\(t\('trace\.sceneTables'\), \{ n: scene\.tableCount \}\)\}`/.test(sceneCard) &&
+    /'aria-label': `\$\{t\('scene\.removeTable'\)\}: \$\{table\}`/.test(sceneCard) &&
+    /'aria-label': `\$\{t\('scene\.addLink'\)\}: \$\{table\}`/.test(sceneCard),
+)
+check(
+  'scenes page: a stranded member says whether its joins leave the scene',
+  /t\('scene\.noJoinAtAll'\)/.test(sceneCard) &&
+    /t\('scene\.joinsOutside'\)/.test(sceneCard) &&
+    /fmt\(t\('scene\.adopt'\), \{ n: name \}\)/.test(sceneCard) &&
+    /outsideOf = \(table\) =>/.test(sceneCard),
+)
+check(
+  'scenes page: adopting a table saves the membership list, never an edge',
+  /const adoptIntoScene = async \(table\) =>/.test(sceneLogic) &&
+    /apiPost\('\/scenes\/save', \{/.test(sceneLogic) &&
+    !/adoptIntoScene[\s\S]{0,400}relations\/propose/.test(sceneLogic),
+)
+check(
+  'scenes page: a wide catalogue is capped and the rest are counted',
+  /const CATALOG_LIMIT = 20/.test(sceneCard) &&
+    /catalogue\.slice\(0, CATALOG_LIMIT\)/.test(sceneCard) &&
+    /fmt\(t\('scene\.moreTables'\), \{ n: hiddenCount \}\)/.test(sceneCard),
+)
+check(
+  'scenes page: the join path wraps at narrow width instead of ellipsis',
+  /\.dbmcp-scene-link \.dbmcp-edge-path \{[\s\S]{0,220}overflow-wrap: anywhere;/.test(source) &&
+    !/\.dbmcp-scene-link \.dbmcp-edge-path \{[\s\S]{0,220}text-overflow: ellipsis/.test(source),
+)
+check(
+  'scenes page: a jumped-to join is visibly focused',
+  /\$\{open \? ' is-focus' : ''\}/.test(source) &&
+    /\.dbmcp-edge\.is-focus \{[\s\S]{0,160}outline: 2px solid var\(--dsw-alias-brand-primary\)/.test(source),
+)
+check(
+  'trace page: the save-as button steps aside once its form is open',
+  /traceSceneDraft\s*\n\s*\? null\s*\n\s*: h\(/.test(source) &&
+    /'aria-label': t\('scene\.saveAs'\)/.test(source),
+)
+
+
 const schemaView = render('schema view', () =>
   SchemaView({ t, source: { id: 'chinook', name: 'Chinook', kind: 'sqlite' }, onBack: noop }),
 )
@@ -413,6 +525,32 @@ check('schema grouping sorts groups', grouped.map(([schema]) => schema).join(','
 check('schema filter matches table names', tableMatches({ name: 'Orders' }, 'ord') === true)
 check('schema filter matches schema names', tableMatches({ name: 'x', schema: 'Sales' }, 'sales') === true)
 check('schema filter drops non-matches', tableMatches({ name: 'x', schema: 'y' }, 'zzz') === false)
+
+// The scene page offers join candidates from column names and types only — it
+// never reads rows. These four cases are the whole contract a reader relies on.
+const { foldName, columnFamily, typesJoin, linkCandidates } = mod.__test
+const col = (name, type) => ({ name, type })
+check('scene join: a column family is read from the type', columnFamily('character varying(16)') === 'text' && columnFamily('numeric(12,2)') === 'number' && columnFamily('') === 'any')
+check(
+  'scene join: a name matches across case and spelling',
+  linkCandidates([col('Order_No', 'varchar(16)')], [{ table: 'payment', columns: [col('order_no', 'character varying(16)')] }]).length === 1,
+)
+check(
+  'scene join: a type mismatch is never suggested',
+  linkCandidates([col('order_no', 'varchar(16)')], [{ table: 'payment', columns: [col('order_no', 'integer')] }]).length === 0,
+)
+check(
+  'scene join: no shared name means no candidate',
+  linkCandidates([col('id', 'integer')], [{ table: 'payment', columns: [col('order_no', 'varchar(16)')] }]).length === 0,
+)
+check(
+  'scene join: more than five candidates are cut to five',
+  linkCandidates(
+    Array.from({ length: 8 }, (_, index) => col(`k${index}`, 'varchar(16)')),
+    [{ table: 'other', columns: Array.from({ length: 8 }, (_, index) => col(`K${index}`, 'text')) }],
+  ).length === 5,
+)
+check('scene join: the folded name is case-insensitive', foldName(' Order_NO ') === 'order_no')
 
 // A row carries several status words and exactly one control. The control is a
 // track switch, because a bordered pill with "read-only" on it read as one more
@@ -918,6 +1056,33 @@ check('renderer: an unfollowed pending edge is reported, not walked', walked.inc
 check('renderer: warnings and stop reasons are listed', walked.includes('warning [depth_limit]') && walked.includes('stopped at t_trans'), walked)
 check('renderer: the traced value is never printed', !walked.includes('A001'), walked)
 
+// A scene result is read before a question is asked: the agent sees the tables,
+// the joins among them and the members with no join at all.
+const sceneListing = renderResult({
+  ok: true,
+  datasource: 'shop',
+  scenes: [
+    {
+      id: 's_a9aa88',
+      name: 'order to cash',
+      note: 'the demo path',
+      tableCount: 3,
+      tables: ['sales_order', 'order_item', 'payment'],
+      edges: [{ id: 'e_1', from: { table: 'payment', column: 'order_no' }, to: { table: 'sales_order', column: 'order_no' }, status: 'confirmed' }],
+      isolated: ['order_item'],
+    },
+  ],
+  total: 1,
+})
+check('renderer: a scene list is named and counted', sceneListing.includes('1 scene(s)') && sceneListing.includes('order to cash'), sceneListing)
+check('renderer: a scene shows its confirmed joins', sceneListing.includes('payment.order_no -> sales_order.order_no') && sceneListing.includes('[confirmed]'), sceneListing)
+check('renderer: a scene names its stranded members', sceneListing.includes('no join reaches: order_item'), sceneListing)
+check('renderer: a scene result teaches the agent how to use it', sceneListing.includes('pass the scene name as `scene` to trace_by_key'), sceneListing)
+check(
+  'renderer: an empty scene list says what to do instead',
+  renderResult({ ok: true, datasource: 'shop', scenes: [], total: 0 }).includes('trace the whole graph'),
+)
+
 // The audit card may hold entries from earlier days, so a bare clock is not enough.
 const clock = localClock('2026-11-09T11:29:38.782Z')
 check('audit clock carries the date', /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(clock), clock)
@@ -1241,8 +1406,8 @@ const traceCard = source.slice(source.indexOf('const traceStepDirection ='), sou
 const traceLogic = source.slice(source.indexOf('const traceTarget ='), source.indexOf('const [textPolicyDraft'))
 check('trace page: it is its own tab', /tab !== 'trace' \? null : renderTrace\(\)/.test(source))
 check(
-  'trace page: the tab sits between relations and connect',
-  mod.__test.TABS.map((tab) => tab.id).indexOf('trace') === 4,
+  'trace page: the tab sits after relations and scenes',
+  mod.__test.TABS.map((tab) => tab.id).indexOf('trace') === 5,
   mod.__test.TABS.map((tab) => tab.id).join(','),
 )
 check(
