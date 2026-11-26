@@ -185,7 +185,9 @@ depth, left to right, one box per table the walk reached, and every join drawn a
 line labelled with the pair of columns it compares — so the shape of the walk is the
 whole view instead of a picture next to a list. Clicking a box reads that step
 underneath it: the values it was bound to, its rows with the bound column
-highlighted, and the ✓/✗ judgement for the join that carried it there. Each lane is
+highlighted, and the ✓/✗ judgement for the join that carried it there. The rows
+arrive open — a few cells per row, enough to check the step — and **Fold** puts
+them away again. Each lane is
 laid out by where its parents sat in the lane to the left, so no two joins cross. A
 table the walk already read is not drawn again — its rows came from upstream, and a
 second box would only repeat them. A value that lives in several places offers those

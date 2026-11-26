@@ -474,9 +474,11 @@ The panel has two pages that talk to the graph, and neither of them accepts SQL:
   and the confirmation record of an edge that is already confirmed or trusted.
   Two buttons fill the graph: **Import foreign keys** reads the catalog, and
   **Mine the log** reads the statements already audited.
-- **Trace** takes a value and an optional entry table/column, walks it, and shows
-  the steps with the row counts, the sample rows, the edge status, and the points
-  where the chain broke or was truncated. Every step carries the four judgements
+- **Trace** takes a value and an optional entry table/column, walks it, and draws the
+  walk as a graph — one column per depth, one box per table, one line per join — with
+  the picked step read underneath it: the values it was bound to, its rows (open
+  already, folded on demand), the edge status, and the points where the chain broke or
+  was truncated. Every step carries the four judgements
   (`ok` / `too_many` with a reason / `missing` / `irrelevant`), and judging a step
   feeds the edge that carried it — so the page is also the place where a walk
   teaches the graph. Edges that were not followed because they are still pending

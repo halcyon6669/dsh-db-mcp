@@ -1250,8 +1250,13 @@ check(
     !/dbmcp-trace-cell/.test(source),
 )
 check(
-  'trace page: rows expand under the picked step',
-  /trace\.showRowsN/.test(source) && /traceRows\(node\)/.test(traceCard) && /is-bound/.test(traceCard),
+  'trace page: rows are open under the picked step, and fold on demand',
+  /trace\.showRowsN/.test(source) &&
+    /traceRows\(node\)/.test(traceCard) &&
+    /is-bound/.test(traceCard) &&
+    /const \[traceFolded, setTraceFolded\] = React\.useState\(\[\]\)/.test(source) &&
+    /const open = !traceFolded\.includes\(node\.index\)/.test(traceCard) &&
+    !/traceExpanded/.test(source),
 )
 check(
   'trace page: a join carries its own confidence chip',

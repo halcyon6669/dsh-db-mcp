@@ -826,10 +826,11 @@ def trace_by_key(
     Every step reports the table, the bound condition, the SQL that ran, how many
     rows came back, how long it took and a few sample cells; `status: "empty"` is a
     chain that broke there. `nodes` is the same walk as a tree (each node carries
-    `parent` and `children`), with `repeated: true` on a table already expanded
-    elsewhere so its subtree is not walked twice. Pending edges are listed under
-    `pending` — confirming one lets the trace follow it — and anything truncated or
-    skipped is in `warnings` or `stoppedAt` rather than quietly missing.
+    `parent` and `children`). A table the walk already read is not reported a second
+    time — its rows came from upstream — so a table appears at most once in `steps`
+    and in `nodes`. Pending edges are listed under `pending` — confirming one lets
+    the trace follow it — and anything truncated or skipped is in `warnings` or
+    `stoppedAt` rather than quietly missing.
     """
     try:
         profile, (connection, close) = _open(datasource)

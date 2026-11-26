@@ -29,7 +29,7 @@ MAX_STEPS = 200
 PROBE_COLUMNS = 8
 PROBE_ROWS = 5
 PROBE_SECONDS = 3.0
-SAMPLE_ROWS = 3
+SAMPLE_ROWS = 10
 SAMPLE_COLUMNS = 6
 
 # Only these two are walked. A pending edge is a suggestion nobody confirmed, and

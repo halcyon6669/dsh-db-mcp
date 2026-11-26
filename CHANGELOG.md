@@ -87,6 +87,11 @@ report of each version in more detail.
 - **`trace_by_key` no longer reports `repeated`.** The `repeated` flag on a step and
   `summary.repeated` are gone, and a step or node for a table the walk already read is
   no longer emitted at all.
+- **A step's rows arrive open, and there are more of them.** The picked step used to
+  open folded, so checking what it read meant one more click; the rows are now shown
+  already, with **Fold** to put them away. The sample keeps up to 10 rows instead of 3
+  (still the first few columns, primary key and bound column first) — enough to see
+  whether a fanout looks right without re-running anything.
 - **An index is no longer a condition for trust.** An edge becomes `trusted` after
   three confirmations, with no rejection left standing, an average fanout of 5 or
   less, and its recent steps all faster than 200ms — at least three measured ones, so

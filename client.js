@@ -5414,9 +5414,10 @@ function groupTables(tables) {
          from "wherever the value lives", and two empty boxes over the form read
          as required fields. */
       const [traceManual, setTraceManual] = React.useState(false)
-      /* Nodes arrive collapsed: the shape is what you scan first, and the rows are
-         what you open when a node is the one you doubt. */
-      const [traceExpanded, setTraceExpanded] = React.useState([])
+      /* Nodes arrive open: the rows are how a step is checked, so a reader who
+         picked a box should not have to click again to see what it read. The set
+         therefore holds the folded ones instead of the open ones. */
+      const [traceFolded, setTraceFolded] = React.useState([])
       /* Which node the overview strip is pointing at — set by clicking a box up
          there, cleared when the walk is re-run. */
       const [traceFocus, setTraceFocus] = React.useState(0)
@@ -5960,7 +5961,7 @@ function groupTables(tables) {
         setTraceBusy(true)
         setTraceError(null)
         setTraceOpen('')
-        setTraceExpanded([])
+        setTraceFolded([])
         setTraceFocus(0)
         setTraceZoom(1)
         try {
@@ -7612,8 +7613,8 @@ function groupTables(tables) {
         )
       }
 
-      const toggleExpanded = (index) => {
-        setTraceExpanded((current) =>
+      const toggleTraceRows = (index) => {
+        setTraceFolded((current) =>
           current.includes(index) ? current.filter((item) => item !== index) : current.concat(index),
         )
       }
@@ -7626,7 +7627,7 @@ function groupTables(tables) {
         const status = node.status || 'hit'
         const edge = node.edge || null
         const slow = status === 'needs_confirm'
-        const open = traceExpanded.includes(node.index)
+        const open = !traceFolded.includes(node.index)
         const rows = node.rows || 0
         const direction = node.index === 1 || !edge ? null : traceStepDirection(edge, node.table)
         return h(
@@ -7746,7 +7747,7 @@ function groupTables(tables) {
                 { className: 'dbmcp-inline dbmcp-trace-more' },
                 h(
                   'button',
-                  { type: 'button', className: 'dbmcp-btn is-small is-plain', onClick: () => toggleExpanded(node.index) },
+                  { type: 'button', className: 'dbmcp-btn is-small is-plain', onClick: () => toggleTraceRows(node.index) },
                   open ? t('trace.hideRows') : fmt(t('trace.showRowsN'), { n: rows }),
                 ),
                 traceOpen === `${node.index}`
