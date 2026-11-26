@@ -484,6 +484,23 @@ The panel has two pages that talk to the graph, and neither of them accepts SQL:
   teaches the graph. Edges that were not followed because they are still pending
   are listed separately, with a pointer back to the Relations page.
 
+### The panel remembers where it was
+
+The panel is mounted fresh every time it is opened, so it keeps its position in
+the browser rather than in React state: one `localStorage` key,
+`dsh-db-mcp:panel`, holds a single JSON object with the active tab, the search
+text, the filter chip, the folded groups, the Relations and Trace inputs, and a
+half-typed *new data source* form. Reopening the page therefore lands on the tab
+it was left on with the boxes still filled, and a draft that was never saved
+comes back as it was typed.
+
+Two rules keep that memory safe. A value is only a suggestion — a tab that no
+longer exists falls back to the list — and nothing secret is ever written: a
+draft is stored with its `password` blanked, and a pasted connection string is
+stored only when it carries no password. Storage access is wrapped, so private
+mode or a frame that refuses `localStorage` simply loses the memory instead of
+breaking the page. Saving the new source clears its remembered draft.
+
 `logs/audit.jsonl` — one JSON object per tool call; rotates to `audit.1.jsonl` at
 512 KiB:
 

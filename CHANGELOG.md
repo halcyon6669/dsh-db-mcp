@@ -78,6 +78,14 @@ report of each version in more detail.
 
 ### Changed
 
+- **The panel reopens where you left it.** A position used to last only as long as the
+  page stayed mounted: open the panel again and it was back on the first tab with every
+  box empty. The tab, the search text, the filter chip, the folded groups, the
+  Relations and Trace inputs and a half-typed *new source* form now live in one
+  `localStorage` key (`dsh-db-mcp:panel`), so reopening lands on the same tab with the
+  same text. A remembered tab that no longer exists falls back to the list, a draft is
+  stored with its password blanked, a pasted connection string is kept only when it
+  carries no password, and storage that is unavailable simply drops the memory.
 - **The Trace tab has one view, and it does not cross itself.** The flat list and the
   Graph / Flat switch are gone: a walk is read as the graph and nothing else. Because a
   table is now reported once, the graph is a tree — every box hangs off exactly one

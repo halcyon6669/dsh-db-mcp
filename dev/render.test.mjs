@@ -232,6 +232,71 @@ if (panel) {
   check('main panel: no second navigation row', toolbar.length === 0, `got ${toolbar.length}`)
 }
 
+// The panel comes back where it was left. Node has no localStorage, so a
+// minimal one is installed for these checks and removed afterwards; the
+// storage layer must work with whatever the browser hands it.
+const { readPanel, writePanel, forgetPanel, draftForStorage, rawForStorage, createDraftFrom } = mod.__test
+if (typeof readPanel !== 'function' || typeof writePanel !== 'function') {
+  check('panel memory: exported for testing', false, 'storage helpers missing')
+} else {
+  check('panel memory: no storage means an empty memory, not a crash', JSON.stringify(readPanel()) === '{}')
+  check(
+    'panel memory: a draft is stored without its password',
+    (draftForStorage({ ...emptyDraft(), password: 'hunter2' }) || {}).password === '',
+  )
+  check(
+    'panel memory: a pasted string that carries a password is not stored',
+    rawForStorage('postgres://alice:hunter2@db:5432/app') === '',
+  )
+  const plainUrl = 'postgres://db:5432/app'
+  check('panel memory: a pasted string without a password is kept', rawForStorage(plainUrl) === plainUrl)
+
+  const bag = new Map()
+  globalThis.localStorage = {
+    getItem: (key) => (bag.has(key) ? bag.get(key) : null),
+    setItem: (key, value) => bag.set(key, String(value)),
+    removeItem: (key) => bag.delete(key),
+  }
+  writePanel({ tab: 'list', query: 'SO-1001' })
+  check(
+    'panel memory: values are written under one key',
+    bag.size === 1 && JSON.parse([...bag.values()][0]).query === 'SO-1001',
+  )
+  /* The list page only renders its strip once the sources have loaded, so the
+     seeded search text is checked in the source rather than in a tree. */
+  check(
+    'panel memory: the list page seeds its search and filter from memory',
+    /const \[query, setQuery\] = React\.useState\(\(\) => String\(savedPanel\.query \|\| ''\)\)/.test(source) &&
+      /const \[filter, setFilter\] = React\.useState\(\(\) => String\(savedPanel\.filter \|\| 'all'\)\)/.test(source) &&
+      /Array\.isArray\(savedPanel\.collapsed\)/.test(source),
+  )
+  writePanel({ tab: 'trace' })
+  const reopened = render('main panel', () => MainPanel({ t: (key) => key, useResource: undefined, useWorkspaces: undefined }))
+  if (reopened) {
+    const reopenedTabs = collect(reopened, (node) => node.type === 'button' && node.props.role === 'tab')
+    const traceTab = reopenedTabs.find((node) => texts(node).join('') === 'tab.trace')
+    check(
+      'panel memory: the tab it was left on is the one that opens',
+      Boolean(traceTab) && traceTab.props['aria-selected'] === true,
+      JSON.stringify(reopenedTabs.map((node) => [texts(node).join(''), node.props['aria-selected']])),
+    )
+  }
+  writePanel({ tab: 'no-such-tab' })
+  const fallback = render('main panel', () => MainPanel({ t: (key) => key, useResource: undefined, useWorkspaces: undefined }))
+  if (fallback) {
+    const fallbackTabs = collect(fallback, (node) => node.type === 'button' && node.props.role === 'tab')
+    check('panel memory: a tab that no longer exists falls back to the list', fallbackTabs[0].props['aria-selected'] === true)
+  }
+  writePanel({ createDraft: { ...emptyDraft(), name: 'typed-but-unsaved' } })
+  check(
+    'panel memory: the half-typed new source is laid over a fresh draft',
+    createDraftFrom(emptyDraft()).name === 'typed-but-unsaved',
+  )
+  forgetPanel('createDraft')
+  check('panel memory: forgetting one slice keeps the rest', readPanel().tab === 'no-such-tab' && !('createDraft' in readPanel()))
+  delete globalThis.localStorage
+}
+
 const schemaView = render('schema view', () =>
   SchemaView({ t, source: { id: 'chinook', name: 'Chinook', kind: 'sqlite' }, onBack: noop }),
 )

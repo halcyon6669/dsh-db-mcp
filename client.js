@@ -3700,6 +3700,114 @@ window.__ModuleLoader__.load({
       return data
     }
 
+    /* ---------------------------------------------------------------------
+     * Remembering where the panel was.
+     *
+     * The panel is a slot: the chat takes it away and gives it back, and a
+     * page that opens on the first tab every time makes the reader re-type a
+     * value and re-pick a datasource for nothing. So the position, the typed
+     * inputs and the create form's draft live in localStorage, keyed by one
+     * object. Three rules keep that honest:
+     *
+     *   1. The store is optional. A private-mode or sandboxed page can throw on
+     *      access — a panel that cannot remember is still a panel.
+     *   2. Nothing secret is written. The draft is stored without its password,
+     *      and a pasted connection string is only stored when it carries no
+     *      password either; the OS secret store stays the one place for those.
+     *   3. A stored value is a suggestion, not a fact. It is checked against
+     *      what actually exists before it is used (a tab that no longer exists,
+     *      a datasource that was deleted).
+     * ------------------------------------------------------------------- */
+
+    /** One key, so the panel's own state is one line in the browser console. */
+    const PANEL_KEY = 'dsh-db-mcp:panel'
+
+    /** localStorage when the page has one that works, else null. */
+    function panelStore() {
+      try {
+        if (typeof localStorage === 'undefined' || !localStorage) return null
+        return localStorage
+      } catch (error) {
+        return null
+      }
+    }
+
+    function readPanel() {
+      const store = panelStore()
+      if (!store) return {}
+      try {
+        const raw = store.getItem(PANEL_KEY)
+        const parsed = raw ? JSON.parse(raw) : null
+        return parsed && typeof parsed === 'object' ? parsed : {}
+      } catch (error) {
+        return {}
+      }
+    }
+
+    /** Merge one slice into the remembered state. Never throws. */
+    function writePanel(patch) {
+      const store = panelStore()
+      if (!store) return
+      try {
+        store.setItem(PANEL_KEY, JSON.stringify({ ...readPanel(), ...patch }))
+      } catch (error) {
+        /* a full or blocked store must not break the page */
+      }
+    }
+
+    /** Drop one slice — used when a draft has been saved, cancelled or deleted. */
+    function forgetPanel(key) {
+      const store = panelStore()
+      if (!store) return
+      try {
+        const next = readPanel()
+        delete next[key]
+        store.setItem(PANEL_KEY, JSON.stringify(next))
+      } catch (error) {
+        /* same as writePanel */
+      }
+    }
+
+    /** A draft is remembered without its password: only the server holds that. */
+    function draftForStorage(draft) {
+      if (!draft || typeof draft !== 'object') return null
+      return { ...draft, password: '' }
+    }
+
+    /**
+     * The pasted connection string, kept only while it carries no password.
+     * `user:secret@host` is the one shape that must not reach browser storage;
+     * the draft's own fields already hold host, user and database, so only the
+     * secret is left for the reader to type again.
+     */
+    function rawForStorage(raw) {
+      const text = String(raw || '')
+      if (!text.trim()) return ''
+      const parsed = parseConnectionText(text)
+      return parsed && parsed.password ? '' : text
+    }
+
+    /**
+     * The half-typed new source, laid over a fresh draft so a form saved by an
+     * older version still opens with every field the current one expects.
+     */
+    function createDraftFrom(base) {
+      const saved = readPanel().createDraft
+      if (!saved || typeof saved !== 'object') return base
+      return {
+        ...base,
+        ...saved,
+        config: { ...base.config, ...(saved.config || {}) },
+        password: '',
+      }
+    }
+
+    /** Once a source is saved the scratch draft has done its job. */
+    function forgetCreateDraft() {
+      forgetPanel('createDraft')
+      forgetPanel('createRaw')
+    }
+
     /** Sidebar icon: a stacked-database glyph drawn with currentColor. */
     function SidebarIcon(props) {
       const size = props && typeof props.size === 'number' ? props.size : 20
@@ -4180,8 +4288,15 @@ window.__ModuleLoader__.load({
 
     function SourceForm(props) {
       const t = props.t
+      /* `persist` is set for a new source only: that form is the one a reader
+         leaves half-typed (a connection string copied from somewhere else), so
+         its fields outlive the panel. The edit form always starts from the
+         source on the server. */
+      const persisting = props.persist === true
       const [draft, setDraft] = React.useState(props.draft)
-      const [raw, setRaw] = React.useState(() => (props.editing ? canonicalUrl(props.draft) : ''))
+      const [raw, setRaw] = React.useState(() =>
+        props.editing ? canonicalUrl(props.draft) : String(readPanel().createRaw || ''),
+      )
       const [parsed, setParsed] = React.useState(null)
       const [saveSecret, setSaveSecret] = React.useState(true)
       const [busy, setBusy] = React.useState(false)
@@ -4193,8 +4308,14 @@ window.__ModuleLoader__.load({
       const [missing, setMissing] = React.useState({})
       const editing = props.editing
 
-      const patch = (changes) => setDraft((prev) => ({ ...prev, ...changes }))
-      const patchConfig = (changes) => setDraft((prev) => ({ ...prev, config: { ...prev.config, ...changes } }))
+      /** Every write to the draft goes through here, so the memory is never stale. */
+      const commit = (next) => {
+        if (persisting) writePanel({ createDraft: draftForStorage(next) })
+        return next
+      }
+      const patch = (changes) => setDraft((prev) => commit({ ...prev, ...changes }))
+      const patchConfig = (changes) =>
+        setDraft((prev) => commit({ ...prev, config: { ...prev.config, ...changes } }))
 
       const fillFrom = (result) => {
         setDraft((prev) => {
@@ -4204,27 +4325,28 @@ window.__ModuleLoader__.load({
           if (!editing && (!prev.idTouched || !prev.id.trim())) {
             next.id = uniqueId(result.name || result.kind, props.takenIds)
           }
-          return next
+          return commit(next)
         })
       }
 
       const onRawChange = (value) => {
         setRaw(value)
+        if (persisting) writePanel({ createRaw: rawForStorage(value) })
         if (!value.trim()) {
           setParsed(null)
           // Deleting a recognised connection string also drops what it filled
           // in; editing keeps the identifier and group the source already owns.
           setDraft((prev) => {
             const fresh = emptyDraft()
-            if (!editing) return fresh
-            return {
+            if (!editing) return commit(fresh)
+            return commit({
               ...fresh,
               id: prev.id,
               nameTouched: prev.nameTouched,
               idTouched: prev.idTouched,
               group: prev.group,
               readOnly: prev.readOnly,
-            }
+            })
           })
           setMissing({})
           setProbeResult(null)
@@ -4236,11 +4358,13 @@ window.__ModuleLoader__.load({
       }
 
       const changeKind = (kind) => {
-        setDraft((prev) => ({
-          ...prev,
-          kind,
-          config: { ...baseConfig(kind), file: prev.config.file, user: prev.config.user, database: prev.kind === 'oracle' ? '' : prev.config.database },
-        }))
+        setDraft((prev) =>
+          commit({
+            ...prev,
+            kind,
+            config: { ...baseConfig(kind), file: prev.config.file, user: prev.config.user, database: prev.kind === 'oracle' ? '' : prev.config.database },
+          }),
+        )
       }
 
       const submit = async () => {
@@ -4279,6 +4403,9 @@ window.__ModuleLoader__.load({
           }
           if (!body.id) delete body.id
           const data = await apiPost('/datasources/save', body)
+          /* The scratch draft has become a real source: drop it so the next
+             "new source" opens empty instead of pre-filled with this one. */
+          if (persisting) forgetCreateDraft()
           props.onSaved(data.datasource)
         } catch (caught) {
           const existingId = caught && caught.payload && caught.payload.existingId
@@ -5334,7 +5461,15 @@ function groupTables(tables) {
       const t = React.useMemo(() => (service ? service.bind(NS) : (key) => key), [service])
       const [state, setState] = React.useState({ status: 'loading', data: null, error: null })
       const [busy, setBusy] = React.useState(false)
-      const [view, setView] = React.useState({ mode: 'list' })
+      /* The panel comes back where it was left: the remembered tab is checked
+         against the tabs that actually exist, and a sub-view that belongs to one
+         datasource (the structure browser, the edit form) opens its own tab
+         instead of guessing which row the reader meant. */
+      const [view, setView] = React.useState(() => {
+        const saved = String(readPanel().tab || '')
+        if (!TABS.some((entry) => entry.id === saved)) return { mode: 'list' }
+        return { mode: saved }
+      })
       const tab = tabOfMode(view.mode)
       const [notice, setNotice] = React.useState(null)
       const [probing, setProbing] = React.useState(null)
@@ -5349,15 +5484,28 @@ function groupTables(tables) {
       const [dragOverGroup, setDragOverGroup] = React.useState(null)
       const [dropMark, setDropMark] = React.useState(null)
       const [renamingSource, setRenamingSource] = React.useState(null)
-      const [query, setQuery] = React.useState('')
-      const [filter, setFilter] = React.useState('all')
+      /* The typed boxes come back filled: the search text, the filter chip, the
+         folded groups, the datasource picked on each page and the trace form.
+         `remember` writes the new value and hands it to the setter, so one line
+         both updates the screen and the memory. */
+      const savedPanel = readPanel()
+      const remember = (key, setter) => (value) => {
+        setter(value)
+        writePanel({ [key]: value })
+      }
+      const [query, setQuery] = React.useState(() => String(savedPanel.query || ''))
+      const [filter, setFilter] = React.useState(() => String(savedPanel.filter || 'all'))
       const [copiedId, setCopiedId] = React.useState(null)
       const [copiedEndpoint, setCopiedEndpoint] = React.useState(false)
       const [copiedChip, setCopiedChip] = React.useState(null)
-      const [collapsed, setCollapsed] = React.useState([])
+      const [collapsed, setCollapsed] = React.useState(() =>
+        Array.isArray(savedPanel.collapsed) ? savedPanel.collapsed : [],
+      )
 
       const toggleFolded = (name) => {
-        setCollapsed((prev) => (prev.includes(name) ? prev.filter((item) => item !== name) : prev.concat(name)))
+        const next = collapsed.includes(name) ? collapsed.filter((item) => item !== name) : collapsed.concat(name)
+        setCollapsed(next)
+        writePanel({ collapsed: next })
       }
 
       /** Switching a tab only swaps the card below; the chrome never moves. */
@@ -5392,28 +5540,30 @@ function groupTables(tables) {
       const [graph, setGraph] = React.useState(null)
       const [graphBusy, setGraphBusy] = React.useState(false)
       const [graphError, setGraphError] = React.useState(null)
-      const [graphSource, setGraphSource] = React.useState('')
-      const [graphFilter, setGraphFilter] = React.useState('all')
+      const [graphSource, setGraphSource] = React.useState(() => String(savedPanel.graphSource || ''))
+      const [graphFilter, setGraphFilter] = React.useState(() => String(savedPanel.graphFilter || 'all'))
       const [graphOpen, setGraphOpen] = React.useState('')
       const [graphForm, setGraphForm] = React.useState(null)
       const [graphReason, setGraphReason] = React.useState('')
       const [graphCondition, setGraphCondition] = React.useState(null)
       const [graphConditionDraft, setGraphConditionDraft] = React.useState('')
-      const [traceValue, setTraceValue] = React.useState('')
-      const [traceTable, setTraceTable] = React.useState('')
-      const [traceColumn, setTraceColumn] = React.useState('')
-      const [traceDirection, setTraceDirection] = React.useState('both')
-      const [traceSource, setTraceSource] = React.useState('')
+      /* The trace form is remembered field by field, not as a whole: the value
+         and the datasource are what a reader re-types most often. */
+      const [traceValue, setTraceValue] = React.useState(() => String(savedPanel.traceValue || ''))
+      const [traceTable, setTraceTable] = React.useState(() => String(savedPanel.traceTable || ''))
+      const [traceColumn, setTraceColumn] = React.useState(() => String(savedPanel.traceColumn || ''))
+      const [traceDirection, setTraceDirection] = React.useState(() => String(savedPanel.traceDirection || 'both'))
+      const [traceSource, setTraceSource] = React.useState(() => String(savedPanel.traceSource || ''))
       const [trace, setTrace] = React.useState(null)
       const [traceBusy, setTraceBusy] = React.useState(false)
       const [traceError, setTraceError] = React.useState(null)
       const [traceOpen, setTraceOpen] = React.useState('')
-      const [traceScene, setTraceScene] = React.useState('')
+      const [traceScene, setTraceScene] = React.useState(() => String(savedPanel.traceScene || ''))
       const [scenes, setScenes] = React.useState([])
       /* The manual entry columns stay hidden until asked for: most walks start
          from "wherever the value lives", and two empty boxes over the form read
          as required fields. */
-      const [traceManual, setTraceManual] = React.useState(false)
+      const [traceManual, setTraceManual] = React.useState(() => savedPanel.traceManual === true)
       /* Nodes arrive open: the rows are how a step is checked, so a reader who
          picked a box should not have to click again to see what it read. The set
          therefore holds the folded ones instead of the open ones. */
@@ -5466,6 +5616,13 @@ function groupTables(tables) {
       React.useEffect(() => {
         load()
       }, [load])
+
+      /* One writer for the tab: a screen that is reopened lands where it was
+         left. Sub-views keep their tab (the structure browser is a list screen,
+         the import runs under its own tab), so this is the tab bar's state. */
+      React.useEffect(() => {
+        writePanel({ tab })
+      }, [tab])
 
       /* The audit log can hold up to 200 lines. readAudit always returns the
          newest `limit`, so asking for a bigger limit and taking the tail keeps
@@ -6713,9 +6870,11 @@ function groupTables(tables) {
           failedSources,
           groupNames,
           filter,
-          setFilter,
+          /* The search box and the chip are part of the position the panel
+             returns to, so they are written through. */
+          setFilter: remember('filter', setFilter),
           query,
-          setQuery,
+          setQuery: remember('query', setQuery),
         })
 
       /** `stdio` stays lowercase (it is an abbreviation of standard I/O); HTTP is an acronym. */
@@ -7473,7 +7632,7 @@ function groupTables(tables) {
                 className: 'dbmcp-input dbmcp-select',
                 value: graphTarget,
                 onChange: (event) => {
-                  setGraphSource(event.target.value)
+                  remember('graphSource', setGraphSource)(event.target.value)
                   setGraphOpen('')
                   setGraphCondition('')
                   setGraphReason('')
@@ -7512,7 +7671,7 @@ function groupTables(tables) {
                         key: filter.id,
                         type: 'button',
                         className: graphFilter === filter.id ? 'dbmcp-filter is-on' : 'dbmcp-filter',
-                        onClick: () => setGraphFilter(filter.id),
+                        onClick: () => remember('graphFilter', setGraphFilter)(filter.id),
                       },
                       `${filter.label} ${filter.count}`,
                     ),
@@ -7658,8 +7817,13 @@ function groupTables(tables) {
                       type: 'button',
                       className: 'dbmcp-btn is-small is-plain',
                       onClick: () => {
-                        setTraceTable(node.table)
-                        setTraceColumn(node.condition ? node.condition.column : '')
+                        /* Naming the entry from a step pre-fills the manual
+                           boxes; they are remembered like typed ones. */
+                        const table = node.table
+                        const column = node.condition ? node.condition.column : ''
+                        setTraceTable(table)
+                        setTraceColumn(column)
+                        writePanel({ traceTable: table, traceColumn: column })
                       },
                     },
                     t('trace.changeEntry'),
@@ -8123,8 +8287,9 @@ function groupTables(tables) {
                 className: 'dbmcp-input dbmcp-select',
                 value: traceTarget,
                 onChange: (event) => {
-                  setTraceSource(event.target.value)
+                  remember('traceSource', setTraceSource)(event.target.value)
                   setTraceScene('')
+                  writePanel({ traceScene: '' })
                   setTrace(null)
                   setTraceError(null)
                 },
@@ -8137,7 +8302,7 @@ function groupTables(tables) {
           {
             className: 'dbmcp-input dbmcp-select',
             value: traceScene,
-            onChange: (event) => setTraceScene(event.target.value),
+            onChange: (event) => remember('traceScene', setTraceScene)(event.target.value),
           },
           h('option', { value: '' }, t('trace.sceneAll')),
           scenes.map((item) =>
@@ -8155,7 +8320,7 @@ function groupTables(tables) {
                 type: 'button',
                 className: `dbmcp-btn is-small${traceDirection === item.id ? ' is-primary' : ''}`,
                 title: item.label,
-                onClick: () => setTraceDirection(item.id),
+                onClick: () => remember('traceDirection', setTraceDirection)(item.id),
               },
               item.id === 'both' ? t('trace.dirBothShort') : item.id === 'up' ? '↑' : '↓',
             ),
@@ -8178,7 +8343,7 @@ function groupTables(tables) {
                     className: 'dbmcp-input dbmcp-mono',
                     value: traceValue,
                     placeholder: t('trace.valuePlaceholder'),
-                    onChange: (event) => setTraceValue(event.target.value),
+                    onChange: (event) => remember('traceValue', setTraceValue)(event.target.value),
                     onKeyDown: (event) => {
                       if (event.key === 'Enter') void runTrace()
                     },
@@ -8214,7 +8379,7 @@ function groupTables(tables) {
                     {
                       type: 'button',
                       className: `dbmcp-btn is-small${traceManual ? ' is-primary' : ' is-plain'}`,
-                      onClick: () => setTraceManual(!traceManual),
+                      onClick: () => remember('traceManual', setTraceManual)(!traceManual),
                       title: t('trace.manualEntry'),
                     },
                     t('trace.manualEntry'),
@@ -8232,7 +8397,7 @@ function groupTables(tables) {
                           className: 'dbmcp-input dbmcp-mono',
                           value: traceTable,
                           placeholder: t('trace.entryOptional'),
-                          onChange: (event) => setTraceTable(event.target.value),
+                          onChange: (event) => remember('traceTable', setTraceTable)(event.target.value),
                         }),
                       ),
                       h(
@@ -8243,7 +8408,7 @@ function groupTables(tables) {
                           className: 'dbmcp-input dbmcp-mono',
                           value: traceColumn,
                           placeholder: t('trace.entryOptional'),
-                          onChange: (event) => setTraceColumn(event.target.value),
+                          onChange: (event) => remember('traceColumn', setTraceColumn)(event.target.value),
                         }),
                       ),
                     )
@@ -8401,7 +8566,11 @@ function groupTables(tables) {
       } else if (view.mode === 'create') {
         body = h(Card, { title: null }, h(SourceForm, {
           t,
-          draft: emptyDraft(),
+          draft: createDraftFrom(emptyDraft()),
+          /* A new source is the one form a reader leaves half-typed, so its
+             fields outlive the panel; the edit form always starts from the
+             source the server holds. */
+          persist: true,
           editing: null,
           takenIds: sources.map((item) => item.id),
           onSaved: save,
@@ -8733,6 +8902,13 @@ function groupTables(tables) {
         reorderForDrop,
         paletteOf,
         parseColor,
+        /* The panel's memory, so the offline tests can prove what it stores. */
+        readPanel,
+        writePanel,
+        forgetPanel,
+        draftForStorage,
+        rawForStorage,
+        createDraftFrom,
       },
       apply(ctx) {
         localeService = ctx.locale
