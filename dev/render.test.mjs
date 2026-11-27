@@ -465,6 +465,33 @@ check(
     /'aria-label': t\('scene\.saveAs'\)/.test(source),
 )
 
+// Batch 1: the preview tries the DRAFT, not only a saved scene. These are
+// source-level because the stub's fetch never resolves an apiPost payload.
+check(
+  'scenes page: the preview sends the draft aliases and tables, no scene_id',
+  /apiPost\('\/scenes\/preview-aliases', \{[\s\S]{0,220}aliases,[\s\S]{0,120}tables:/.test(sceneLogic) &&
+    !/preview-aliases[\s\S]{0,300}scene_id: draft\.id/.test(sceneLogic),
+)
+check(
+  'scenes page: an unsaved scene still shows the preview',
+  /const previewBlock = !draft\s*\n\s*\? null/.test(sceneCard) &&
+    !/const previewBlock = !draft \|\| !draft\.id/.test(sceneCard),
+)
+check(
+  'scenes page: a key with no column is not sent to the preview',
+  /if \(Object\.keys\(aliases\)\.length === 0\) \{[\s\S]{0,120}t\('scene\.noTrialKeys'\)/.test(sceneLogic),
+)
+check(
+  'scenes page: editing keys or members clears a stale preview and the ack',
+  /hasOwnProperty\.call\(changes, 'aliases'\) \|\| Object\.prototype\.hasOwnProperty\.call\(changes, 'tables'\)/.test(sceneLogic) &&
+    /setScenePreview\(null\)[\s\S]{0,120}setSceneZeroAck\(false\)/.test(sceneLogic),
+)
+check(
+  'scenes page: a zero hit is flagged independently of the warning',
+  /item\.zeroHits === true \|\| \(!item\.hits && !item\.warning\)/.test(sceneCard) &&
+    /zeroHits \|\| item\.hits \? String\(item\.hits \|\| 0\) : '—'/.test(sceneCard),
+)
+
 
 const schemaView = render('schema view', () =>
   SchemaView({ t, source: { id: 'chinook', name: 'Chinook', kind: 'sqlite' }, onBack: noop }),
@@ -1108,6 +1135,62 @@ check(
   renderResult({ ok: true, datasource: 'shop', scenes: [], total: 0 }).includes('trace the whole graph'),
 )
 
+// Item 15: the agent-facing renderer must surface stages, weak matches, out-of-
+// scene hits and the ids of refused scans — but never the traced key value or a
+// whole sample row.
+const staged = renderResult({
+  ok: true,
+  value: 'SO-SECRET-9931',
+  direction: 'both',
+  elapsedMs: 20,
+  entry: { table: 'sales_order', column: 'order_no', picked: true, candidates: [] },
+  summary: { tablesHit: 2, steps: 1, depthReached: 1, needsConfirm: 2 },
+  steps: [{ index: 1, depth: 0, table: 'sales_order', condition: { column: 'order_no', operator: 'in', binds: ['SO-SECRET-9931'] }, rows: 1, status: 'hit', edge: null, sample: { columns: ['order_no'], rows: [['SO-SECRET-9931']] } }],
+  stages: {
+    mode: 'scene',
+    scene: 'order to cash',
+    rows: [
+      { stage: 'Order', table: 'sales_order', locate: 'edge', found: 1, status: 'ok', display: { order_no: 'SO-SECRET-9931' } },
+      { stage: 'Payment', table: 'payment', locate: 'alias', found: 2, status: 'paid', pendingConfirm: true, amount: '42.50' },
+    ],
+    other: [],
+    weak: [{ stage: 'Refund', table: 'refund', locate: 'weak', found: 1, weak: true, matchRule: 'Order.created_at same day refund.at', inTruncated: true }],
+  },
+  outside: [{ table: 'audit_event', rows: 20, reason: 'outside the scene' }],
+  confirmTargets: [
+    { table: 'payment', column: 'order_no', edge: 'alias:abc123', rowEstimate: 5000000, reason: 'no index' },
+    { table: 'refund', column: 'at', edge: 'weak:def456', rowEstimate: 9000000, reason: 'no index' },
+  ],
+  warnings: [],
+  stoppedAt: [],
+})
+check('renderer: stage rows are named in business order', staged.includes('Order') && staged.includes('Payment') && staged.indexOf('Order') < staged.indexOf('Payment'), staged)
+check('renderer: a stage says how it was located', staged.includes('alias') && staged.includes('edge'), staged)
+check('renderer: a weak stage shows its match rule', staged.includes('same day') && staged.includes('weak'), staged)
+check('renderer: a pending stage is marked, not a zero', staged.includes('pending') && !/Payment[\s\S]{0,80}0 row/.test(staged), staged)
+check('renderer: refused scans list their query ids', staged.includes('alias:abc123') && staged.includes('weak:def456'), staged)
+check('renderer: out-of-scene hits are named', staged.includes('audit_event') && staged.includes('outside'), staged)
+check('renderer: a few sample cells are shown', staged.includes('42.50'), staged)
+check('renderer: the traced key never leaks into text', !staged.includes('SO-SECRET-9931'), staged)
+
+const sceneRich = renderResult({
+  ok: true,
+  datasource: 'shop',
+  total: 1,
+  scenes: [{
+    name: 'order to cash', note: 'demo', tables: ['sales_order', 'payment'], tableCount: 2,
+    edges: [],
+    isolated: [],
+    stages: [{ name: 'Order', table: 'sales_order', locate: 'alias' }],
+    aliases: { serial: [{ table: 'sales_order', column: 'order_no' }] },
+    inputAlias: 'serial',
+    weakMatch: [{ fromStage: 'Order', fromColumn: 'created_at', toColumn: 'payment.paid_at', op: 'same_day' }],
+    costly: [{ table: 'payment', column: 'paid_at', rowEstimate: 9000000, reason: 'no index' }],
+  }],
+})
+check('renderer: a scene lists its stages, keys and weak links', sceneRich.includes('Order') && sceneRich.includes('serial') && sceneRich.includes('same_day'), sceneRich)
+check('renderer: a scene names its costly joins', sceneRich.includes('payment.paid_at') && sceneRich.includes('no index'), sceneRich)
+
 // The audit card may hold entries from earlier days, so a bare clock is not enough.
 const clock = localClock('2026-11-09T11:29:38.782Z')
 check('audit clock carries the date', /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(clock), clock)
@@ -1504,6 +1587,17 @@ check(
   'trace page: the stopped step offers the one way to allow it',
   /trace\.continueAnyway/.test(traceCard) && /runTrace\(node\.edge && node\.edge\.id \? \[node\.edge\.id\] : undefined\)/.test(traceCard),
 )
+/* A step that never ran is not "0 rows": needs_confirm means the walk refused a
+   full scan, error means the step failed. Both must say so in the graph box and
+   in the detail panel instead of the misleading "0 rows". */
+check(
+  'trace page: a step that did not run is not labelled as zero rows',
+  /traceRowLabel/.test(traceCard) &&
+    /status === 'needs_confirm' \? t\('trace\.pendingRows'\)/.test(traceCard) &&
+    /status === 'error' \? t\('trace\.failedRows'\)/.test(traceCard) &&
+    /trace\.pendingRows/.test(source) &&
+    /trace\.failedRows/.test(source),
+)
 check(
   'trace page: only that button sends confirm_slow',
   /confirm_slow: approved\.length \? approved : confirmSlow === true \? true : undefined/.test(traceLogic) &&
@@ -1601,7 +1695,7 @@ check(
   /const renderStages = \(stages\) =>/.test(traceCard) &&
     /const renderStageRow = \(row, index\) =>/.test(traceCard) &&
     /rows\.map\(renderStageRow\)/.test(traceCard) &&
-    /className: `dbmcp-stage-row\$\{row\.missed \? ' is-missed' : ''\}\$\{nested \? ' is-nested' : ''\}\$\{weak \? ' is-weak' : ''\}\$\{row\.incomplete \? ' is-incomplete' : ''\}`/.test(
+    /className: `dbmcp-stage-row\$\{row\.missed \? ' is-missed' : ''\}\$\{nested \? ' is-nested' : ''\}\$\{weak \? ' is-weak' : ''\}\$\{row\.incomplete \? ' is-incomplete' : ''\}\$\{pending \? ' is-pending' : ''\}`/.test(
       traceCard,
     ) &&
     /stage\.sceneName/.test(source) &&
@@ -1615,11 +1709,53 @@ check(
     /stage\.weakTitle/.test(source),
 )
 check(
+  'trace page: a refused query reads 待确认, never 0 rows or not-found',
+  /const pending = Boolean\(row\.pendingConfirm\)/.test(traceCard) &&
+    /row\.missed \|\| row\.incomplete \|\| pending \? ''/.test(traceCard) &&
+    /pending \? h\('span', \{ className: 'dbmcp-stage-status' \}, t\('stage\.pendingConfirm'\)\)/.test(traceCard) &&
+    /row\.missed \|\| row\.incomplete \|\| pending \|\| weak/.test(traceCard) &&
+    /'stage\.pendingConfirm'/.test(source) &&
+    /'stage\.pendingHint'/.test(source),
+)
+check(
+  'trace page: the approval bar shows with no walk steps (alias-only scene)',
+  /trace && steps\.length === 0 && confirmTargets\.length > 0/.test(traceCard) &&
+    /confirmBlock/.test(traceCard),
+)
+check(
   'trace page: feedback sits only where a decision is needed, else behind "..."',
   /const stageNeedsFeedback = \(row\) =>/.test(traceCard) &&
     /flags\.pending \|\| flags\.abnormalFanout \|\| flags\.empty/.test(traceCard) &&
     /stageNeedsFeedback\(row\)\s*\n?\s*\?/.test(traceCard) &&
     /h\('summary', \{ className: 'dbmcp-stage-morebtn' \}, '⋯'\)/.test(traceCard),
+)
+check(
+  'trace page: an opened stage reads SQL, binds, timing and negative verdicts',
+  /\(row\.detail \|\| \{\}\)\.sql/.test(traceCard) &&
+    /\(row\.detail \|\| \{\}\)\.values/.test(traceCard) &&
+    /\(row\.detail \|\| \{\}\)\.ms/.test(traceCard) &&
+    /judgeStep\(\(row\.detail\.edge \|\| \{\}\)\.id, 'too_many', 'not_unique'\)/.test(traceCard) &&
+    /judgeStep\(\(row\.detail\.edge \|\| \{\}\)\.id, 'missing'\)/.test(traceCard) &&
+    /judgeStep\(\(row\.detail\.edge \|\| \{\}\)\.id, 'irrelevant'\)/.test(traceCard),
+)
+const removeMemberFn = source.slice(
+  source.indexOf('const removeSceneTable = (table) =>'),
+  source.indexOf('const openInGraph ='),
+)
+check(
+  'scene: removing a member clears stages and keys that name it',
+  /const removeSceneTable = \(table\) =>/.test(source) &&
+    /const stages = \(current\.stages \|\| \[\]\)\.filter/.test(removeMemberFn) &&
+    /const aliases = \{\}/.test(removeMemberFn) &&
+    /keptEntries/.test(removeMemberFn) &&
+    /const weakMatch = \(current\.weakMatch \|\| \[\]\)\.filter/.test(removeMemberFn) &&
+    /scene\.memberRemoved/.test(source),
+)
+check(
+  'scene: removing a business key leaves weak links alone',
+  /const removeAlias = \(key\) =>/.test(source) &&
+    !/weakMatch:[\s\S]{0,120}filter\(\(item\) => foldName\(item\.fromStage\)/.test(source) &&
+    /delete aliases\[key\]/.test(source),
 )
 check(
   'trace page: the mode toggles between a scene read and a free walk',

@@ -449,7 +449,7 @@ class AliasPreview(unittest.TestCase):
         first = keys[0]
         self.assertEqual(
             set(first),
-            {"alias", "table", "column", "type", "hits", "samples", "ms", "warning", "truncated"},
+            {"alias", "table", "column", "type", "hits", "samples", "ms", "warning", "truncated", "zeroHits"},
         )
         self.assertEqual(first["alias"], "serial")
         self.assertEqual(first["table"], "t_order")
@@ -492,6 +492,69 @@ class AliasPreview(unittest.TestCase):
         payload = main.preview_aliases(scene["id"], "SO-1", limit=500)
         self.assertTrue(payload["ok"], payload)
         self.assertLessEqual(len(payload["keys"][0]["samples"]), 10)
+
+    # --- batch 1: the panel previews the DRAFT, not only a saved scene ---------
+
+    def test_a_draft_is_previewed_without_being_saved(self):
+        """No scene exists at all: the draft's aliases and tables are enough."""
+        payload = main.preview_aliases(
+            None,
+            "SO-1",
+            aliases={"serial": [{"table": "t_order", "column": "order_no"}]},
+            tables=["t_order", "t_trans"],
+        )
+        self.assertTrue(payload["ok"], payload)
+        self.assertEqual(len(payload["keys"]), 1)
+        self.assertEqual(payload["keys"][0]["hits"], 1)
+        self.assertEqual(payload["keys"][0]["samples"], ["SO-1", "SO-2"])
+
+    def test_an_empty_draft_alias_object_is_still_a_draft(self):
+        """An explicitly empty aliases object means 'preview the draft', not
+        'fall back to the saved scene' — even when a saved scene has keys."""
+        scene = self._scene({"serial": [{"table": "t_order", "column": "order_no"}]})
+        payload = main.preview_aliases(scene["id"], "SO-1", aliases={}, tables=["t_order", "t_trans"])
+        self.assertTrue(payload["ok"], payload)
+        self.assertEqual(payload["keys"], [])
+
+    def test_a_malformed_draft_alias_is_a_user_error(self):
+        payload = main.preview_aliases(None, "SO-1", aliases={"serial": "not-a-list"}, tables=["t_order"])
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["error"]["code"], "user_error")
+
+    def test_a_draft_preview_writes_no_scene_file(self):
+        scenes_dir = Path(self.tmp.name) / "scenes"
+        before = {p.name: p.read_bytes() for p in scenes_dir.glob("*.json")} if scenes_dir.exists() else {}
+        payload = main.preview_aliases(
+            None, "SO-1", aliases={"serial": [{"table": "t_order", "column": "order_no"}]}, tables=["t_order"]
+        )
+        self.assertTrue(payload["ok"], payload)
+        after = {p.name: p.read_bytes() for p in scenes_dir.glob("*.json")} if scenes_dir.exists() else {}
+        self.assertEqual(before, after, "a preview must never write a scene file")
+
+    def test_a_zero_hit_column_has_an_independent_flag(self):
+        """The ack checkbox needs a field that survives the 0-hit warning."""
+        scene = self._scene({"serial": [{"table": "t_order", "column": "order_no"}]})
+        payload = main.preview_aliases(scene["id"], "no-such-order")
+        entry = payload["keys"][0]
+        self.assertTrue(entry["zeroHits"], "this column was queried and matched nothing")
+        self.assertIn("0 hits", entry["warning"])
+
+    def test_a_zero_hit_flag_survives_a_family_warning(self):
+        scene = self._scene(
+            {
+                "serial": [
+                    {"table": "t_order", "column": "order_no"},  # text, "1" finds 0
+                    {"table": "t_trans", "column": "order_no"},  # number, "1" finds 2
+                ]
+            }
+        )
+        payload = main.preview_aliases(scene["id"], "1")
+        self.assertTrue(payload["ok"], payload)
+        text_entry = next(item for item in payload["keys"] if item["table"] == "t_order")
+        self.assertTrue(text_entry["zeroHits"], "queried and 0 hits, even with a family warning")
+        self.assertIn("type families disagree", text_entry["warning"])
+        number_entry = next(item for item in payload["keys"] if item["table"] == "t_trans")
+        self.assertFalse(number_entry["zeroHits"])
 
 
 @unittest.skipUnless(HAVE_MAIN, "the MCP SDK is not installed for this interpreter")

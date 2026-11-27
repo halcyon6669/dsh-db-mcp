@@ -2229,6 +2229,9 @@ function groupTables(tables) {
       const [sceneDirty, setSceneDirty] = React.useState(false)
       const [sceneBusy, setSceneBusy] = React.useState(false)
       const [sceneError, setSceneError] = React.useState(null)
+      /* A notice is a consequence to report, not a validation error: removing a
+         member also dropped the stages and keys that named it. */
+      const [sceneNotice, setSceneNotice] = React.useState(null)
       const [sceneQuery, setSceneQuery] = React.useState('')
       const [sceneCatalog, setSceneCatalog] = React.useState(null)
       const [sceneCatalogError, setSceneCatalogError] = React.useState(null)
@@ -2810,6 +2813,7 @@ function groupTables(tables) {
         }
         setSceneBusy(true)
         setSceneError(null)
+        setSceneNotice(null)
         try {
           const payload = await apiGet(`/scenes?datasource=${encodeURIComponent(sceneTarget)}`)
           const rows = payload && payload.ok !== false && Array.isArray(payload.scenes) ? payload.scenes : []
@@ -2918,16 +2922,29 @@ function groupTables(tables) {
       }, [tab, sceneMemberKey, sceneTarget])
 
       /** Try the draft's business keys against a value before they are saved.
-       * The catalogue is read live by the server; nothing here can run SQL. */
+       * The catalogue is read live by the server; nothing here can run SQL. The
+       * draft is sent as-is, so a key that has not been saved yet is still tried. */
       const previewSceneAliases = async () => {
         const draft = sceneEdit || {}
         const value = String(scenePreviewValue || '').trim()
-        if (!draft.id) {
-          setScenePreviewError(t('scene.saveFirst'))
-          return
-        }
         if (!value) {
           setScenePreviewError(t('scene.needValue'))
+          return
+        }
+        /* A key with no column picked yet is a name the user just typed — it
+           cannot locate anything, so it is not sent. What is left is the real
+           draft: aliases + members, no scene_id, so the server never reads a
+           saved scene behind the editor's back. */
+        const aliases = {}
+        for (const [name, entries] of Object.entries(draft.aliases || {})) {
+          const columns = (entries || [])
+            .filter((item) => item && String(item.table || '').trim() && String(item.column || '').trim())
+            .map((item) => ({ table: String(item.table).trim(), column: String(item.column).trim() }))
+          if (columns.length > 0) aliases[name] = columns
+        }
+        if (Object.keys(aliases).length === 0) {
+          setScenePreviewError(t('scene.noTrialKeys'))
+          setScenePreview(null)
           return
         }
         setScenePreviewBusy(true)
@@ -2936,7 +2953,8 @@ function groupTables(tables) {
         try {
           const payload = await apiPost('/scenes/preview-aliases', {
             datasource: sceneTarget,
-            scene_id: draft.id,
+            aliases,
+            tables: Array.isArray(draft.tables) ? draft.tables : [],
             value,
             limit: 10,
           })
@@ -3003,6 +3021,14 @@ function groupTables(tables) {
       const patchScene = (changes) => {
         setSceneEdit((current) => (current ? { ...current, ...changes } : current))
         setSceneDirty(true)
+        /* A preview describes the keys and members it was run against. If either
+           changes, the numbers on screen are someone else's answer — clear them
+           and the acknowledgement that went with them. */
+        if (Object.prototype.hasOwnProperty.call(changes, 'aliases') || Object.prototype.hasOwnProperty.call(changes, 'tables')) {
+          setScenePreview(null)
+          setSceneZeroAck(false)
+          setScenePreviewError(null)
+        }
       }
 
       /* Business-key editing keeps the draft shape the store accepts: an object
@@ -3047,10 +3073,11 @@ function groupTables(tables) {
         const current = sceneEdit || {}
         const aliases = { ...(current.aliases || {}) }
         delete aliases[key]
+        /* A weak link is keyed by stage name, never by business-key name —
+           removing a key must leave every weak link untouched. */
         patchScene({
           aliases,
           inputAlias: foldName(current.inputAlias) === foldName(key) ? '' : current.inputAlias,
-          weakMatch: (current.weakMatch || []).filter((item) => foldName(item.fromStage) !== foldName(key)),
         })
       }
 
@@ -3081,7 +3108,7 @@ function groupTables(tables) {
            simply not be in this dataset yet — but it must be acknowledged before
            it is written down, so a typo cannot become a silent dead key. */
         const zeroHits = ((scenePreview && scenePreview.keys) || []).filter(
-          (item) => item.alias && !item.hits && !item.warning,
+          (item) => item.alias && (item.zeroHits === true || (!item.hits && !item.warning)),
         )
         if (zeroHits.length > 0 && !sceneZeroAck) {
           setSceneError(fmt(t('scene.zeroHitsNeedAck'), { keys: zeroHits.map((item) => item.alias).join('、') }))
@@ -3163,8 +3190,26 @@ function groupTables(tables) {
 
       const removeSceneTable = (table) => {
         const wanted = String(table || '').toLowerCase()
-        const current = (sceneEdit && sceneEdit.tables) || []
-        patchScene({ tables: current.filter((item) => String(item).toLowerCase() !== wanted) })
+        const current = sceneEdit || {}
+        const kept = (current.tables || []).filter((item) => String(item).toLowerCase() !== wanted)
+        /* Stages are declared over a member; a stage whose table just left the
+           scene cannot locate anything. Business keys name member columns too,
+           and a weak match points at a member column. Drop the references with
+           the member instead of leaving a save-time error the editor cannot fix
+           (there is no stage editor in this panel). */
+        const stages = (current.stages || []).filter((s) => String(s.table || '').toLowerCase() !== wanted)
+        const aliases = {}
+        for (const [name, entries] of Object.entries(current.aliases || {})) {
+          const keptEntries = (entries || []).filter((c) => String(c.table || '').toLowerCase() !== wanted)
+          if (keptEntries.length) aliases[name] = keptEntries
+        }
+        const inputAlias = aliases[current.inputAlias] ? current.inputAlias : ''
+        const weakMatch = (current.weakMatch || []).filter((w) => {
+          const targetTable = String(w.toColumn || '').split('.')[0].toLowerCase()
+          return String(w.fromStage || '').toLowerCase() !== wanted && targetTable !== wanted
+        })
+        patchScene({ tables: kept, stages, aliases, inputAlias, weakMatch })
+        setSceneNotice(fmt(t('scene.memberRemoved'), { name: table }))
       }
 
       /** Go to the Relations page with one join open.
@@ -5312,8 +5357,10 @@ function groupTables(tables) {
            show what the value would locate, which is why it runs on a button and
            never on every keystroke. */
         const previewRows = scenePreview && Array.isArray(scenePreview.keys) ? scenePreview.keys : []
-        const zeroHits = previewRows.filter((item) => item.alias && !item.hits && !item.warning)
-        const previewBlock = !draft || !draft.id
+        const zeroHits = previewRows.filter((item) => item.alias && (item.zeroHits === true || (!item.hits && !item.warning)))
+        /* The preview belongs to the draft, so even a scene that has never been
+           saved can try its keys — the server reads the aliases sent above. */
+        const previewBlock = !draft
           ? null
           : h(
               'div',
@@ -5368,12 +5415,12 @@ function groupTables(tables) {
                           'tr',
                           {
                             key: `${item.alias}.${item.table}.${item.column}`,
-                            className: item.alias && !item.hits && !item.warning ? 'is-zero' : null,
+                            className: item.alias && (item.zeroHits === true || (!item.hits && !item.warning)) ? 'is-zero' : null,
                           },
                           h('td', null, item.alias || ''),
                           h('td', null, h('code', null, `${item.table}.${item.column}`)),
                           h('td', null, item.type || ''),
-                          h('td', null, item.warning ? '—' : String(item.hits || 0)),
+                          h('td', null, item.zeroHits || item.hits ? String(item.hits || 0) : '—'),
                           h('td', null, (item.samples || []).join('、')),
                           h('td', null, String(item.ms || 0)),
                           h('td', null, item.warning || ''),
@@ -5588,6 +5635,7 @@ function groupTables(tables) {
                 deleteBlock,
               ),
               sceneError ? h('p', { className: 'dbmcp-hint dbmcp-edge-error' }, sceneError) : null,
+              sceneNotice ? h('p', { className: 'dbmcp-hint' }, sceneNotice) : null,
               h(
                 'div',
                 { className: 'dbmcp-scene-block' },
@@ -5745,6 +5793,11 @@ function groupTables(tables) {
         )
       }
 
+      /* A step that was refused or failed never read its rows. Calling that
+         "0 rows" says the table was empty when the truth is we did not look. */
+      const traceRowLabel = (status, rows) =>
+        status === 'needs_confirm' ? t('trace.pendingRows') : status === 'error' ? t('trace.failedRows') : fmt(t('trace.rows'), { n: rows || 0 })
+
       /** One step, read in full: the join that carried the value there, the values
        * it was bound to, how many rows it hit and how long it took. This is what
        * sits under the graph for whichever table the reader picked, so the shape
@@ -5771,7 +5824,7 @@ function groupTables(tables) {
               node.index === 1 ? t('trace.root') : `d${node.depth}`,
             ),
             h('code', { className: 'dbmcp-trace-name' }, node.table),
-            h('span', { className: 'dbmcp-pill' }, fmt(t('trace.rows'), { n: rows })),
+            h('span', { className: 'dbmcp-pill' }, traceRowLabel(status, rows)),
             node.truncated ? h('span', { className: 'dbmcp-pill dbmcp-trace-cut' }, t('trace.truncated')) : null,
             slow ? h('span', { className: edgeStatusClass('pending') }, t('trace.needsConfirmChip')) : null,
             node.index === 1
@@ -6126,7 +6179,7 @@ function groupTables(tables) {
                   },
                   tabIndex: 0,
                   role: 'button',
-                  'aria-label': `${node.table} · ${fmt(t('trace.rows'), { n: node.rows || 0 })}`,
+                  'aria-label': `${node.table} · ${traceRowLabel(status, node.rows || 0)}`,
                 },
                 h('rect', {
                   className: `dbmcp-ov-node is-${status === 'needs_confirm' ? 'pending' : status === 'empty' ? 'stale' : status === 'error' ? 'rejected' : status}${focused ? ' is-focus' : ''}`,
@@ -6144,9 +6197,9 @@ function groupTables(tables) {
                 h(
                   'text',
                   { className: 'dbmcp-ov-sub', x: here.x + BOX_W / 2, y: here.y + 31, textAnchor: 'middle' },
-                  fmt(t('trace.rows'), { n: node.rows || 0 }),
+                  traceRowLabel(status, node.rows || 0),
                 ),
-                h('title', null, `${node.table} · ${fmt(t('trace.rows'), { n: node.rows || 0 })}`),
+                h('title', null, `${node.table} · ${traceRowLabel(status, node.rows || 0)}`),
               ),
             )
             const parent = node.parent ? spots[node.parent] : null
@@ -6303,23 +6356,29 @@ function groupTables(tables) {
         const nested = Boolean(row.parent)
         const label = stageStatusText(row)
         const weak = Boolean(row.weak || row.locate === 'weak')
+        /* A refused alias/weak lookup is waiting on a decision, not a miss and
+           not a timeout. It keeps whatever rows a cheaper column already found,
+           so it must never print "0 rows" or "not found". */
+        const pending = Boolean(row.pendingConfirm)
         return h(
           'div',
           {
             key: `${row.stage}:${index}`,
-            className: `dbmcp-stage-row${row.missed ? ' is-missed' : ''}${nested ? ' is-nested' : ''}${weak ? ' is-weak' : ''}${row.incomplete ? ' is-incomplete' : ''}`,
+            className: `dbmcp-stage-row${row.missed ? ' is-missed' : ''}${nested ? ' is-nested' : ''}${weak ? ' is-weak' : ''}${row.incomplete ? ' is-incomplete' : ''}${pending ? ' is-pending' : ''}`,
           },
           h(
             'div',
             { className: 'dbmcp-stage-main' },
             h('span', { className: 'dbmcp-stage-name' }, row.stage || row.table),
             h('span', { className: 'dbmcp-stage-locate' }, row.locate === 'alias' ? t('stage.byAlias') : row.locate === 'weak' ? t('stage.weak') : t('stage.byEdge')),
-            h('span', { className: 'dbmcp-stage-count' }, row.missed || row.incomplete ? '' : fmt(t('trace.rows'), { n: row.found || 0 })),
-            row.incomplete ? h('span', { className: 'dbmcp-stage-status' }, t('stage.incomplete')) : label ? h('span', { className: 'dbmcp-stage-status' }, label) : null,
+            h('span', { className: 'dbmcp-stage-count' }, row.missed || row.incomplete || pending ? '' : fmt(t('trace.rows'), { n: row.found || 0 })),
+            pending ? h('span', { className: 'dbmcp-stage-status' }, t('stage.pendingConfirm')) : row.incomplete ? h('span', { className: 'dbmcp-stage-status' }, t('stage.incomplete')) : label ? h('span', { className: 'dbmcp-stage-status' }, label) : null,
             row.amount !== undefined && row.amount !== null ? h('span', { className: 'dbmcp-stage-amount' }, String(row.amount)) : null,
             row.time !== undefined && row.time !== null ? h('span', { className: 'dbmcp-stage-time' }, String(row.time)) : null,
           ),
-          row.incomplete
+          pending
+            ? h('p', { className: 'dbmcp-hint dbmcp-stage-warning' }, t('stage.pendingHint'))
+            : row.incomplete
             ? h('p', { className: 'dbmcp-hint dbmcp-stage-warning' }, row.warning || t('stage.incompleteHint'))
             : row.missed
             ? h('p', { className: 'dbmcp-hint dbmcp-stage-missed' }, t('stage.missedHint'))
@@ -6333,9 +6392,9 @@ function groupTables(tables) {
           weak && row.inTruncated
             ? h('p', { className: 'dbmcp-hint' }, fmt(t('stage.inTruncated'), { n: (row.inValues || []).length }))
             : null,
-          /* Feedback belongs to real steps only: a missed stage or a weak row
-             has no edge behind it to judge, so only an edge row offers it. */
-          row.missed || row.incomplete || weak
+          /* Feedback belongs to real steps only: a missed stage, a weak row or
+             a stage waiting on a scan decision has no edge to judge. */
+          row.missed || row.incomplete || pending || weak
             ? null
             : stageNeedsFeedback(row)
               ? h(
@@ -6359,18 +6418,29 @@ function groupTables(tables) {
                   'details',
                   { className: 'dbmcp-stage-more' },
                   h('summary', { className: 'dbmcp-stage-morebtn' }, '⋯'),
-                  (row.detail || {}).edge
-                    ? h(
-                        'button',
-                        {
-                          type: 'button',
-                          className: 'dbmcp-btn is-small',
-                          onClick: () => void judgeStep((row.detail.edge || {}).id, 'ok'),
-                        },
-                        t('trace.judgeOk'),
-                      )
+                  (row.detail || {}).sql
+                    ? h('pre', { className: 'dbmcp-stage-sql' }, String(row.detail.sql))
+                    : null,
+                  (row.detail || {}).values && (row.detail.values || []).length
+                    ? h('p', { className: 'dbmcp-hint' }, `${t('stage.binds')}: ${(row.detail.values || []).map(String).join(', ')}`)
+                    : null,
+                  typeof (row.detail || {}).ms === 'number'
+                    ? h('p', { className: 'dbmcp-hint' }, fmt(t('trace.stepMs'), { ms: row.detail.ms }))
                     : null,
                   (row.detail || {}).fanout ? h('p', { className: 'dbmcp-hint' }, fanoutLabel(row.detail.fanout)) : null,
+                  /* All four verdicts live here too, not only on the free-walk
+                     detail: a scene row is still a join somebody can judge. */
+                  (row.detail || {}).edge
+                    ? h(
+                        'div',
+                        { className: 'dbmcp-inline dbmcp-trace-reasons' },
+                        h('button', { type: 'button', className: 'dbmcp-btn is-small', onClick: () => void judgeStep((row.detail.edge || {}).id, 'too_many', 'not_unique') }, t('graph.reasonNotUnique')),
+                        h('button', { type: 'button', className: 'dbmcp-btn is-small', onClick: () => void judgeStep((row.detail.edge || {}).id, 'too_many', 'wrong_column') }, t('graph.reasonWrongColumn')),
+                        h('button', { type: 'button', className: 'dbmcp-btn is-small', onClick: () => void judgeStep((row.detail.edge || {}).id, 'too_many', 'needs_condition') }, t('graph.reasonNeedsCondition')),
+                        h('button', { type: 'button', className: 'dbmcp-btn is-small is-plain', onClick: () => void judgeStep((row.detail.edge || {}).id, 'missing') }, t('trace.judgeMissing')),
+                        h('button', { type: 'button', className: 'dbmcp-btn is-small is-danger', onClick: () => void judgeStep((row.detail.edge || {}).id, 'irrelevant') }, t('trace.judgeIrrelevant')),
+                      )
+                    : null,
                 ),
         )
       }
@@ -6673,6 +6743,12 @@ function groupTables(tables) {
           traceBusy && !trace ? h('p', { className: 'dbmcp-hint' }, t('loading')) : null,
           trace && steps.length === 0 && !(traceMode === 'scene' && trace.stages)
             ? h('p', { className: 'dbmcp-hint' }, t('trace.nothing'))
+            : null,
+          /* An alias-only scene can have no walk steps at all, yet still have a
+             refused lookup waiting on a decision. Show the same approval bar in
+             that case instead of hiding it behind a "steps > 0" gate. */
+          trace && steps.length === 0 && confirmTargets.length > 0
+            ? confirmBlock
             : null,
           trace && candidates.length > 1
             ? h(

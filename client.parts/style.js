@@ -2571,6 +2571,12 @@
         border-color: color-mix(in srgb, var(--dsw-alias-state-warning-primary) 55%, var(--dsw-alias-border-color-secondary));
         background: color-mix(in srgb, var(--dsw-alias-state-warning-primary) 6%, transparent);
       }
+      /* A stage waiting on a scan decision is tinted like an unfinished one,
+         but keeps its rows: the reader can still see what a cheaper column read. */
+      .dbmcp-stage-row.is-pending {
+        border-color: color-mix(in srgb, var(--dsw-alias-state-warning-primary) 55%, var(--dsw-alias-border-color-secondary));
+        background: color-mix(in srgb, var(--dsw-alias-state-warning-primary) 6%, transparent);
+      }
       .dbmcp-stage-warning {
         color: var(--dsw-alias-state-warning-primary);
       }

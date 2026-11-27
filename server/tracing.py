@@ -15,6 +15,8 @@ Two rules keep the output honest:
 
 from __future__ import annotations
 
+import hashlib
+import json
 import time
 from collections import deque
 
@@ -343,18 +345,60 @@ def _column_family(info: dict, column: str) -> str:
     return "any"
 
 
+# Queries with no relation edge behind them (an alias lookup, a weak match)
+# still have to obey the same full-scan gate as a walked edge. They cannot use an
+# edge id, so the identifier is derived from exactly what the query would run:
+# a hash over the casefolded parts. Change any part and the old approval expires
+# on its own; identical queries share one id and appear once in confirmTargets.
+def _query_id(prefix: str, parts) -> str:
+    normal = [str(part or "").casefold() for part in parts]
+    digest = hashlib.sha1(
+        json.dumps(normal, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()[:12]
+    return f"{prefix}:{digest}"
+
+
+def _alias_query_id(table: str, column: str) -> str:
+    return _query_id("alias", [table, column])
+
+
+def _weak_query_id(from_table, from_column, dest_table, dest_column, op, minutes) -> str:
+    return _query_id("weak", [from_table, from_column, dest_table, dest_column, op, minutes])
+
+
+def _confirm_target(targets: list, entry: dict) -> None:
+    """Collect a refused query once; one decision can cover every refusal."""
+    if not any(item.get("edge") == entry["edge"] for item in targets):
+        targets.append(entry)
+
+
+def _query_cost(profile, connection, table, column) -> dict:
+    """The full-scan decision for one column, using the same rule as an edge."""
+    cost = engines.column_cost(profile, connection, table, column)
+    return {
+        "indexed": cost.get("indexed"),
+        "rowEstimate": cost.get("rowEstimate"),
+        "needsConfirm": relations.needs_confirm(cost),
+    }
+
+
 def _alias_rows(
-    profile, connection, chosen_scene, text, row_limit, describe, warnings
+    profile, connection, chosen_scene, text, row_limit, describe, warnings,
+    approved=None, allow_all=False, confirm_targets=None,
 ) -> list[dict]:
     """Locate alias stages straight on the scene's input business key.
 
     Only the input alias is used, with the scene input value (decision 3): an
     alias stage never depends on a graph edge, so it still runs when the edge
     chain breaks. Each query is bounded by LIMIT and the statement timeout; a
-    timeout becomes a flagged, incomplete stage rather than a silent zero.
+    timeout becomes a flagged, incomplete stage rather than a silent zero. Each
+    target column is cost-checked on its own: one expensive column is refused
+    without losing the rows a cheap column already found.
     """
     if not chosen_scene:
         return []
+    approved = approved or set()
+    confirm_targets = confirm_targets if confirm_targets is not None else []
     declared = scenes._stage_list(chosen_scene.get("stages"))
     aliases = chosen_scene.get("aliases") or {}
     input_alias = chosen_scene.get("inputAlias")
@@ -397,14 +441,47 @@ def _alias_rows(
         # One query per distinct column; combine the results into one stage.
         combined = {"columns": [], "rows": [], "sql": "", "truncated": False}
         timed_out = False
+        pending_confirm = False
         total_ms = 0
         for column, value in zip(columns_used, binds):
+            # A column is cost-checked on its own. Only a query that would
+            # actually run is worth asking about: the value bound cleanly and we
+            # are about to search it. Refusing one column leaves the rows found
+            # by the others intact — the stage reads "待确认", never 0 / missed.
+            query_id = _alias_query_id(table, column)
+            cost = _query_cost(profile, connection, table, column)
+            if cost["needsConfirm"] and not allow_all and query_id not in approved:
+                pending_confirm = True
+                _confirm_target(
+                    confirm_targets,
+                    {
+                        "table": table,
+                        "column": column,
+                        "rowEstimate": cost["rowEstimate"],
+                        "edge": query_id,
+                        "reason": relations.why_confirm(cost),
+                    },
+                )
+                warnings.append(
+                    {
+                        "code": "alias_needs_confirm",
+                        "message": (
+                            f"{table}.{column}: {relations.why_confirm(cost)} — this alias "
+                            "lookup needs confirmation before it can scan the table"
+                        ),
+                    }
+                )
+                continue
             started = time.perf_counter()
             try:
                 found = engines.fetch_matching(
                     profile, connection, table, column, [value], row_limit
                 )
-            except engines.DbError as error:
+            except Exception as error:
+                # DBAPI drivers raise their own exception types with no common
+                # base alongside DbError (sqlite3.OperationalError, psycopg
+                # errors, ...). One bad column must be a warning on this stage,
+                # never a failure of the whole walk.
                 if engines._is_timeout(error):
                     timed_out = True
                     warnings.append(
@@ -432,12 +509,17 @@ def _alias_rows(
                 "table": table,
                 "locate": "alias",
                 "found": len(combined["rows"]),
-                "missed": not combined["rows"] and not timed_out,
+                # A refused column is not a miss: the stage is waiting on a
+                # decision, so it reads 待确认 while keeping any rows a cheap
+                # column already found. Never show it as 0 rows / missed.
+                "missed": not combined["rows"] and not timed_out and not pending_confirm,
                 "incomplete": timed_out,
+                "pendingConfirm": pending_confirm,
                 "matchRule": f"input alias {input_alias}",
                 "parent": None,
                 "step": None,
                 "sample": _sample(combined["columns"], combined["rows"], [], columns_used[0]),
+                "_full": {"columns": combined["columns"], "rows": combined["rows"]},
                 "sql": combined["sql"],
                 "ms": total_ms,
                 "truncated": combined["truncated"],
@@ -452,17 +534,23 @@ def _alias_rows(
 
 
 def _weak_rows(
-    profile, connection, chosen_scene, declared, stage_steps, warnings
+    profile, connection, chosen_scene, declared, stage_steps, warnings,
+    approved=None, allow_all=False, confirm_targets=None,
 ) -> list[dict]:
     """Read loose (weak) stage matches without feeding them back into the walk.
 
     Weak rows are not BFS seeds, are not counted in the hit tables, and never
     write a relation edge (decision 2). They are read with a bounded scan and a
-    statement timeout, filtered in Python by the declared op, and carry the
-    match rule text so a reader can see why they are only weak.
+    statement timeout, and carry the match rule text so a reader can see why
+    they are only weak. The loose rule lives in SQL with bound values (so a
+    match past the first page is still found and an index can still be used).
+    Like an alias lookup, a weak scan obeys the full-scan gate: an expensive
+    target column is refused until its query id is approved.
     """
     if not chosen_scene or not declared:
         return []
+    approved = approved or set()
+    confirm_targets = confirm_targets if confirm_targets is not None else []
     weak = chosen_scene.get("weakMatch") or []
     if not weak:
         return []
@@ -490,16 +578,79 @@ def _weak_rows(
         op = match.get("op")
         minutes = match.get("minutes") or 60
         rule_text = _weak_rule(match, op, minutes)
-        # Source values come from the fromStage hit rows.
+        # Source values come from the fromStage hit rows. With no values there
+        # is no query to run, so there is nothing to ask about either.
         src_values = _row_values(source, match.get("fromColumn"))
         if not src_values:
             continue
+        # The id is derived from the actual query, with the op and minute
+        # window baked in: the same source/target under two different rules are
+        # two independent decisions. Only run the cost gate when a query would
+        # really go to the database.
+        query_id = _weak_query_id(
+            stage["table"], match.get("fromColumn"), dest_table, dest_column,
+            op, minutes if op == "within_minutes" else None,
+        )
+        cost = _query_cost(profile, connection, dest_table, dest_column)
+        if cost["needsConfirm"] and not allow_all and query_id not in approved:
+            _confirm_target(
+                confirm_targets,
+                {
+                    "table": dest_table,
+                    "column": dest_column,
+                    "rowEstimate": cost["rowEstimate"],
+                    "edge": query_id,
+                    "reason": relations.why_confirm(cost),
+                },
+            )
+            warnings.append(
+                {
+                    "code": "weak_needs_confirm",
+                    "message": (
+                        f"{dest_table}.{dest_column}: {relations.why_confirm(cost)} — this "
+                        "weak match needs confirmation before it can scan the table"
+                    ),
+                }
+            )
+            rows.append(
+                {
+                    "stage": (dest_stage or {}).get("name", dest_table),
+                    "table": dest_table,
+                    "locate": "weak",
+                    "found": 0,
+                    "missed": False,
+                    "incomplete": False,
+                    "pendingConfirm": True,
+                    "matchRule": rule_text,
+                    "parent": stage["name"],
+                    "step": None,
+                    "sample": {"columns": [], "rows": []},
+                    "sql": "",
+                    "ms": 0,
+                    "truncated": False,
+                    "weak": True,
+                }
+            )
+            continue
         started = time.perf_counter()
         try:
-            found = engines.scan_bounded(
-                profile, connection, dest_table, scenes.IN_VALUE_CAP
+            # The loose rule is pushed into SQL with bound values, so a match
+            # past the first page is still found. `found["rows"]` are already
+            # the matches; no Python-side filter over a WHERE-less scan.
+            found = engines.weak_candidates(
+                profile,
+                connection,
+                dest_table,
+                dest_column,
+                src_values[: scenes.IN_VALUE_CAP],
+                op,
+                minutes,
+                scenes.IN_VALUE_CAP,
             )
-        except engines.DbError as error:
+        except Exception as error:
+            # Same as the alias lookup: a raw driver exception (a bad table, a
+            # real SQLite "interrupted" from the timeout handler) is one bad
+            # weak match, not the end of the trace.
             flag = engines._is_timeout(error)
             warnings.append(
                 {
@@ -515,6 +666,7 @@ def _weak_rows(
                     "found": 0,
                     "missed": False,
                     "incomplete": flag,
+                    "pendingConfirm": False,
                     "matchRule": rule_text,
                     "parent": stage["name"],
                     "step": None,
@@ -526,14 +678,8 @@ def _weak_rows(
                 }
             )
             continue
-        col_index = _column_index(found["columns"], dest_column)
-        matched = []
-        if col_index is not None:
-            for row in found["rows"]:
-                if col_index >= len(row):
-                    continue
-                if _weak_compare(row[col_index], src_values, op, minutes):
-                    matched.append(row)
+        matched = found["rows"]  # the SQL already applied the loose rule
+        truncated = bool(found.get("truncated")) or len(src_values) > scenes.IN_VALUE_CAP
         rows.append(
             {
                 "stage": (dest_stage or {}).get("name", dest_table),
@@ -542,13 +688,14 @@ def _weak_rows(
                 "found": len(matched),
                 "missed": not matched,
                 "weak": True,
+                "pendingConfirm": False,
                 "matchRule": rule_text,
                 "parent": stage["name"],
                 "step": None,
                 "sample": _sample(found["columns"], matched, [], dest_column),
                 "sql": found["sql"],
                 "ms": int((time.perf_counter() - started) * 1000),
-                "truncated": found["truncated"],
+                "truncated": truncated,
                 "inValues": src_values[: scenes.IN_VALUE_CAP],
                 "inTruncated": len(src_values) > scenes.IN_VALUE_CAP,
             }
@@ -564,14 +711,37 @@ def _split_table_column(value):
     return table.strip(), column.strip()
 
 
+def _without_full(rows):
+    """Drop the private `_full` result rows before a list is reported.
+
+    The full row is an internal read aid for a stage's amount/status/weak
+    source column; it must never be handed to the panel with the result.
+    """
+    return [
+        {key: value for key, value in row.items() if key != "_full"}
+        for row in rows
+    ]
+
+
+def _full_sample(source):
+    """The full result columns/rows for a stage, or the display sample.
+
+    The `sample` a step carries is capped at SAMPLE_COLUMNS cells for the panel,
+    but a declared amount/status/time or weak source column may sit further
+    right. `_full` is kept internally for those reads and stripped before the
+    report goes out, so the whole row never reaches the client (item 12).
+    """
+    return source.get("_full") or source.get("sample") or {}
+
+
 def _row_values(source, column):
-    sample = source.get("sample") or {}
-    columns = [str(name) for name in (sample.get("columns") or [])]
+    data = _full_sample(source)
+    columns = [str(name) for name in (data.get("columns") or [])]
     index = _column_index(columns, column)
     if index is None:
         return []
     values = []
-    for row in sample.get("rows") or []:
+    for row in data.get("rows") or []:
         if index < len(row) and row[index] is not None and str(row[index]) not in {str(v) for v in values}:
             values.append(row[index])
     return values
@@ -702,13 +872,14 @@ def _stage_view(chosen_scene, steps, alias_rows=None, weak_rows=None) -> dict | 
             source = (alias_by_name if locate == "alias" else weak_by_name).get(stage["name"])
             if source:
                 display, status, status_value, amount, when = _stage_display(
-                    stage, source.get("sample") or {}
+                    stage, _full_sample(source)
                 )
                 base.update(
                     {
                         "found": source.get("found", 0),
                         "missed": bool(source.get("missed")),
                         "incomplete": bool(source.get("incomplete")),
+                        "pendingConfirm": bool(source.get("pendingConfirm")),
                         "matchRule": source.get("matchRule"),
                         "weak": locate == "weak",
                         "status": status,
@@ -731,8 +902,9 @@ def _stage_view(chosen_scene, steps, alias_rows=None, weak_rows=None) -> dict | 
 
         step = table_steps[0] if table_steps else None
         if step is not None:
-            sample = step.get("sample") or {}
-            display, status, status_value, amount, when = _stage_display(stage, sample)
+            display, status, status_value, amount, when = _stage_display(
+                stage, _full_sample(step)
+            )
             base.update(
                 {
                     "found": step.get("rows") or 0,
@@ -846,6 +1018,21 @@ def trace(
     pending = [edge for edge in all_edges if edge.get("status") == "pending"]
 
     warnings: list[dict] = []
+
+    # One metadata read per table, reused for the sample, the pending hints, and
+    # the alias locators. Defined before the entry probe so an alias-only scene
+    # (no edges to probe) can still resolve its input key on the early path.
+    described: dict[str, dict] = {}
+
+    def describe(table: str) -> dict:
+        key = _fold(table)
+        if key not in described:
+            try:
+                described[key] = engines.describe_table(profile, connection, table, None)
+            except engines.DbError:
+                described[key] = {}
+        return described[key]
+
     if not walkable:
         warnings.append(
             {
@@ -878,6 +1065,20 @@ def trace(
                 ),
             }
         )
+        # Even with no graph entry an alias-only scene can still resolve the
+        # input key, and a refused alias lookup still needs the same approval
+        # gate as a walked edge. Carry the decision through this path too.
+        early_targets: list[dict] = []
+        early_alias = _alias_rows(
+            profile, connection, chosen_scene, text, row_limit, describe, warnings,
+            approved, allow_all, early_targets,
+        )
+        early_stages = _stage_view(chosen_scene, [], early_alias, [])
+        early_pending = sum(
+            1 for row in (early_stages or {}).get("rows", []) if row.get("pendingConfirm")
+        ) + sum(
+            1 for row in (early_stages or {}).get("weak", []) if row.get("pendingConfirm")
+        )
         return {
             "value": text,
             "direction": heading,
@@ -890,7 +1091,7 @@ def trace(
                 "rowsRead": 0,
                 "steps": 0,
                 "depthReached": 0,
-                "needsConfirm": 0,
+                "needsConfirm": early_pending,
                 "outside": 0,
             },
             "nodes": [],
@@ -899,21 +1100,12 @@ def trace(
             "pending": [],
             "warnings": warnings,
             "stoppedAt": [],
-            "stages": _stage_view(chosen_scene, []),
-            "confirmTargets": [],
+            "stages": early_stages,
+            "confirmTargets": early_targets,
         }
 
-    # One metadata read per table, reused for the sample and the pending hints.
-    described: dict[str, dict] = {}
-
-    def describe(table: str) -> dict:
-        key = _fold(table)
-        if key not in described:
-            try:
-                described[key] = engines.describe_table(profile, connection, table, None)
-            except engines.DbError:
-                described[key] = {}
-        return described[key]
+    # `describe` is defined above the entry probe so alias stages also work
+    # when the walk has no edge to follow.
 
     steps: list[dict] = []
     stopped: list[dict] = []
@@ -1143,6 +1335,7 @@ def trace(
             "status": status,
             "edge": _edge_summary(edge) if edge else None,
             "sample": _sample(found["columns"], rows, info.get("primaryKey"), column),
+            "_full": {"columns": found["columns"], "rows": rows},
             "fanout": fanout,
             "ms": step_ms,
             "note": None,
@@ -1302,7 +1495,10 @@ def trace(
     # weak stages are loose, look-ahead matches. Neither feeds the BFS queue, so
     # both run after the walk and are reported only in the stage view.
     declared_stages = scenes._stage_list(chosen_scene.get("stages")) if chosen_scene else []
-    alias_rows = _alias_rows(profile, connection, chosen_scene, text, row_limit, describe, warnings)
+    alias_rows = _alias_rows(
+        profile, connection, chosen_scene, text, row_limit, describe, warnings,
+        approved, allow_all, confirm_targets,
+    )
     # Weak matches read their source values from the hit rows of an earlier
     # stage, which came from the BFS walk (alias stages have no step).
     stage_steps = {}
@@ -1313,9 +1509,21 @@ def trace(
         if match:
             stage_steps[stage["name"]] = match
     weak_rows = _weak_rows(
-        profile, connection, chosen_scene, declared_stages, stage_steps, warnings
+        profile, connection, chosen_scene, declared_stages, stage_steps, warnings,
+        approved, allow_all, confirm_targets,
     )
 
+    stages = _stage_view(chosen_scene, steps, alias_rows, weak_rows)
+    if stages:
+        # The weak list is reported as returned by `_weak_rows`; strip any
+        # internal full-row aid the same way as the steps.
+        stages["weak"] = _without_full(stages.get("weak") or [])
+    # A refused alias/weak lookup is as much a "needs confirmation" as a refused
+    # walk step, and must show up in the same count so the panel shows its bar
+    # even when the walk itself produced no steps (an alias-only scene).
+    pending_stage_confirms = sum(
+        1 for row in (stages or {}).get("rows", []) if row.get("pendingConfirm")
+    ) + sum(1 for row in (stages or {}).get("weak", []) if row.get("pendingConfirm"))
     return {
         "value": text,
         "direction": heading,
@@ -1328,15 +1536,16 @@ def trace(
             "rowsRead": rows_read,
             "steps": len(steps),
             "depthReached": depth_reached,
-            "needsConfirm": sum(1 for step in steps if step.get("status") == NEEDS_CONFIRM),
+            "needsConfirm": sum(1 for step in steps if step.get("status") == NEEDS_CONFIRM)
+            + pending_stage_confirms,
             "outside": len(outside),
         },
         "confirmTargets": confirm_targets,
         "nodes": _nodes(steps),
-        "steps": steps,
+        "steps": _without_full(steps),
         "outside": outside,
         "pending": hints,
         "warnings": warnings,
         "stoppedAt": stopped,
-        "stages": _stage_view(chosen_scene, steps, alias_rows, weak_rows),
+        "stages": stages,
     }

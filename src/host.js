@@ -3557,11 +3557,19 @@ export function createHost(options = {}) {
         return sendJson(response, result.status, result.body);
       }
       if (route === "/scenes/preview-aliases") {
+        // A draft preview sends its own aliases and tables so an unsaved key can
+        // be tried; a saved-scene preview sends only scene_id. "Passed but empty"
+        // is meaningful — the server treats an empty object as the draft.
+        const draft = payload.aliases !== undefined || payload.tables !== undefined;
         const result = await callTool("preview_aliases", {
-          scene_id: trimmed(payload.scene_id),
+          scene_id: draft ? undefined : trimmed(payload.scene_id),
           value: trimmed(payload.value),
           datasource: trimmed(payload.datasource) || undefined,
           limit: typeof payload.limit === "number" ? payload.limit : undefined,
+          aliases: draft && payload.aliases && typeof payload.aliases === "object" && !Array.isArray(payload.aliases)
+            ? payload.aliases
+            : draft ? {} : undefined,
+          tables: draft && Array.isArray(payload.tables) ? payload.tables : draft ? [] : undefined,
         });
         return sendJson(response, result.status, result.body);
       }

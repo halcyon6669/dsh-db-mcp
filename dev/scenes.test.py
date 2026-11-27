@@ -163,6 +163,32 @@ class SavingScenes(unittest.TestCase):
         again = scenes.save_scene(self.profile, "order to cash", ["t_order", "t_trans"])
         self.assertEqual(again["scene"]["note"], "first")
 
+    def test_a_renamed_scene_does_not_collide_with_a_new_one(self):
+        """Renaming 订单 to 退款 must free the name 订单 for a NEW scene.
+
+        When ids were a hash of the name, the renamed scene kept the old id
+        (hash of 订单), so creating 订单 again matched that id and overwrote the
+        renamed scene instead of making a second one.
+        """
+        first = scenes.save_scene(self.profile, "订单", ["t_order"])
+        old_id = first["scene"]["id"]
+        scenes.save_scene(self.profile, "退款", ["t_order"], scene_id=old_id)
+        fresh = scenes.save_scene(self.profile, "订单", ["t_trans"])
+        self.assertTrue(fresh["created"])
+        self.assertNotEqual(fresh["scene"]["id"], old_id)
+        names = [s["name"] for s in scenes.load(self.profile)["scenes"]]
+        self.assertEqual(sorted(names), ["订单", "退款"])
+
+    def test_renaming_to_an_existing_name_is_refused(self):
+        scenes.save_scene(self.profile, "b", ["t_order"])
+        scenes.save_scene(self.profile, "a", ["t_trans"])
+        b = scenes.find(scenes.load(self.profile), "b")
+        with self.assertRaises(Exception) as caught:
+            scenes.save_scene(self.profile, "a", ["t_order"], scene_id=b["id"])
+        self.assertEqual(getattr(caught.exception, "code", None), "user_error")
+        names = [s["name"] for s in scenes.load(self.profile)["scenes"]]
+        self.assertEqual(sorted(names), ["a", "b"])
+
 
 class StageLayout(unittest.TestCase):
     """A scene can describe the stages a walk is read in business order."""
@@ -268,6 +294,46 @@ class StageLayout(unittest.TestCase):
         )
         cleared = scenes.save_scene(self.profile, "cash", ["t_order"], stages=[])
         self.assertEqual(cleared["scene"].get("stages", []), [])
+
+    def test_a_weak_match_must_name_a_table_in_the_scene(self):
+        """toColumn is `table.column`; the table must be a member and fromStage real."""
+        with self.assertRaises(Exception) as caught:
+            scenes.save_scene(
+                self.profile, "cash", ["t_order", "t_trans"],
+                stages=[{"name": "Order", "table": "t_order", "locate": "edge"}],
+                weak_match=[{"fromStage": "Order", "fromColumn": "created_at",
+                             "toColumn": "t_ghost.paid_at", "op": "same_day"}],
+            )
+        self.assertEqual(getattr(caught.exception, "code", None), "user_error")
+
+    def test_a_weak_match_to_column_needs_a_table_qualifier(self):
+        with self.assertRaises(Exception) as caught:
+            scenes.save_scene(
+                self.profile, "cash", ["t_order", "t_trans"],
+                stages=[{"name": "Order", "table": "t_order", "locate": "edge"}],
+                weak_match=[{"fromStage": "Order", "fromColumn": "created_at",
+                             "toColumn": "paid_at", "op": "same_day"}],
+            )
+        self.assertEqual(getattr(caught.exception, "code", None), "user_error")
+
+    def test_a_weak_match_from_stage_must_exist(self):
+        with self.assertRaises(Exception) as caught:
+            scenes.save_scene(
+                self.profile, "cash", ["t_order", "t_trans"],
+                stages=[{"name": "Order", "table": "t_order", "locate": "edge"}],
+                weak_match=[{"fromStage": "Ghost", "fromColumn": "created_at",
+                             "toColumn": "t_trans.paid_at", "op": "same_day"}],
+            )
+        self.assertEqual(getattr(caught.exception, "code", None), "user_error")
+
+    def test_a_valid_weak_match_is_saved(self):
+        result = scenes.save_scene(
+            self.profile, "cash", ["t_order", "t_trans"],
+            stages=[{"name": "Order", "table": "t_order", "locate": "edge"}],
+            weak_match=[{"fromStage": "Order", "fromColumn": "created_at",
+                         "toColumn": "t_trans.paid_at", "op": "same_day"}],
+        )
+        self.assertEqual(result["scene"]["weakMatch"][0]["toColumn"], "t_trans.paid_at")
 
     def test_listed_scenes_carry_stages(self):
         scenes.save_scene(

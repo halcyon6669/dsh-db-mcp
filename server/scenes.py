@@ -17,6 +17,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -133,7 +134,13 @@ def save(profile: dict, doc: dict) -> None:
 
 
 def _uuid(name: str) -> str:
+    """Legacy name-derived id — kept so pre-existing scenes still resolve."""
     return "s_" + hashlib.sha1(name.casefold().encode("utf-8")).hexdigest()[:6]
+
+
+def _new_id() -> str:
+    """A fresh id for a new scene: unique regardless of the name it starts with."""
+    return "s_" + uuid.uuid4().hex[:10]
 
 
 def _table_list(tables) -> list[str]:
@@ -644,7 +651,12 @@ def save_scene(
     doc = load(profile)
     scenes = doc.get("scenes") or []
     now = _now()
-    target_id = str(scene_id or "").strip() or _uuid(wanted)
+    # A new scene gets a fresh random id, not a hash of its name: renaming an
+    # old scene keeps that id (so an in-flight panel still finds it), and the
+    # freed-up name must be available for a genuinely NEW scene. Reusing the
+    # name's hash made the second "订单" match the renamed "退款" and overwrite
+    # it. Old hash ids in existing files keep working — they are never rewritten.
+    target_id = str(scene_id or "").strip() or _new_id()
 
     def apply_fields(scene: dict, creating: bool) -> None:
         """Write all optional fields onto a scene, then validate their links."""
@@ -691,8 +703,53 @@ def save_scene(
                     f"inputAlias {input_now} is not one of the scene's aliases",
                     "name one of the keys in aliases as the input alias",
                 )
+        # A weak match names a source stage and a target as `table.column`. Both
+        # ends must be real: the fromStage must be declared, and the target table
+        # must be a member of this scene (a scene holds no edges, so there is no
+        # other place to check the target against).
+        weak_now = scene.get("weakMatch") or []
+        if weak_now:
+            stage_names = {_fold(stage.get("name") or "") for stage in stages_now}
+            members_now = {_fold(table) for table in chosen}
+            for match in weak_now:
+                source = str(match.get("fromStage") or "")
+                if _fold(source) not in stage_names:
+                    raise store.StoreError(
+                        "user_error",
+                        f"weak match names an unknown stage: {source}",
+                        "fromStage must be one of this scene's stages",
+                    )
+                target = str(match.get("toColumn") or "")
+                if "." not in target:
+                    raise store.StoreError(
+                        "user_error",
+                        f"weak match target is not table.column: {target}",
+                        "write the target as table.column, e.g. t_trans.paid_at",
+                    )
+                target_table, _, _ = target.partition(".")
+                if _fold(target_table) not in members_now:
+                    raise store.StoreError(
+                        "user_error",
+                        f"weak match target table is not in the scene: {target_table}",
+                        "add that table to the scene, or point the match at a member",
+                    )
         scene["updatedAt"] = now
 
+    asked_id = str(scene_id or "").strip()
+    if asked_id:
+        # An explicit id means this is a rename. Check the whole file first: if a
+        # DIFFERENT scene already carries the wanted name, refuse rather than
+        # produce two scenes with one name. A plain save without an id keeps the
+        # old behaviour — saving an existing name updates that scene.
+        for scene in scenes:
+            same_id = str(scene.get("id")) == target_id
+            same_name = str(scene.get("name") or "").casefold() == wanted.casefold()
+            if same_name and not same_id:
+                raise store.StoreError(
+                    "user_error",
+                    f"another scene is already named {scene.get('name')}",
+                    "rename this scene to a name that is not already used",
+                )
     for scene in scenes:
         same_id = str(scene.get("id")) == target_id
         same_name = str(scene.get("name") or "").casefold() == wanted.casefold()

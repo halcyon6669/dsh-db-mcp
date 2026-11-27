@@ -344,6 +344,19 @@ connect". It starts at one column, then follows graph edges one hop at a time:
   exists only for the panel's own route. An approved scan still obeys the statement
   timeout and the row cap, and a step that times out is marked `timedOut` with a note
   rather than quietly reported as empty.
+   Business-key and weak-match lookups join this gate. Their `edge` id is a **query
+   id** — `alias:<sha1(table,column)[:12]>` or
+   `weak:<sha1(fromTable,fromColumn,toTable,toColumn,op,minutes)[:12]>` over
+   case-folded names — not a relation edge. Identical queries share an id and appear
+   once in `confirmTargets`. These ids must **never** be passed to
+   `feedback_relation`, which only accepts real relation edge ids. Each column is
+   judged on its own cost: a partly blocked alias stage keeps the rows already found
+   and reads `pendingConfirm: true` (never `0` rows, `missed` or `incomplete`), and
+   only queries that would actually run (a bound value exists and source values are
+   present) ask for approval. `summary.needsConfirm` counts refused walk steps plus
+   pending alias/weak stage rows, so a scene with no walk steps still reports the
+   block. The no-entry early return carries the same approval list and returns its
+   own `confirmTargets`.
 - **Every step is timed.** Each step reports `ms`, and a finished trace writes the
   durations of the steps it actually ran onto their edges, where `lastMs` / `avgMs`
   keep the last `cost.timingWindow` (five by default).
@@ -403,8 +416,8 @@ A stage whose business term is not a column name can be located two other ways.
 `save_scene(..., aliases={...})` declares the keys: a name mapped to the columns
 that carry it, `{"流水号": [{"table": "t_order", "column": "order_no"}]}`. A key may
 name several tables — that is the point, since the same business number is stored
-under different column names in different tables. Up to 20 keys and 50 columns per
-key; every named column must be a scene member. `input_alias` names the one key the
+under different column names in different tables. Up to 20 keys and 50 columns **in
+total** across all keys; every named column must be a scene member. `input_alias` names the one key the
 typed value is typed into, and it is required whenever any stage locates by alias
 (`save_scene` refuses the save with `user_error` instead of guessing). Omitting
 `input_alias` leaves an existing one alone; sending it empty (`""`) clears it, which
@@ -421,25 +434,34 @@ stage `incomplete` (with an `alias_timeout` warning) rather than zero rows.
 `save_scene(..., weak_match=[...])` declares the loose matches:
 `{ fromStage, fromColumn, toColumn, op }` with `op` one of `eq`, `same_day`,
 `within_minutes` (a positive minute count, default 60), up to 20 entries. `toColumn`
-is written `table.column`. A weak match reads at most `IN_VALUE_CAP` (50) distinct
-source values and does a bounded scan of the destination, filtering in Python; when
-the source holds more than that the row says `inTruncated: true` and shows the cap.
+is written `table.column`. A weak match binds at most `IN_VALUE_CAP` (50) source
+values into the destination query: `eq` becomes an `IN (…)` list, `same_day` a bound
+half-open day range and `within_minutes` a bound timestamp range — conditions on the
+bare target column, with no function wrapped around it so an index can still serve
+the query. The statement is row-capped and timed out like any other lookup; when the
+source holds more than the cap the row says `inTruncated: true` and shows the cap.
 Weak rows appear under `stages.weak` and *never* as a walk step: they do not seed
 the BFS, do not enter `summary.tablesHit` or `summary.steps`, and are never written
 into the relation graph. Each carries `matchRule` — the text a reader sees, such as
 `Order.created_at → t_ship.created_at + same day`.
 
-`preview_aliases(scene_id, value)` trial-runs the declared keys before saving. It
-returns one row per alias column — `{ alias, table, column, type, hits, samples, ms,
-truncated, warning }` — where `hits` is a bounded equality count for `value` and
-`samples` a few real values of the column (no `DISTINCT` and no `COUNT(*)`, so an
-unindexed key is not a table scan). Warnings cover a column that has left the
-catalog (`stale`), a family that disagrees with its siblings, a value the column
-cannot hold, and 0 hits. None of these blocks the save; the panel simply asks for an
-explicit acknowledgement when a previewed key found nothing. Catalog names are
-whitelisted against a live `describe_table`, so a scene file cannot name a column
-that reaches SQL. Samples and hit counts stay in the tool's return value and are
-never written to the audit log.
+`preview_aliases(value, scene_id?, aliases?, tables?)` trial-runs business keys
+against the live catalog before saving. Pass a **saved** scene's `scene_id`, or send
+the unsaved draft's `aliases` and `tables` directly (an empty alias object still
+counts as a draft) — the panel previews what it is about to save, not what was saved
+last time. Draft aliases are validated with the same rules as `save_scene`, and the
+live catalog is always the whitelist, so a preview never writes a scene and a scene
+file can never reach SQL. It returns one row per alias column — `{ alias, table, column, type, hits, samples, ms,
+truncated, warning, zeroHits }` — where `hits` is a bounded, bound-parameter equality
+count for `value` and `samples` a few real values of the column (no `DISTINCT`; the
+driver's own limit keeps it bounded, so an unindexed key is not a whole-table scan).
+`zeroHits` is an independent flag for "this column was queried and matched nothing",
+set even when a type-family warning is also present, so the panel's acknowledgement
+checkbox cannot be hidden by a warning. Warnings cover a column that has left the
+catalog (`stale`), a family that disagrees with its siblings, and a value the column's
+family cannot hold. None of these blocks the save; the panel simply asks for an
+explicit acknowledgement when a previewed key found nothing. Samples and hit counts
+stay in the tool's return value and are never written to the audit log.
 
 A table reachable both by a confirmed edge and by a declared alias is read once: the
 declared locate wins, and the walk's own step for that table is not printed a second
@@ -452,10 +474,16 @@ status, statusValue, amount, time, display, detail, feedback }`. A stage the wal
 did not reach is a grey placeholder (`missed: true`, `found: 0`, `step: null`) so
 the broken link is visible; an alias or weak stage adds `matchRule`, and a timeout
 adds `incomplete: true` (`missed` stays false, because a timeout is not the same as
-"no row"). A hit carries its sample values through `display`, `status`, `amount`
-and `time`, and keeps the SQL, binds, timing and edge in `detail` for the panel to
-unfold. Tables outside the declared stages are listed under `other` instead of being
-dropped. A free walk, or a scene with no stages, has no `stages` field. The panel's
+"no row"). A stage whose lookup was refused for cost reads `pendingConfirm: true`:
+it keeps the rows already found, and is never shown as `0` rows, `missed` or
+`incomplete`. `summary.needsConfirm` counts those pending rows too, so a scene with
+no walk steps still surfaces the block in the panel's approval bar. Stage amounts,
+times and status come from the **full** result row, not the capped sample (a value
+past the sixth column is still read), while the sample shown to the reader stays small;
+the whole row never reaches the panel. A hit carries its sample values through
+`display`, `status`, `amount` and `time`, and keeps the SQL, binds, timing and edge in
+`detail` for the panel to unfold. Tables outside the declared stages are listed under
+`other` instead of being dropped. A free walk, or a scene with no stages, has no `stages` field. The panel's
 Trace tab switches between this **按场景运行** reading and the ordinary free graph,
 and never shows an internal verdict token where a person expects a word.
 

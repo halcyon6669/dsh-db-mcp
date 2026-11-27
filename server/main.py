@@ -953,28 +953,47 @@ def save_scene(
 @mcp.tool()
 @_audited
 def preview_aliases(
-    scene_id: str,
-    value: str,
+    scene_id: Optional[str] = None,
+    value: str = "",
     datasource: Optional[str] = None,
     limit: int = 10,
+    aliases: Optional[dict] = None,
+    tables: Optional[list] = None,
 ) -> dict:
-    """Trial-run a scene's business-key aliases before saving them.
+    """Trial-run business-key aliases against a value, saved or still a draft.
+
+    Pass `aliases` and `tables` to preview what is on screen before it is saved
+    (an explicitly empty aliases object still means "the draft"); leave them out
+    and `scene_id` reads the saved scene. The two-positional-argument call,
+    `preview_aliases(scene_id, value)`, keeps working as before. Only the live
+    catalogue is consulted: columns outside those `tables` are never queried, and
+    nothing here writes a scene file.
 
     For every alias column this reports the live type, a bounded hit count for
     `value`, a few sample values and a warning when the column is missing or its
-    type disagrees with its siblings. Type compatibility is a warning here only
-    — `save_scene` still accepts any structurally valid alias. Sample values and
-    hit counts stay in this return value and are never written to the audit log.
-    The catalog is read live once per call; nothing is cached across sessions.
+    type disagrees with its siblings. `zeroHits` marks a column that was queried
+    and matched nothing — separate from `warning` so the panel can still offer
+    an acknowledgement when several warnings apply. Type compatibility is a
+    warning here only — `save_scene` still accepts any structurally valid alias.
+    Sample values and hit counts stay in this return value and are never written
+    to the audit log. The catalog is read live once per call; nothing is cached.
     """
     try:
         capped = max(1, min(int(limit), PREVIEW_LIMIT))
         profile, (connection, close) = _open(datasource)
         try:
-            chosen = scenes.resolve(profile, scene_id)
-            if chosen is None:
-                return _error(store.StoreError("user_error", f"no scene {scene_id!r}", "save one first"))
-            known = scenes._table_list(chosen.get("tables"))
+            draft = aliases is not None or tables is not None
+            if draft:
+                # A draft is validated with the same structural rules as saving,
+                # but never stored. An empty aliases object is a valid draft.
+                chosen_aliases = scenes._alias_map(aliases)
+                known = scenes._table_list(tables)
+            else:
+                chosen = scenes.resolve(profile, scene_id)
+                if chosen is None:
+                    return _error(store.StoreError("user_error", f"no scene {scene_id!r}", "save one first"))
+                chosen_aliases = scenes._alias_map(chosen.get("aliases"))
+                known = scenes._table_list(chosen.get("tables"))
             allowed = set()
             for table in known:
                 try:
@@ -984,7 +1003,7 @@ def preview_aliases(
                 for column in info.get("columns") or []:
                     allowed.add((scenes._fold(table), scenes._fold(column.get("name"))))
             result = []
-            for name, columns in (chosen.get("aliases") or {}).items():
+            for name, columns in chosen_aliases.items():
                 families = []
                 for item in columns:
                     table = item.get("table")
@@ -998,6 +1017,7 @@ def preview_aliases(
                         "samples": [],
                         "ms": 0,
                         "warning": None,
+                        "zeroHits": False,
                     }
                     if scenes._fold(table) not in {scenes._fold(t) for t in known}:
                         entry["warning"] = "stale — table left the scene"
@@ -1037,6 +1057,9 @@ def preview_aliases(
                             )
                             entry["hits"] = int(hits.get("hits") or 0)
                             entry["truncated"] = bool(hits.get("truncated"))
+                            # The column really was queried: a zero here is a
+                            # finding, independent of any warning attached later.
+                            entry["zeroHits"] = entry["hits"] == 0
                             sample = engines.sample_values(
                                 profile, connection, table, column, allowed, limit=capped
                             )
@@ -1051,7 +1074,7 @@ def preview_aliases(
                         if entry["alias"] == name and entry["warning"] is None:
                             entry["warning"] = "type families disagree across this alias"
                 for entry in result:
-                    if entry["alias"] == name and entry["warning"] is None and not entry["hits"]:
+                    if entry["alias"] == name and entry["warning"] is None and entry["zeroHits"]:
                         entry["warning"] = "0 hits for this value — confirm before saving"
             return {"ok": True, "datasource": _source(profile), "value": value, "keys": result}
         finally:

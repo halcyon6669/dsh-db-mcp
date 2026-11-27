@@ -862,9 +862,9 @@ class PhaseCBusinessKeys(_Walk):
         source = {"sample": {"columns": ["id"], "rows": [[index] for index in range(60)]}}
         # tracing imports engines through sys.path, which is a different module
         # object from the one this test file loaded: patch the one it calls.
-        original = tracing.engines.scan_bounded
-        tracing.engines.scan_bounded = lambda *args, **kwargs: {
-            "columns": ["left_id"], "rows": [[900]], "truncated": False, "sql": "select * from t_shared"
+        original = tracing.engines.weak_candidates
+        tracing.engines.weak_candidates = lambda *args, **kwargs: {
+            "columns": ["left_id"], "rows": [[900]], "truncated": False, "sql": "select * from t_shared", "binds": []
         }
         try:
             warnings = []
@@ -872,7 +872,7 @@ class PhaseCBusinessKeys(_Walk):
                 self.profile, self.connection, scene, declared, {"Order": source}, warnings
             )
         finally:
-            tracing.engines.scan_bounded = original
+            tracing.engines.weak_candidates = original
         self.assertEqual(len(rows), 1)
         self.assertEqual(len(rows[0]["inValues"]), scenes.IN_VALUE_CAP)
         self.assertTrue(rows[0]["inTruncated"], "60 source values do not fit the cap")
@@ -892,24 +892,268 @@ class PhaseCBusinessKeys(_Walk):
         }
         source = {"sample": {"columns": ["id"], "rows": [[1]]}}
         # Same reason as above: tracing calls the sys.path engines module.
-        original = tracing.engines.scan_bounded
+        original = tracing.engines.weak_candidates
 
         def boom(*args, **kwargs):
             raise tracing.engines.DbError("timeout", "canceling statement due to statement timeout")
 
-        tracing.engines.scan_bounded = boom
+        tracing.engines.weak_candidates = boom
         try:
             warnings = []
             rows = tracing._weak_rows(
                 self.profile, self.connection, scene, declared, {"Order": source}, warnings
             )
         finally:
-            tracing.engines.scan_bounded = original
+            tracing.engines.weak_candidates = original
         self.assertEqual(len(rows), 1)
         self.assertTrue(rows[0]["incomplete"])
         self.assertFalse(rows[0]["missed"], "a timeout is not the same as no match")
         self.assertEqual(rows[0]["found"], 0)
         self.assertIn("weak_timeout", [warning.get("code") for warning in warnings])
+
+    # -- item 12: stage reads full rows, not the capped sample -------------
+
+    def _seed_wide(self):
+        seed = sqlite3.connect(str(self.path))
+        try:
+            seed.execute("create table t_wide (id integer, c0 text, c1 text, c2 text, c3 text, c4 text, c5 text, amount text)")
+            seed.execute(
+                "insert into t_wide values (1, 'k', 'a', 'b', 'c', 'd', 'e', '42.50')"
+            )
+            seed.commit()
+        finally:
+            seed.close()
+
+    def test_a_stage_reads_amount_beyond_the_sample_columns(self):
+        """A declared amount column past the 6th column must still be read.
+
+        The sample is capped at SAMPLE_COLUMNS cells for display; a stage's
+        amount/status/time/display column can live further right. The stage row
+        must take it from the full result row, not from the capped sample.
+        """
+        self._seed_wide()
+        scene = self._scene(
+            [
+                {
+                    "name": "Wide",
+                    "table": "t_wide",
+                    "locate": "alias",
+                    "amountColumn": "amount",
+                    "displayColumns": ["amount"],
+                }
+            ],
+            aliases={"serial": [{"table": "t_wide", "column": "c0"}]},
+            input_alias="serial",
+            tables=["t_wide"],
+        )
+        result = self._trace("k", scene=scene["id"], direction="down")
+        row = result["stages"]["rows"][0]
+        self.assertEqual(row["amount"], "42.50", "amount is the 8th column, past the sample cap")
+        self.assertEqual(row["display"].get("amount"), "42.50")
+        self.assertNotIn("rows", str(row.get("detail", {})), "the full row must not be returned")
+
+    def test_a_weak_source_column_beyond_the_sample_is_used(self):
+        """A weak match whose source column sits past the sample is still read."""
+        declared = [
+            {"name": "Wide", "table": "t_wide", "locate": "edge"},
+            {"name": "Shared", "table": "t_shared", "locate": "weak"},
+        ]
+        scene = {
+            "stages": declared,
+            "weakMatch": [
+                {
+                    "fromStage": "Wide",
+                    "fromColumn": "amount",
+                    "toColumn": "t_shared.name",
+                    "op": "eq",
+                }
+            ],
+        }
+        # The sample omits `amount`; the full row has it.
+        source = {
+            "sample": {"columns": ["id", "c0"], "rows": [[1, "k"]]},
+            "_full": {"columns": ["id", "c0", "amount"], "rows": [[1, "k", "42.50"]]},
+        }
+        warnings = []
+        original = tracing.engines.weak_candidates
+        tracing.engines.weak_candidates = lambda *a, **k: {
+            "columns": ["name"], "rows": [["42.50"]], "truncated": False, "sql": "select ...", "binds": []
+        }
+        try:
+            rows = tracing._weak_rows(
+                self.profile, self.connection, scene, declared, {"Wide": source}, warnings
+            )
+        finally:
+            tracing.engines.weak_candidates = original
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["found"], 1, "the source value past the sample should match")
+
+    # -- item 11: weak matches filter in SQL, not the first 51 rows --------
+
+    def _seed_many(self):
+        seed = sqlite3.connect(str(self.path))
+        try:
+            seed.execute("create table t_many (id integer, code text, at text)")
+            for i in range(100):
+                seed.execute(
+                    "insert into t_many values (?, ?, ?)",
+                    (i, "A%03d" % i, "2026-11-25 10:%02d:00" % (i % 60)),
+                )
+            seed.commit()
+        finally:
+            seed.close()
+
+    def test_a_late_weak_target_is_still_found(self):
+        """A target row past the LIMIT must not be missed.
+
+        The old code did a WHERE-less `select * LIMIT 51` then filtered in
+        Python, so a match at row 80 was invisible. The condition now goes into
+        the SQL with bound values; the row cap stays for safety.
+        """
+        self._seed_many()
+        declared = [
+            {"name": "Order", "table": "t_order", "locate": "edge"},
+            {"name": "Many", "table": "t_many", "locate": "weak"},
+        ]
+        scene = {
+            "stages": declared,
+            "weakMatch": [
+                {"fromStage": "Order", "fromColumn": "code", "toColumn": "t_many.code", "op": "eq"}
+            ],
+        }
+        source = {"sample": {"columns": ["code"], "rows": [["A080"]]}}
+        warnings = []
+        rows = tracing._weak_rows(
+            self.profile, self.connection, scene, declared, {"Order": source}, warnings
+        )
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["found"], 1, "the match at row 80 must be reached")
+        self.assertNotIn("A080", rows[0]["sql"], "the value is bound, never printed into SQL")
+
+    def test_a_weak_day_range_is_bound_into_sql(self):
+        """same_day and within_minutes push a bound range into the statement."""
+        self._seed_many()
+        declared = [
+            {"name": "Order", "table": "t_order", "locate": "edge"},
+            {"name": "Many", "table": "t_many", "locate": "weak"},
+        ]
+        source = {"sample": {"columns": ["at"], "rows": [["2026-11-25 10:00:00"]]}}
+        for op, minutes in (("same_day", None), ("within_minutes", 30)):
+            with self.subTest(op=op):
+                scene = {
+                    "stages": declared,
+                    "weakMatch": [
+                        {
+                            "fromStage": "Order",
+                            "fromColumn": "at",
+                            "toColumn": "t_many.at",
+                            "op": op,
+                            "minutes": minutes,
+                        }
+                    ],
+                }
+                warnings = []
+                rows = tracing._weak_rows(
+                    self.profile, self.connection, scene, declared, {"Order": source}, warnings
+                )
+                self.assertEqual(len(rows), 1)
+                self.assertIn("where", rows[0]["sql"].lower())
+                self.assertNotIn("2026-11-25", rows[0]["sql"], "the day is a bind, not SQL text")
+
+    # -- item 10: an alias-only scene locates rows with no join at all -----
+
+    def test_an_alias_only_scene_reports_hits_even_without_an_entry(self):
+        """No edge means the probe has no table to search, but the input business
+        key can still locate rows. The stage view must show those hits even
+        though `steps` is empty and the entry probe picked nothing.
+        """
+        scene = self._scene(
+            [{"name": "Payment", "table": "t_trans", "locate": "alias"}],
+            aliases={"serial": [{"table": "t_trans", "column": "order_id"}]},
+            input_alias="serial",
+            tables=["t_trans"],
+        )
+        result = self._trace("1", scene=scene["id"], direction="down")
+        self.assertEqual(result["steps"], [], "no join: the BFS has no edge to follow")
+        self.assertFalse(result["entry"]["picked"])
+        rows = {row["stage"]: row for row in result["stages"]["rows"]}
+        self.assertIn("Payment", rows)
+        self.assertEqual(rows["Payment"]["locate"], "alias")
+        self.assertEqual(rows["Payment"]["found"], 2, "order_id = 1 holds two rows")
+        self.assertFalse(rows["Payment"]["missed"])
+
+    # -- item 8: raw driver exceptions must not fail the whole walk --------
+
+    def test_a_raw_driver_error_on_one_alias_does_not_lose_the_other(self):
+        """A real sqlite3.OperationalError (bad table) is a warning, not a crash.
+
+        fetch_matching lets driver exceptions through unwrapped; a table that
+        does not exist must not abort the trace or hide the stage that did work.
+        """
+        declared = [
+            {"name": "Payment", "table": "t_trans", "locate": "alias"},
+            {"name": "Gone", "table": "t_gone", "locate": "alias"},
+        ]
+        chosen = {
+            "stages": declared,
+            "aliases": {
+                "serial": [
+                    {"table": "t_trans", "column": "order_id"},
+                    {"table": "t_gone", "column": "order_no"},
+                ]
+            },
+            "inputAlias": "serial",
+        }
+
+        def describe(table):
+            return {"columns": [{"name": "order_id", "type": "integer"}]} if table == "t_trans" else {}
+
+        warnings = []
+        rows = tracing._alias_rows(
+            self.profile, self.connection, chosen, "1", 20, describe, warnings
+        )
+        by_stage = {row["stage"]: row for row in rows}
+        self.assertEqual(set(by_stage), {"Payment", "Gone"})
+        self.assertEqual(by_stage["Payment"]["found"], 2, "the good alias still resolves")
+        self.assertEqual(by_stage["Gone"]["found"], 0)
+        self.assertTrue(by_stage["Gone"]["missed"])
+        self.assertIn("alias_failed", [w.get("code") for w in warnings])
+
+    def test_a_raw_sqlite_timeout_on_a_weak_lookup_is_incomplete(self):
+        """An "interrupted" from SQLite's own progress handler is a timeout.
+
+        That is a real sqlite3.OperationalError, not a mocked DbError; _is_timeout
+        must recognise it and _weak_rows must flag the stage incomplete.
+        """
+        declared = [
+            {"name": "Order", "table": "t_order", "locate": "edge"},
+            {"name": "Shared", "table": "t_shared", "locate": "weak"},
+        ]
+        scene = {
+            "stages": declared,
+            "weakMatch": [
+                {"fromStage": "Order", "fromColumn": "id", "toColumn": "t_shared.left_id", "op": "eq"}
+            ],
+        }
+        source = {"sample": {"columns": ["id"], "rows": [[1]]}}
+        original = tracing.engines.weak_candidates
+
+        def interrupted(*args, **kwargs):
+            raise sqlite3.OperationalError("interrupted")
+
+        tracing.engines.weak_candidates = interrupted
+        try:
+            warnings = []
+            rows = tracing._weak_rows(
+                self.profile, self.connection, scene, declared, {"Order": source}, warnings
+            )
+        finally:
+            tracing.engines.weak_candidates = original
+        self.assertEqual(len(rows), 1)
+        self.assertTrue(rows[0]["incomplete"])
+        self.assertFalse(rows[0]["missed"], "a timeout is not the same as no match")
+        self.assertEqual(rows[0]["found"], 0)
+        self.assertIn("weak_timeout", [w.get("code") for w in warnings])
 
     # -- decision 9: a declared locate wins over an edge -------------------
 
@@ -932,6 +1176,220 @@ class PhaseCBusinessKeys(_Walk):
         self.assertEqual(len(stage_rows), 2, "the edge hit and the alias hit must not both be printed")
         self.assertEqual(result["stages"]["other"], [], "the claimed step is not re-listed as other")
         self.assertEqual(stage_rows[1]["locate"], "alias")
+
+
+class QueryConfirmation(_Walk):
+    """Item 14: alias and weak lookups obey the same full-scan gate as edges.
+
+    A query with no relation edge behind it still needs a stable id and the same
+    "ask before scanning a big, unindexed column" decision. SQLite has no row
+    estimate, so the tests mock `column_cost` (never the cost rule itself) and let
+    every query run against the real file with bound parameters.
+    """
+
+    def _costly_columns(self, rows=5_000_000):
+        """Report every column as an expensive scan; the rule stays real."""
+        original = tracing.engines.column_cost
+
+        def costly(profile, connection, table, column, schema=None):
+            return {"indexed": False, "rowEstimate": rows}
+
+        tracing.engines.column_cost = costly
+        self.addCleanup(setattr, tracing.engines, "column_cost", original)
+
+    def _record_queries(self):
+        """Wrap fetch_matching so we can see exactly which columns ran."""
+        calls = []
+        original = tracing.engines.fetch_matching
+
+        def recording(profile, connection, table, column, *args, **kwargs):
+            calls.append((table, column))
+            return original(profile, connection, table, column, *args, **kwargs)
+
+        tracing.engines.fetch_matching = recording
+        self.addCleanup(setattr, tracing.engines, "fetch_matching", original)
+        return calls
+
+    def _seed_many(self):
+        seed = sqlite3.connect(str(self.path))
+        try:
+            seed.execute("create table t_many (id integer, code text, at text)")
+            for i in range(100):
+                seed.execute(
+                    "insert into t_many values (?, ?, ?)",
+                    (i, "A%03d" % i, "2026-11-25 10:%02d:00" % (i % 60)),
+                )
+            seed.commit()
+        finally:
+            seed.close()
+
+    def test_a_costly_alias_column_is_refused_then_runs_with_its_id(self):
+        self._costly_columns()
+        calls = self._record_queries()
+        scene = scenes.save_scene(
+            self.profile,
+            "cash",
+            ["t_trans"],
+            stages=[{"name": "Payment", "table": "t_trans", "locate": "alias"}],
+            aliases={"serial": [{"table": "t_trans", "column": "order_id"}]},
+            input_alias="serial",
+        )["scene"]
+        first = self._trace("1", scene=scene["id"], direction="down")
+        target = first["confirmTargets"][0]
+        self.assertTrue(target["edge"].startswith("alias:"), "a query id is not a relation edge id")
+        self.assertEqual(target["table"], "t_trans")
+        self.assertEqual(target["column"], "order_id")
+        self.assertEqual(calls, [], "a refused query executes no SQL")
+        row = first["stages"]["rows"][0]
+        self.assertTrue(row.get("pendingConfirm"))
+        self.assertFalse(row["missed"], "a refused query is not 'no match'")
+        self.assertFalse(row["incomplete"], "a refused query is not a timeout")
+        self.assertEqual(row["found"], 0)
+        self.assertEqual(first["summary"]["needsConfirm"], 1)
+
+        calls.clear()
+        second = self._trace("1", scene=scene["id"], direction="down", confirm_slow=[target["edge"]])
+        self.assertEqual(second["confirmTargets"], [], "an approved query is no longer a target")
+        self.assertEqual(calls, [("t_trans", "order_id")], "only the approved column ran")
+        row = second["stages"]["rows"][0]
+        self.assertEqual(row["found"], 2, "order_id = 1 holds two rows")
+        self.assertFalse(row.get("pendingConfirm"))
+
+    def test_two_weak_ops_have_different_ids(self):
+        self._costly_columns()
+        self._seed_many()
+        declared = [
+            {"name": "Order", "table": "t_order", "locate": "edge"},
+            {"name": "Many", "table": "t_many", "locate": "weak"},
+        ]
+        scene = {
+            "stages": declared,
+            "weakMatch": [
+                {"fromStage": "Order", "fromColumn": "code", "toColumn": "t_many.code", "op": "eq"},
+                {"fromStage": "Order", "fromColumn": "code", "toColumn": "t_many.code", "op": "same_day"},
+            ],
+        }
+        source = {"_full": {"columns": ["code"], "rows": [["A080"]]}}
+        warnings = []
+        targets = []
+        tracing._weak_rows(
+            self.profile, self.connection, scene, declared, {"Order": source}, warnings,
+            confirm_targets=targets,
+        )
+        ids = [item["edge"] for item in targets]
+        self.assertEqual(len(ids), 2)
+        self.assertTrue(all(item.startswith("weak:") for item in ids))
+        self.assertNotEqual(ids[0], ids[1], "changing only the op must change the id")
+
+    def test_changing_the_alias_column_changes_its_id(self):
+        self._costly_columns()
+        calls = self._record_queries()
+        base = dict(
+            stages=[{"name": "Payment", "table": "t_trans", "locate": "alias"}],
+            input_alias="serial",
+        )
+        first = scenes.save_scene(
+            self.profile, "cash", ["t_trans"],
+            aliases={"serial": [{"table": "t_trans", "column": "order_id"}]}, **base
+        )["scene"]
+        target = self._trace("1", scene=first["id"], direction="down")["confirmTargets"][0]
+        self.assertEqual(calls, [])
+        second = scenes.save_scene(
+            self.profile, "cash", ["t_trans"],
+            scene_id=first["id"],
+            aliases={"serial": [{"table": "t_trans", "column": "state"}]}, **base
+        )["scene"]
+        result = self._trace("1", scene=second["id"], direction="down", confirm_slow=[target["edge"]])
+        self.assertEqual(calls, [], "the old id must not approve the new column")
+        new_targets = result["confirmTargets"]
+        self.assertEqual(len(new_targets), 1)
+        self.assertNotEqual(new_targets[0]["edge"], target["edge"])
+        self.assertEqual(new_targets[0]["column"], "state")
+
+    def test_a_multi_column_alias_approves_only_one_column(self):
+        self._costly_columns()
+        calls = self._record_queries()
+        scene = scenes.save_scene(
+            self.profile,
+            "cash",
+            ["t_trans", "t_shared"],
+            stages=[{"name": "Payment", "table": "t_trans", "locate": "alias"}],
+            aliases={"serial": [
+                {"table": "t_trans", "column": "order_id"},
+                {"table": "t_trans", "column": "state"},
+            ]},
+            input_alias="serial",
+        )["scene"]
+        first = self._trace("1", scene=scene["id"], direction="down")
+        self.assertEqual(len(first["confirmTargets"]), 2, "each column is its own decision")
+        by_column = {item["column"]: item["edge"] for item in first["confirmTargets"]}
+        self.assertEqual(calls, [])
+        calls.clear()
+        second = self._trace(
+            "1", scene=scene["id"], direction="down", confirm_slow=[by_column["order_id"]]
+        )
+        self.assertEqual(calls, [("t_trans", "order_id")], "the unapproved column stays unrun")
+        row = second["stages"]["rows"][0]
+        self.assertEqual(row["found"], 2, "rows read by the approved column are kept")
+        self.assertTrue(row.get("pendingConfirm"))
+        self.assertFalse(row["incomplete"])
+        self.assertFalse(row["missed"])
+        self.assertEqual(second["summary"]["needsConfirm"], 1)
+
+    def test_an_alias_only_scene_with_no_join_returns_and_shows_confirm(self):
+        """The early no-entry path must carry confirmTargets and a stage row."""
+        self._costly_columns()
+        scene = scenes.save_scene(
+            self.profile,
+            "cash",
+            ["t_trans"],
+            stages=[{"name": "Payment", "table": "t_trans", "locate": "alias"}],
+            aliases={"serial": [{"table": "t_trans", "column": "order_id"}]},
+            input_alias="serial",
+        )["scene"]
+        result = self._trace("1", scene=scene["id"], direction="down")
+        self.assertEqual(result["steps"], [])
+        self.assertFalse(result["entry"]["picked"])
+        self.assertEqual(len(result["confirmTargets"]), 1)
+        self.assertGreaterEqual(result["summary"]["needsConfirm"], 1)
+        row = result["stages"]["rows"][0]
+        self.assertTrue(row.get("pendingConfirm"))
+        self.assertEqual(row["found"], 0)
+        # An approved query on the early path runs and reports its rows.
+        approved = self._trace(
+            "1", scene=scene["id"], direction="down",
+            confirm_slow=[result["confirmTargets"][0]["edge"]],
+        )
+        self.assertEqual(approved["stages"]["rows"][0]["found"], 2)
+
+    def test_an_approved_alias_that_times_out_is_marked_unfinished(self):
+        """A timeout after approval is incomplete, never a silent zero."""
+        self._costly_columns()
+        scene = scenes.save_scene(
+            self.profile,
+            "cash",
+            ["t_trans"],
+            stages=[{"name": "Payment", "table": "t_trans", "locate": "alias"}],
+            aliases={"serial": [{"table": "t_trans", "column": "order_id"}]},
+            input_alias="serial",
+        )["scene"]
+        target = self._trace("1", scene=scene["id"], direction="down")["confirmTargets"][0]
+        original = tracing.engines.fetch_matching
+
+        def interrupted(*args, **kwargs):
+            raise sqlite3.OperationalError("interrupted")
+
+        tracing.engines.fetch_matching = interrupted
+        try:
+            result = self._trace(
+                "1", scene=scene["id"], direction="down", confirm_slow=[target["edge"]]
+            )
+        finally:
+            tracing.engines.fetch_matching = original
+        row = result["stages"]["rows"][0]
+        self.assertTrue(row["incomplete"])
+        self.assertFalse(row["missed"])
+        self.assertIn("alias_timeout", [w.get("code") for w in result["warnings"]])
 
 
 class TheTreeShape(_Walk):

@@ -379,10 +379,11 @@ whose locate kind is `alias` is then reached through that key, with no join at a
 which is how a table gets read when the graph has no edge to it yet.
 
 **Try it** runs the keys against the live catalogue with a value you supply, before
-the scene is saved. Each key shows its column, type, hit count, a few real values and
-how long it took; a key that finds nothing is highlighted, and Save asks you to tick a
-box before storing it. A value a column cannot hold (a word into a numeric key) is
-reported rather than guessed at, and a column that has since left the catalogue is
+the scene is saved — including keys you have only typed into the draft. Each key shows
+its column, type, hit count, a few real values and how long it took; a key that finds
+nothing is highlighted (even when it also has a type warning), and Save asks you to
+tick a box before storing it. A value a column cannot hold (a word into a numeric key)
+is reported rather than guessed at, and a column that has since left the catalogue is
 marked stale.
 
 **Weak links** describe a match that is worth showing but not worth walking: same

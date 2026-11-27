@@ -1146,6 +1146,67 @@ class BusinessKeyLookups(unittest.TestCase):
         self.assertIn("IS NOT NULL", statement)
         self.assertNotIn("DISTINCT", statement.upper(), "no DISTINCT: it would scan the whole table")
 
+    def test_oracle_date_ranges_bind_datetimes_not_iso_strings(self):
+        """Oracle converts ISO strings to TIMESTAMP by NLS_DATE_FORMAT (DD-MON-YY),
+        so binding '2026-01-02' to a TIMESTAMP comparison raises ORA-01843. The
+        rule helpers must bind real datetime objects on Oracle for same_day and
+        within_minutes, while leaving the target column bare so an index works.
+
+        Verified against a real Oracle Free container; this guards the shape.
+        """
+        import datetime
+
+        class BindCursor(FakeCursor):
+            def __init__(self):
+                super().__init__(description=[("paid_at",)], rows=[])
+                self.params = None
+
+            def execute(self, sql, params=None):
+                self.params = params
+                super().execute(sql, params)
+
+        for op, minutes in (("same_day", 0), ("within_minutes", 30)):
+            with self.subTest(op=op):
+                cursor = BindCursor()
+                result = engines.weak_candidates(
+                    profile("oracle"), FakeConnection(cursor), "T_TRANS", "PAID_AT",
+                    ["2026-01-02 10:00:00"], op, minutes, 50,
+                )
+                self.assertNotIn('"PAID_AT" =', result["sql"])
+                # column stays bare: a comparison, never TO_DATE(PAID_AT)
+                self.assertIn('"PAID_AT" >=', result["sql"])
+                self.assertNotIn("TO_DATE", result["sql"].upper())
+                self.assertTrue(cursor.params)
+                for bound in cursor.params:
+                    self.assertIsInstance(
+                        bound, datetime.datetime,
+                        f"Oracle date bind must be a datetime, got {bound!r}",
+                    )
+
+
+class TimeoutRecognition(unittest.TestCase):
+    """A real driver's timeout message is recognised across every engine.
+
+    The alias/weak lookups catch raw DBAPI exceptions (they have no common base
+    with DbError), so the marker list is the only thing telling a timeout apart
+    from a bad table. Each line below is the wording a driver actually emits.
+    """
+
+    def test_each_drivers_own_timeout_message_is_recognised(self):
+        messages = [
+            sqlite3.OperationalError("interrupted"),  # SQLite progress handler
+            Exception("canceling statement due to statement timeout"),  # PG/gauss
+            Exception("Query execution was interrupted, maximum statement execution time exceeded"),
+            Exception("ORA-01013: user requested cancel of current operation"),
+            Exception("ORA-12170: TNS:Connect timeout occurred"),
+        ]
+        for error in messages:
+            with self.subTest(message=str(error)):
+                self.assertTrue(engines._is_timeout(error), str(error))
+
+    def test_an_ordinary_error_is_not_mistaken_for_a_timeout(self):
+        self.assertFalse(engines._is_timeout(sqlite3.OperationalError("no such table: t_gone")))
+
 
 class CellPolicy(unittest.TestCase):
     """`_cell` summarises long text under `auto`, keeps it under `full`."""

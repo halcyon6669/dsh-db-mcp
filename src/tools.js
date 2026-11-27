@@ -73,6 +73,70 @@ function renderTrace(value) {
     const line = `${step.index}. ${step.table}.${step.condition ? step.condition.column : ''}  ${count}${label ? `  [${label}]` : ''}${fanout}${when}`
     return line
   })
+  // The traced key itself never goes into the text: only the column names do.
+  // An agent reading this should see the shape of the walk and its decisions,
+  // not the customer's order number or amount.
+  const traced = String(value.value == null ? '' : value.value)
+
+  // A scene read is a business story, not a list of SQL steps. Say which stage
+  // each table fills, how it was found, and what it read — but never a sample
+  // cell equal to the key the reader typed.
+  const stages = value.stages || {}
+  const stageRows = Array.isArray(stages.rows) ? stages.rows : []
+  if (stageRows.length) {
+    lines.push('')
+    lines.push(`stages (${stages.scene || 'scene'}, business order):`)
+    for (const row of stageRows) {
+      const locate = row.locate || 'edge'
+      const count = row.pendingConfirm
+        ? 'pending approval'
+        : row.incomplete
+        ? 'unfinished (timed out)'
+        : row.missed
+        ? 'not found'
+        : `${row.found || 0} row(s)`
+      const notes = []
+      if (row.status !== undefined && row.status !== null && row.status !== '') notes.push(String(row.status))
+      if (row.amount !== undefined && row.amount !== null) notes.push(`amount ${row.amount}`)
+      if (row.time !== undefined && row.time !== null) notes.push(`at ${row.time}`)
+      notes.push(`by ${locate}`)
+      lines.push(`  ${row.stage || row.table}: ${count}  [${notes.join(' · ')}]`)
+      const sample = row.sample || {}
+      const cells = (Array.isArray(sample.rows) && sample.rows[0]) || []
+      const shown = cells
+        .filter((cell) => String(cell == null ? '' : cell) !== traced)
+        .slice(0, 4)
+        .map((cell) => String(cell == null ? 'NULL' : cell))
+      if (shown.length) lines.push(`    sample: ${shown.join(' | ')}`)
+    }
+  }
+  const weak = Array.isArray(stages.weak) ? stages.weak : []
+  if (weak.length) {
+    lines.push('weak matches (shown, never walked):')
+    for (const row of weak) {
+      lines.push(`  ${row.stage || row.table}: ${row.found || 0} row(s) — ${row.matchRule || 'loose match'}${row.inTruncated ? '  [value list truncated]' : ''}`)
+    }
+  }
+  const other = Array.isArray(stages.other) ? stages.other : []
+  if (other.length) {
+    lines.push(`other tables reached: ${other.map((row) => row.table).join(', ')}`)
+  }
+
+  // A refused scan is a decision the reader has to make. Its id is a query id
+  // (alias:/weak:), NOT a relation edge — never offer it for feedback_relation.
+  const confirmTargets = Array.isArray(value.confirmTargets) ? value.confirmTargets : []
+  if (confirmTargets.length) {
+    lines.push('refused scans (tick to approve, then re-run):')
+    for (const item of confirmTargets) {
+      const rows = typeof item.rowEstimate === 'number' ? ` (~${item.rowEstimate} rows)` : ''
+      lines.push(`  ${item.table}.${item.column} [${item.edge}]: ${item.reason || 'expensive scan'}${rows}`)
+    }
+  }
+  const outside = Array.isArray(value.outside) ? value.outside : []
+  if (outside.length) {
+    lines.push(`outside the scene (not walked): ${outside.map((item) => item.table).join(', ')}`)
+  }
+
   const tail = []
   const pending = Array.isArray(value.pending) ? value.pending : []
   for (const item of pending) {
@@ -141,6 +205,28 @@ export function renderResult(value) {
       }
       const isolated = scene.isolated || [];
       if (isolated.length) lines.push(`  no join reaches: ${isolated.join(', ')}`);
+      const stages = (scene.stages || []).map((s) => `${s.name} (${s.table}, ${s.locate || 'edge'})`);
+      if (stages.length) lines.push(`  stages: ${stages.join(', ')}`);
+      const aliases = scene.aliases || {};
+      const aliasNames = Object.keys(aliases);
+      if (aliasNames.length) {
+        for (const name of aliasNames) {
+          const cols = (aliases[name] || []).map((c) => `${c.table}.${c.column}`).join(', ');
+          lines.push(`  business key ${name}${scene.inputAlias === name ? ' [input]' : ''}: ${cols}`);
+        }
+      }
+      const weakMatch = scene.weakMatch || [];
+      if (weakMatch.length) {
+        for (const w of weakMatch) {
+          lines.push(`  weak link: ${w.fromStage}.${w.fromColumn} -> ${w.toColumn} (${w.op || 'eq'}${w.op === 'within_minutes' ? ` ${w.minutes || 60}m` : ''})`);
+        }
+      }
+      const costly = scene.costly || [];
+      if (costly.length) {
+        for (const c of costly) {
+          lines.push(`  costly join: ${c.table}.${c.column}${typeof c.rowEstimate === 'number' ? ` (~${c.rowEstimate} rows)` : ''}${c.reason ? ` — ${c.reason}` : ''}`);
+        }
+      }
     }
     lines.push('');
     lines.push('pass the scene name as `scene` to trace_by_key to walk only these tables');

@@ -2146,6 +2146,113 @@ def scan_bounded(
     }
 
 
+def weak_candidates(
+    profile: dict,
+    connection,
+    table: str,
+    column: str,
+    values,
+    op: str,
+    minutes: int,
+    limit: int,
+    schema: str | None = None,
+) -> dict:
+    """Bounded rows matching a loose rule, with the rule pushed into SQL.
+
+    A WHERE-less scan plus a Python filter missed a target that sat past the
+    row cap. The condition now goes into the statement with every value bound,
+    so a match at row 80 is reached and no value appears in the SQL text. The
+    same statement timeout and LIMIT+1 truncation reporting apply.
+    """
+    import datetime
+
+    kind = profile.get("kind")
+    wanted = [value for value in values if value is not None]
+    if not wanted:
+        return {"columns": [], "rows": [], "truncated": False, "sql": "", "binds": []}
+    if kind == "oracle":
+        tokens = [f":{index + 1}" for index in range(len(wanted))]
+    elif kind == "sqlite":
+        tokens = ["?"] * len(wanted)
+    else:
+        tokens = ["%s"] * len(wanted)
+
+    binds: list = []
+    pieces: list[str] = []
+    col = _quote(kind, column)
+    if op == "eq":
+        pieces.append(f"{col} in ({', '.join(tokens)})")
+        binds = [str(value) for value in wanted]
+    elif op == "same_day":
+        for value in wanted:
+            day = str(value)[:10]
+            try:
+                end = (datetime.date.fromisoformat(day) + datetime.timedelta(days=1)).isoformat()
+            except ValueError:
+                continue
+            pieces.append(f"({col} >= ? and {col} < ?)")
+            binds.extend([day, end])
+    elif op == "within_minutes":
+        window = max(0, int(minutes))
+        for value in wanted:
+            try:
+                moment = datetime.datetime.fromisoformat(str(value)[:19])
+            except ValueError:
+                continue
+            low = (moment - datetime.timedelta(minutes=window)).isoformat(sep=" ")
+            high = (moment + datetime.timedelta(minutes=window)).isoformat(sep=" ")
+            pieces.append(f"({col} >= ? and {col} <= ?)")
+            binds.extend([low, high])
+    if not pieces or not binds:
+        return {"columns": [], "rows": [], "truncated": False, "sql": "", "binds": []}
+    if kind == "oracle" and op in ("same_day", "within_minutes"):
+        # Oracle does implicit string -> TIMESTAMP conversion using NLS_DATE_FORMAT
+        # (usually DD-MON-YY), so an ISO string bind raises ORA-01843. Bind real
+        # datetime objects instead; the rules below only build ISO strings here,
+        # so conversion is safe. The target column stays bare (no function wrap),
+        # which keeps an index on it usable.
+        converted = []
+        for bind in binds:
+            text = str(bind)
+            try:
+                converted.append(datetime.datetime.fromisoformat(text) if len(text) > 10
+                                 else datetime.datetime.strptime(text, "%Y-%m-%d"))
+            except ValueError:
+                converted.append(bind)
+        binds = converted
+    # Pieces use ? internally. SQLite keeps it; PG/MySQL use %s; Oracle needs
+    # positional :N tokens so each bind is numbered in statement order.
+    where = " or ".join(pieces)
+    if kind == "oracle":
+        seat = iter(f":{index + 1}" for index in range(len(binds)))
+        where = "".join(next(seat) if ch == "?" else ch for ch in where)
+    elif kind != "sqlite":
+        where = where.replace("?", "%s")
+    cap = max(1, int(limit)) + 1
+    owner = schema
+    if owner is None and kind in PG_LIKE:
+        owner = table_schema(profile, connection, table)
+    target = qualified(profile, table, exact=True, schema=owner)
+    sql = f"select * from {target} where {where}{_limit_clause(kind, cap)}"
+    if kind == "sqlite":
+        _arm_sqlite_timeout(connection)
+    cursor = connection.cursor()
+    try:
+        cursor.execute(sql, list(binds))
+        columns, rows, more = _rows(cursor, cap)
+    finally:
+        cursor.close()
+        if kind == "sqlite":
+            _disarm_sqlite_timeout(connection)
+    return {
+        "columns": columns,
+        "rows": rows[: max(1, int(limit))],
+        "truncated": bool(more) or len(rows) > limit,
+        "sql": sql,
+        "binds": list(binds),
+    }
+
+
 # --------------------------------------------------------------------------- #
 # DDL
 

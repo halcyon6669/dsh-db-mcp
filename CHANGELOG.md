@@ -108,7 +108,7 @@ report of each version in more detail.
   folds the rest behind a `⋯` menu.
 - **A scene can name its business keys, and match loosely where no join exists.**
   `save_scene` now takes `aliases` (`{"流水号": [{"table": "t_order", "column":
-  "order_no"}]}`, up to 20 keys and 50 columns per key), `input_alias` (which key the
+  "order_no"}]}`, up to 20 keys and 50 columns in total), `input_alias` (which key the
   typed value is typed into, required as soon as a stage locates by alias) and
   `weak_match` (`{ fromStage, fromColumn, toColumn, op }` with `op` equal, same day
   or within N minutes). A stage whose term is not a column name can therefore be
@@ -283,6 +283,15 @@ by this section.
   when a trace reports its timings, with one `trust withdrawn` line in the edge
   history; a single slow sample among fast ones does not. `cost_of` also returns
   the `timings` window, not just `lastMs`/`avgMs`.
+- **Business-key and weak-match lookups now take the same approval gate as a walk
+  step.** A costly alias or weak query is refused and listed in `confirmTargets`
+  with a `query id` rather than a relation edge id — `alias:<hash(table,column)>`
+  or `weak:<hash(fromTable,fromColumn,toTable,toColumn,op,minutes)>` over
+  case-folded names. A caller that approves by edge id alone will not approve these:
+  it must pass the query id from `confirmTargets`. These ids are **not** valid for
+  `feedback_relation`. A refused stage reads `pendingConfirm: true` and keeps the
+  rows already found instead of showing 0 rows or "not found". Callers that use the
+  panel need do nothing; the checkbox bar handles query ids and walk-edge ids alike.
 - **How old files are handled on upgrade.** Existing `relations/*.json` and
   `scenes/*.json` are read as-is — no migration step, no file rewrite on load. An
   old edge has no `timings`, `indexed` or `rowEstimate`: it keeps its saved
@@ -297,6 +306,22 @@ by this section.
 
 ### Fixed
 
+- **The Scenes / business-key / weak-link pass.** A batch of fixes to how a scene
+  is previewed, saved and read: **Try it** now previews the keys in the unsaved draft
+  (not only the last saved scene) and a 0-hit key is flagged independently of any
+  type warning, so the acknowledgement checkbox can no longer disappear; new scenes
+  get a random id so renaming one frees the name, and renaming onto an existing name
+  is refused; a raw DBAPI driver error (a SQLite timeout, a bad column) on one alias
+  or weak lookup no longer fails the whole trace; a weak target must name a table in
+  the scene; an alias-only scene with no join reports its rows; weak matching pushes
+  its `eq` / `same-day` / `within-minutes` condition into a bound SQL query so a late
+  target row is not missed by a Python-side filter; stage status/amount/time are read
+  from the full result row rather than the six-column sample; a refused or failed step
+  reads **not run** / **failed** instead of "0 rows"; the agent-facing renderer prints
+  stages, weak matches, refused queries and outside tables without ever echoing the
+  traced value; removing a scene member clears the stages and keys that named it and
+  removing a business key leaves weak links intact. Old `scenes/*.json` still load
+  unchanged; checks are strict on save only.
 - **The self-test no longer reads this machine's DBeaver.** Its DBeaver check pointed
   the scan at the real `%APPDATA%\DBeaverData`, so deleting the sample connection in
   the editor turned `npm test` red for a reason that had nothing to do with the code.
