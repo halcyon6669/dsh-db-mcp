@@ -61,8 +61,8 @@ try {
   check('initialize handshake', client.serverInfo !== null, JSON.stringify(client.serverInfo))
   const names = client.tools.map((tool) => tool.name).sort()
   check(
-    'twenty tools listed',
-    names.length === 20 && names.includes('test_connection') && names.includes('get_ddl'),
+    'twenty-one tools listed',
+    names.length === 21 && names.includes('test_connection') && names.includes('get_ddl'),
     names.join(', '),
   )
   check(
@@ -82,6 +82,7 @@ try {
       'list_scenes',
       'save_scene',
       'delete_scene',
+      'preview_aliases',
       'set_relation_condition',
       'delete_edge',
       'execute_sql',
@@ -100,6 +101,17 @@ try {
     /list_scenes/.test(toolsSource) &&
       /pass its name as `scene`/.test(toolsSource) &&
       /trace_by_key/.test(toolsSource.slice(toolsSource.indexOf('const scenes ='))),
+  )
+
+  // The scene save route must hand the business keys through as an object. It
+  // once checked `Array.isArray(aliases)`, which silently dropped every key on
+  // its way from the panel to the store.
+  const hostSource = readFileSync(join(packageDir, 'src', 'host.js'), 'utf8')
+  check(
+    'the scene save route forwards business keys as an object',
+    /aliases:\s*[\s\S]{0,240}typeof payload\.aliases === "object"[\s\S]{0,80}!Array\.isArray\(payload\.aliases\)/.test(
+      hostSource,
+    ) && /input_alias: typeof payload\.input_alias === "string"/.test(hostSource),
   )
 
   const sources = await client.callTool('list_datasources', {})

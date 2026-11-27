@@ -137,6 +137,7 @@ for real before you commit the source.
 | `mcp__db__list_scenes` | the scenes of a source: named sets of tables a trace may stay inside |
 | `mcp__db__save_scene` | create or update a scene |
 | `mcp__db__delete_scene` | remove a scene — the relation graph keeps every edge |
+| `mcp__db__preview_aliases` | trial-run a scene's business keys against the live catalog before saving |
 | `mcp__db__feedback_relation` | confirm, reject or retire a join after a trace step |
 | `mcp__db__set_relation_condition` | attach the extra predicate a join needs to be true |
 | `mcp__db__delete_edge` | remove one edge from the graph for good |
@@ -210,6 +211,13 @@ holds named sets of tables that narrow that walk to one business process. See th
 [guide's Scenes section](docs/guide.md#scenes) for the panel workflow, and the
 [reference's `trace_by_key` contract](docs/reference.md#how-tracebykey-walks) and
 [Scenes section](docs/reference.md#scenes) for the tool fields and routes.
+
+A scene can also say what its tables are called in the business — a business key such
+as `流水号` stored as `order_no` in one table and `order_id` in another — and match
+loosely where no join exists (the same day, within N minutes). A stage located by a
+key is reached without any join; a weak match is shown as a hint and never walked.
+**Try it** in the scene editor runs the keys against the live catalog first, so a key
+that finds nothing is visible before the scene is saved.
 
 ## Safety
 

@@ -1949,6 +1949,203 @@ def fetch_matching(
     }
 
 
+def bind_value(value, family: str):
+    """Coerce one bind value into a target column's family.
+
+    Char and date values stay text (so a leading-zero business key keeps its
+    zeros); a numeric target gets a real number. A value that cannot be coerced
+    returns None and the caller skips that key with a warning — a bad key must
+    never fail the whole trace or preview.
+    """
+    text = str(value)
+    if family == "number":
+        try:
+            number = float(text)
+        except (TypeError, ValueError):
+            return None
+        return int(number) if number.is_integer() else number
+    return text
+
+
+def count_matching(
+    profile: dict,
+    connection,
+    table: str,
+    column: str,
+    value,
+    allowed: set,
+    limit: int = 10,
+    schema: str | None = None,
+) -> dict:
+    """How many rows hold `value` in one column, bounded — for a key preview.
+
+    `allowed` is the set of (folded table, folded column) pairs the catalogue
+    said exist; a name outside it is refused before any SQL is built, so a scene
+    file cannot turn into an injection vector. The value travels as a bind
+    parameter, never as SQL text. One row past `limit` is fetched so `truncated`
+    can say "at least this many" without a full COUNT(*).
+    """
+    kind = profile.get("kind")
+    folded = (str(table or "").strip().casefold(), str(column or "").strip().casefold())
+    if folded not in allowed:
+        return {
+            "ok": False,
+            "reason": "unknown_table_or_column",
+            "table": table,
+            "column": column,
+            "hits": 0,
+            "truncated": False,
+        }
+    wanted = max(1, int(limit))
+    found = fetch_matching(profile, connection, table, column, [value], wanted, schema=schema)
+    return {
+        "ok": True,
+        "reason": None,
+        "table": table,
+        "column": column,
+        "hits": len(found["rows"]),
+        "truncated": bool(found.get("truncated")),
+        "sql": found.get("sql") or "",
+    }
+
+
+def column_family(type_name: str | None) -> str:
+    """The binding family a database type belongs to: char / number / date / any.
+
+    Alias and weak matches convert values by family, not by exact type: a
+    business key stored as VARCHAR in one table and NUMBER in another still
+    compares once both sides are the same Python family. `any` means the type is
+    unknown or exotic (JSON, blob) and no conversion is attempted.
+    """
+    text = str(type_name or "").strip().lower()
+    if not text:
+        return "any"
+    if any(word in text for word in ("date", "time")):
+        return "date"
+    if any(
+        word in text
+        for word in ("int", "numeric", "decimal", "number", "float", "double", "real", "money", "bigint", "smallint")
+    ):
+        return "number"
+    if any(word in text for word in ("char", "text", "varchar", "clob", "string", "enum", "uuid")):
+        return "char"
+    if "bool" in text:
+        return "char"
+    return "any"
+
+
+def sample_values(
+    profile: dict,
+    connection,
+    table: str,
+    column: str,
+    allowed: set,
+    limit: int = 10,
+    schema: str | None = None,
+) -> dict:
+    """A few real values of one column, for previewing a business-key alias.
+
+    Deliberately no DISTINCT and no COUNT(*): both would scan the whole table on
+    the exact unindexed columns aliases tend to use. We take the first non-null
+    `limit` rows (bounded by LIMIT and the statement timeout), then dedupe in
+    Python. `allowed` is the set of (folded table, folded column) pairs the
+    catalogue said exist — a name outside it is refused before any SQL is built,
+    so a scene file cannot turn into an injection vector.
+    """
+    kind = profile.get("kind")
+    folded = (str(table or "").strip().casefold(), str(column or "").strip().casefold())
+    if folded not in allowed:
+        return {
+            "ok": False,
+            "reason": "unknown_table_or_column",
+            "table": table,
+            "column": column,
+            "values": [],
+            "truncated": False,
+        }
+    wanted = max(1, int(limit)) + 1
+    quoted_column = _quote(kind, column)
+    owner = schema
+    if owner is None and kind in PG_LIKE:
+        owner = table_schema(profile, connection, table)
+    target = qualified(profile, table, exact=True, schema=owner)
+    where = f"{quoted_column} IS NOT NULL"
+    sql = f"select {quoted_column} from {target} where {where}{_limit_clause(kind, wanted)}"
+    if kind == "sqlite":
+        _arm_sqlite_timeout(connection)
+    cursor = connection.cursor()
+    try:
+        cursor.execute(sql)
+        raw = [row[0] for row in cursor.fetchall()]
+    finally:
+        cursor.close()
+        if kind == "sqlite":
+            _disarm_sqlite_timeout(connection)
+    seen: set = set()
+    values: list = []
+    for value in raw:
+        # The statement already filters NULLs; a driver that still hands one
+        # back must not put an empty sample cell in the preview.
+        if value is None:
+            continue
+        marker = str(value)
+        if marker in seen:
+            continue
+        seen.add(marker)
+        values.append(_cell(value))
+        if len(values) >= limit:
+            break
+    return {
+        "ok": True,
+        "reason": None,
+        "table": table,
+        "column": column,
+        "values": values,
+        # We read one row past the cap; if the distinct values filled the cap
+        # before the rows ran out there may be more the caller did not see.
+        "truncated": len(raw) >= wanted or len(seen) >= limit,
+    }
+
+
+def scan_bounded(
+    profile: dict,
+    connection,
+    table: str,
+    limit: int,
+    schema: str | None = None,
+) -> dict:
+    """A bounded `select *` for loose (weak) matches that no index can serve.
+
+    Weak matches compare by day or by a time window, which an equality lookup
+    cannot express portably. We read at most `limit + 1` rows, under the same
+    statement timeout as every other query, and let the caller filter in Python.
+    The extra row is only there to report truncation honestly.
+    """
+    kind = profile.get("kind")
+    wanted = max(1, int(limit)) + 1
+    owner = schema
+    if owner is None and kind in PG_LIKE:
+        owner = table_schema(profile, connection, table)
+    target = qualified(profile, table, exact=True, schema=owner)
+    sql = f"select * from {target}{_limit_clause(kind, wanted)}"
+    if kind == "sqlite":
+        _arm_sqlite_timeout(connection)
+    cursor = connection.cursor()
+    try:
+        cursor.execute(sql)
+        columns, rows, more = _rows(cursor, wanted)
+    finally:
+        cursor.close()
+        if kind == "sqlite":
+            _disarm_sqlite_timeout(connection)
+    return {
+        "columns": columns,
+        "rows": rows[: max(1, int(limit))],
+        "truncated": bool(more) or len(rows) > limit,
+        "sql": sql,
+    }
+
+
 # --------------------------------------------------------------------------- #
 # DDL
 

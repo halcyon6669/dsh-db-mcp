@@ -2232,6 +2232,16 @@ function groupTables(tables) {
          name: the catalogue is the only thing consulted, never a row. */
       const [sceneLinkFor, setSceneLinkFor] = React.useState('')
       const [sceneColumns, setSceneColumns] = React.useState({})
+      /* Business keys are declared on the draft and tried against the live
+         catalogue before saving: `preview_aliases` answers "does this value
+         actually live in these columns", which saving alone cannot know. The
+         zero-hit acknowledgement is why Save can be blocked without the store
+         understanding anything about types. */
+      const [scenePreview, setScenePreview] = React.useState(null)
+      const [scenePreviewValue, setScenePreviewValue] = React.useState('')
+      const [scenePreviewBusy, setScenePreviewBusy] = React.useState(false)
+      const [scenePreviewError, setScenePreviewError] = React.useState(null)
+      const [sceneZeroAck, setSceneZeroAck] = React.useState(false)
 
       const load = React.useCallback(async () => {
         setBusy(true)
@@ -2824,11 +2834,29 @@ function groupTables(tables) {
           return
         }
         const row = sceneRows.find((scene) => scene.id === scenePicked) || null
-        setSceneEdit(row ? { id: row.id, name: row.name || '', note: row.note || '', tables: (row.tables || []).slice() } : null)
+        setSceneEdit(
+          row
+            ? {
+                id: row.id,
+                name: row.name || '',
+                note: row.note || '',
+                tables: (row.tables || []).slice(),
+                /* Stages and business keys travel with the draft, or picking a
+                   row would silently drop what the previous row carried. */
+                stages: (row.stages || []).slice(),
+                aliases: row.aliases || {},
+                inputAlias: row.inputAlias || '',
+                weakMatch: (row.weakMatch || []).slice(),
+              }
+            : null,
+        )
         setSceneDirty(false)
         setSceneDeleteAsk(false)
         setSceneAddOpen(false)
         setSceneLinkFor('')
+        setScenePreview(null)
+        setSceneZeroAck(false)
+        setScenePreviewError(null)
       }, [sceneNew, scenePicked, sceneRows])
 
       /* The edges of the edited datasource, fetched only when a scene is open and
@@ -2861,6 +2889,59 @@ function groupTables(tables) {
         void loadSceneGraph()
       }, [tab, sceneHasIsolated, loadSceneGraph])
 
+      /* A business-key row offers a column picker for every member table, so the
+         columns of all of them are read as soon as a scene is open — not only of
+         the one table whose candidate list someone happened to expand. The key is
+         the member list, so a table added or removed re-reads; loadSceneColumns
+         keeps its own "already read" guard. Columns are dropped when the
+         datasource changes, because a name from another catalogue would offer
+         columns that table does not have. */
+      const sceneMemberKey = ((sceneEdit && sceneEdit.tables) || []).map((name) => foldName(name)).sort().join('|')
+      React.useEffect(() => {
+        setSceneColumns({})
+      }, [sceneTarget])
+      React.useEffect(() => {
+        if (tab !== 'scenes' || !sceneMemberKey) return
+        for (const name of (sceneEdit && sceneEdit.tables) || []) void loadSceneColumns(name)
+      }, [tab, sceneMemberKey, sceneTarget])
+
+      /** Try the draft's business keys against a value before they are saved.
+       * The catalogue is read live by the server; nothing here can run SQL. */
+      const previewSceneAliases = async () => {
+        const draft = sceneEdit || {}
+        const value = String(scenePreviewValue || '').trim()
+        if (!draft.id) {
+          setScenePreviewError(t('scene.saveFirst'))
+          return
+        }
+        if (!value) {
+          setScenePreviewError(t('scene.needValue'))
+          return
+        }
+        setScenePreviewBusy(true)
+        setScenePreviewError(null)
+        setSceneZeroAck(false)
+        try {
+          const payload = await apiPost('/scenes/preview-aliases', {
+            datasource: sceneTarget,
+            scene_id: draft.id,
+            value,
+            limit: 10,
+          })
+          if (payload && payload.ok === false) {
+            const failure = payload.error || {}
+            setScenePreviewError(`${failure.message || 'preview_aliases failed'}${failure.hint ? ` — ${failure.hint}` : ''}`)
+            setScenePreview(null)
+            return
+          }
+          setScenePreview({ value: (payload && payload.value) || value, keys: (payload && payload.keys) || [] })
+        } catch (error) {
+          setScenePreviewError(String((error && error.message) || error))
+        } finally {
+          setScenePreviewBusy(false)
+        }
+      }
+
       /** The columns of one member table, read once and kept by name. */
       const loadSceneColumns = React.useCallback(
         async (table) => {
@@ -2882,8 +2963,7 @@ function groupTables(tables) {
 
       /** The catalogue of the edited datasource: only table names, read through
        * list_tables. Nothing here can run a statement. */
-      const loadSceneCatalog = React.useCallback(async () => {
-        if (!sceneTarget) {
+      const loadSceneCatalog = React.useCallback(async () => {        if (!sceneTarget) {
           setSceneCatalog(null)
           return
         }
@@ -2913,10 +2993,59 @@ function groupTables(tables) {
         setSceneDirty(true)
       }
 
+      /* Business-key editing keeps the draft shape the store accepts: an object
+         of key name to [{table, column}]. A key with no column yet is a key the
+         user has just named — it is written only once a column is filled in, so a
+         half-typed key cannot reach the file. */
+      const aliasEntries = (aliases, key) => ((aliases || {})[key] || []).map((item) => ({ ...item }))
+      const setAliasColumn = (key, table, column) => {
+        const current = sceneEdit || {}
+        const aliases = { ...(current.aliases || {}) }
+        const entries = aliasEntries(aliases, key).filter((item) => foldName(item.table) !== foldName(table))
+        if (String(column || '').trim()) entries.push({ table, column: String(column).trim() })
+        if (entries.length === 0) delete aliases[key]
+        else aliases[key] = entries
+        patchScene({ aliases })
+      }
+      const renameAlias = (from, to) => {
+        const current = sceneEdit || {}
+        const name = String(to || '').trim()
+        const aliases = { ...(current.aliases || {}) }
+        const entries = aliasEntries(aliases, from)
+        delete aliases[from]
+        if (name) aliases[name] = entries
+        patchScene({
+          aliases,
+          inputAlias: foldName(current.inputAlias) === foldName(from) ? name : current.inputAlias,
+        })
+      }
+      const addAlias = () => {
+        const current = sceneEdit || {}
+        const aliases = { ...(current.aliases || {}) }
+        let name = `${t('scene.aliasDefault')} ${Object.keys(aliases).length + 1}`
+        let index = 1
+        while (aliases[name]) {
+          index += 1
+          name = `${t('scene.aliasDefault')} ${Object.keys(aliases).length + index}`
+        }
+        aliases[name] = []
+        patchScene({ aliases })
+      }
+      const removeAlias = (key) => {
+        const current = sceneEdit || {}
+        const aliases = { ...(current.aliases || {}) }
+        delete aliases[key]
+        patchScene({
+          aliases,
+          inputAlias: foldName(current.inputAlias) === foldName(key) ? '' : current.inputAlias,
+          weakMatch: (current.weakMatch || []).filter((item) => foldName(item.fromStage) !== foldName(key)),
+        })
+      }
+
       const startNewScene = () => {
         setScenePicked('')
         setSceneNew(true)
-        setSceneEdit({ id: '', name: '', note: '', tables: [] })
+        setSceneEdit({ id: '', name: '', note: '', tables: [], stages: [], aliases: {}, inputAlias: '', weakMatch: [] })
         setSceneDirty(true)
         setSceneError(null)
         setSceneDeleteAsk(false)
@@ -2936,6 +3065,16 @@ function groupTables(tables) {
           setSceneError(t('scene.keepOne'))
           return
         }
+        /* A business key that found nothing is not an error — the value may
+           simply not be in this dataset yet — but it must be acknowledged before
+           it is written down, so a typo cannot become a silent dead key. */
+        const zeroHits = ((scenePreview && scenePreview.keys) || []).filter(
+          (item) => item.alias && !item.hits && !item.warning,
+        )
+        if (zeroHits.length > 0 && !sceneZeroAck) {
+          setSceneError(fmt(t('scene.zeroHitsNeedAck'), { keys: zeroHits.map((item) => item.alias).join('、') }))
+          return
+        }
         setSceneBusy(true)
         setSceneError(null)
         try {
@@ -2947,6 +3086,13 @@ function groupTables(tables) {
                "leave it alone", so a note could never be cleared from here. */
             note: String(draft.note || '').trim(),
             tables: draft.tables,
+            /* Stages and business keys are optional, but an explicit empty value
+               is how the editor clears them — the store treats a missing value as
+               "leave it alone". Aliases are an object of key name to columns. */
+            stages: Array.isArray(draft.stages) ? draft.stages : [],
+            aliases: draft.aliases && typeof draft.aliases === 'object' ? draft.aliases : {},
+            input_alias: String(draft.inputAlias || '').trim(),
+            weak_match: Array.isArray(draft.weakMatch) ? draft.weakMatch : [],
           })
           if (payload && payload.ok === false) {
             const failure = payload.error || {}
@@ -5000,6 +5146,305 @@ function groupTables(tables) {
               ),
             )
 
+        /* Business keys. Each key names one real-world identifier and lists the
+           column that carries it in each table that has it — those column names
+           need not match, which is the whole point: `order_item.sku` and
+           `stock_move.sku` join by a value, not by a declared edge. A key marked
+           as the input is the one the value on the Trace page is typed into. */
+        const aliasKeys = Object.keys(draft && draft.aliases ? draft.aliases : {})
+        const stageNames = ((draft && draft.stages) || []).map((stage) => String(stage.name || '')).filter(Boolean)
+        const columnOptions = (key, table, value) => {
+          const columns = sceneColumns[table] || []
+          const current = String(value || '')
+          return h(
+            'select',
+            {
+              className: 'dbmcp-select is-small',
+              value: current,
+              disabled: columns.length === 0,
+              onChange: (event) => setAliasColumn(key, table, event.target.value),
+            },
+            h('option', { value: '' }, columns.length === 0 ? t('loading') : t('scene.aliasNone')),
+            columns.map((column) =>
+              h('option', { key: column.name, value: column.name }, column.name),
+            ),
+          )
+        }
+        const aliasColumnValue = (key, table) => {
+          const entry = ((draft.aliases || {})[key] || []).find((item) => foldName(item.table) === foldName(table))
+          return entry ? entry.column : ''
+        }
+        /* A stored column can outlive its place in the catalogue (the table was
+           renamed, the member left the scene). The server marks it `stale`; the
+           row says so instead of quietly pointing at a column nobody has. */
+        const aliasStale = (key) => ((draft.aliases || {})[key] || []).some((item) => item.stale)
+        const aliasBlock = h(
+          'div',
+          { className: 'dbmcp-scene-block' },
+          h('p', { className: 'dbmcp-label' }, t('scene.aliasTitle')),
+          h('p', { className: 'dbmcp-hint' }, t('scene.aliasHint')),
+          aliasKeys.length === 0
+            ? h('p', { className: 'dbmcp-hint' }, t('scene.aliasEmpty'))
+            : h(
+                'div',
+                { className: 'dbmcp-scene-aliases' },
+                aliasKeys.map((key) =>
+                  h(
+                    'div',
+                    { key, className: 'dbmcp-scene-alias' },
+                    h(
+                      'div',
+                      { className: 'dbmcp-scene-member-head' },
+                      h('input', {
+                        className: 'dbmcp-input is-small',
+                        defaultValue: key,
+                        'aria-label': t('scene.aliasName'),
+                        onBlur: (event) => {
+                          const next = String(event.target.value || '').trim()
+                          if (next !== key) renameAlias(key, next)
+                        },
+                        onKeyDown: (event) => {
+                          if (event.key === 'Enter') event.target.blur()
+                        },
+                      }),
+                      h(
+                        'label',
+                        { className: 'dbmcp-inline dbmcp-scene-alias-input' },
+                        h('input', {
+                          type: 'radio',
+                          name: 'dbmcp-scene-input-alias',
+                          checked: foldName(draft.inputAlias) === foldName(key),
+                          onChange: () => patchScene({ inputAlias: key }),
+                        }),
+                        t('scene.aliasInput'),
+                      ),
+                      h(
+                        'button',
+                        {
+                          type: 'button',
+                          className: 'dbmcp-btn is-small',
+                          'aria-label': `${t('scene.aliasRemove')}: ${key}`,
+                          onClick: () => removeAlias(key),
+                        },
+                        t('scene.aliasRemove'),
+                      ),
+                    ),
+                    h(
+                      'div',
+                      { className: 'dbmcp-scene-alias-cols' },
+                      members.map((table) =>
+                        h(
+                          'label',
+                          { key: table, className: 'dbmcp-cell' },
+                          h('span', { className: 'dbmcp-label' }, fmt(t('scene.aliasColumn'), { table })),
+                          columnOptions(key, table, aliasColumnValue(key, table)),
+                        ),
+                      ),
+                    ),
+                    aliasStale(key) ? h('p', { className: 'dbmcp-hint dbmcp-edge-error' }, t('scene.aliasStaleHint')) : null,
+                  ),
+                ),
+              ),
+          h(
+            'div',
+            { className: 'dbmcp-inline' },
+            h('button', { type: 'button', className: 'dbmcp-btn is-small', disabled: sceneBusy, onClick: addAlias }, t('scene.addAlias')),
+          ),
+        )
+
+        /* The preview: the only place a key is proven. It reads a few rows to
+           show what the value would locate, which is why it runs on a button and
+           never on every keystroke. */
+        const previewRows = scenePreview && Array.isArray(scenePreview.keys) ? scenePreview.keys : []
+        const zeroHits = previewRows.filter((item) => item.alias && !item.hits && !item.warning)
+        const previewBlock = !draft || !draft.id
+          ? null
+          : h(
+              'div',
+              { className: 'dbmcp-scene-block' },
+              h('p', { className: 'dbmcp-label' }, t('scene.previewTitle')),
+              h(
+                'div',
+                { className: 'dbmcp-inline' },
+                h('input', {
+                  className: 'dbmcp-input',
+                  value: scenePreviewValue,
+                  placeholder: t('scene.previewValue'),
+                  onChange: (event) => setScenePreviewValue(event.target.value),
+                }),
+                h(
+                  'button',
+                  {
+                    type: 'button',
+                    className: 'dbmcp-btn is-small',
+                    disabled: scenePreviewBusy || aliasKeys.length === 0,
+                    onClick: () => void previewSceneAliases(),
+                  },
+                  scenePreviewBusy ? t('loading') : t('scene.preview'),
+                ),
+              ),
+              scenePreviewError ? h('p', { className: 'dbmcp-hint dbmcp-edge-error' }, scenePreviewError) : null,
+              previewRows.length === 0
+                ? h('p', { className: 'dbmcp-hint' }, t('scene.previewEmpty'))
+                : h(
+                    'table',
+                    { className: 'dbmcp-table dbmcp-scene-preview' },
+                    h(
+                      'thead',
+                      null,
+                      h(
+                        'tr',
+                        null,
+                        h('th', null, t('scene.aliasName')),
+                        h('th', null, t('scene.previewTable')),
+                        h('th', null, t('scene.previewType')),
+                        h('th', null, t('scene.previewHits')),
+                        h('th', null, t('scene.previewSamples')),
+                        h('th', null, t('scene.previewMs')),
+                        h('th', null, t('scene.previewWarning')),
+                      ),
+                    ),
+                    h(
+                      'tbody',
+                      null,
+                      previewRows.map((item) =>
+                        h(
+                          'tr',
+                          {
+                            key: `${item.alias}.${item.table}.${item.column}`,
+                            className: item.alias && !item.hits && !item.warning ? 'is-zero' : null,
+                          },
+                          h('td', null, item.alias || ''),
+                          h('td', null, h('code', null, `${item.table}.${item.column}`)),
+                          h('td', null, item.type || ''),
+                          h('td', null, item.warning ? '—' : String(item.hits || 0)),
+                          h('td', null, (item.samples || []).join('、')),
+                          h('td', null, String(item.ms || 0)),
+                          h('td', null, item.warning || ''),
+                        ),
+                      ),
+                    ),
+                  ),
+              zeroHits.length === 0
+                ? null
+                : h(
+                    'label',
+                    { className: 'dbmcp-inline' },
+                    h('input', {
+                      type: 'checkbox',
+                      checked: sceneZeroAck,
+                      onChange: (event) => setSceneZeroAck(event.target.checked),
+                    }),
+                    t('scene.zeroAck'),
+                  ),
+            )
+
+        /* Weak links are read beside the walk and never feed it: a column pair
+           that often holds (same day, same hour) is evidence for a human, not a
+           join the walker may follow. */
+        const weakRows = ((draft && draft.weakMatch) || []).map((item, index) => ({ ...item, index }))
+        const patchWeak = (index, changes) => {
+          const next = ((draft && draft.weakMatch) || []).map((item, at) => (at === index ? { ...item, ...changes } : item))
+          patchScene({ weakMatch: next })
+        }
+        const weakBlock = h(
+          'div',
+          { className: 'dbmcp-scene-block' },
+          h('p', { className: 'dbmcp-label' }, t('scene.weakTitle')),
+          h('p', { className: 'dbmcp-hint' }, t('scene.weakHint')),
+          weakRows.length === 0
+            ? h('p', { className: 'dbmcp-hint' }, t('scene.weakEmpty'))
+            : h(
+                'div',
+                { className: 'dbmcp-scene-weak' },
+                weakRows.map((item) =>
+                  h(
+                    'div',
+                    { key: item.index, className: 'dbmcp-scene-weak-row' },
+                    h(
+                      'select',
+                      {
+                        className: 'dbmcp-select is-small',
+                        value: String(item.fromStage || ''),
+                        'aria-label': t('scene.weakFrom'),
+                        onChange: (event) => patchWeak(item.index, { fromStage: event.target.value }),
+                      },
+                      h('option', { value: '' }, t('scene.weakFrom')),
+                      stageNames.map((name) => h('option', { key: name, value: name }, name)),
+                    ),
+                    h('input', {
+                      className: 'dbmcp-input is-small',
+                      defaultValue: String(item.fromColumn || ''),
+                      'aria-label': t('scene.weakColumn'),
+                      placeholder: t('scene.weakColumn'),
+                      onBlur: (event) => patchWeak(item.index, { fromColumn: String(event.target.value || '').trim() }),
+                    }),
+                    h('input', {
+                      className: 'dbmcp-input is-small',
+                      defaultValue: String(item.toColumn || ''),
+                      'aria-label': t('scene.weakTo'),
+                      placeholder: t('scene.weakTo'),
+                      onBlur: (event) => patchWeak(item.index, { toColumn: String(event.target.value || '').trim() }),
+                    }),
+                    h(
+                      'select',
+                      {
+                        className: 'dbmcp-select is-small',
+                        value: String(item.op || 'eq'),
+                        'aria-label': t('scene.weakOp'),
+                        onChange: (event) => patchWeak(item.index, { op: event.target.value }),
+                      },
+                      h('option', { value: 'eq' }, t('scene.weakEq')),
+                      h('option', { value: 'same_day' }, t('scene.weakDay')),
+                      h('option', { value: 'within_minutes' }, t('scene.weakMinutes')),
+                    ),
+                    String(item.op || 'eq') === 'within_minutes'
+                      ? h('input', {
+                          className: 'dbmcp-input is-small dbmcp-scene-weak-minutes',
+                          type: 'number',
+                          min: '1',
+                          defaultValue: String(item.minutes || 60),
+                          'aria-label': t('scene.weakMinutes'),
+                          onBlur: (event) =>
+                            patchWeak(item.index, { minutes: Number(event.target.value) > 0 ? Number(event.target.value) : 60 }),
+                        })
+                      : null,
+                    h(
+                      'button',
+                      {
+                        type: 'button',
+                        className: 'dbmcp-btn is-small',
+                        'aria-label': t('scene.weakRemove'),
+                        onClick: () => {
+                          patchScene({ weakMatch: ((draft && draft.weakMatch) || []).filter((row, at) => at !== item.index) })
+                        },
+                      },
+                      t('scene.weakRemove'),
+                    ),
+                  ),
+                ),
+              ),
+          h(
+            'div',
+            { className: 'dbmcp-inline' },
+            h(
+              'button',
+              {
+                type: 'button',
+                className: 'dbmcp-btn is-small',
+                disabled: sceneBusy,
+                onClick: () =>
+                  patchScene({
+                    weakMatch: ((draft && draft.weakMatch) || []).concat([
+                      { fromStage: '', fromColumn: '', toColumn: '', op: 'eq' },
+                    ]),
+                  }),
+              },
+              t('scene.addWeak'),
+            ),
+          ),
+        )
+
         const deleteBlock = !draft || !draft.id
           ? null
           : !sceneDeleteAsk
@@ -5112,6 +5557,9 @@ function groupTables(tables) {
                     linkRows,
                   )
                 : null,
+              draft.id ? aliasBlock : null,
+              previewBlock,
+              draft.id ? weakBlock : null,
               draft.id ? isolatedBlock : null,
             )
 
@@ -5792,24 +6240,41 @@ function groupTables(tables) {
       const renderStageRow = (row, index) => {
         const nested = Boolean(row.parent)
         const label = stageStatusText(row)
+        const weak = Boolean(row.weak || row.locate === 'weak')
         return h(
           'div',
           {
             key: `${row.stage}:${index}`,
-            className: `dbmcp-stage-row${row.missed ? ' is-missed' : ''}${nested ? ' is-nested' : ''}`,
+            className: `dbmcp-stage-row${row.missed ? ' is-missed' : ''}${nested ? ' is-nested' : ''}${weak ? ' is-weak' : ''}${row.incomplete ? ' is-incomplete' : ''}`,
           },
           h(
             'div',
             { className: 'dbmcp-stage-main' },
             h('span', { className: 'dbmcp-stage-name' }, row.stage || row.table),
             h('span', { className: 'dbmcp-stage-locate' }, row.locate === 'alias' ? t('stage.byAlias') : row.locate === 'weak' ? t('stage.weak') : t('stage.byEdge')),
-            h('span', { className: 'dbmcp-stage-count' }, row.missed ? '' : fmt(t('trace.rows'), { n: row.found || 0 })),
-            label ? h('span', { className: 'dbmcp-stage-status' }, label) : null,
+            h('span', { className: 'dbmcp-stage-count' }, row.missed || row.incomplete ? '' : fmt(t('trace.rows'), { n: row.found || 0 })),
+            row.incomplete ? h('span', { className: 'dbmcp-stage-status' }, t('stage.incomplete')) : label ? h('span', { className: 'dbmcp-stage-status' }, label) : null,
             row.amount !== undefined && row.amount !== null ? h('span', { className: 'dbmcp-stage-amount' }, String(row.amount)) : null,
             row.time !== undefined && row.time !== null ? h('span', { className: 'dbmcp-stage-time' }, String(row.time)) : null,
           ),
-          row.missed
+          row.incomplete
+            ? h('p', { className: 'dbmcp-hint dbmcp-stage-warning' }, row.warning || t('stage.incompleteHint'))
+            : row.missed
             ? h('p', { className: 'dbmcp-hint dbmcp-stage-missed' }, t('stage.missedHint'))
+            : null,
+          /* A weak row says why it is only weak — the rule text the server built
+             from fromStage/fromColumn/toColumn/op — and whether the value list it
+             matched against was cut off at the cap. */
+          weak && row.matchRule
+            ? h('p', { className: 'dbmcp-hint dbmcp-stage-weakrule' }, fmt(t('stage.weakRule'), { rule: row.matchRule }))
+            : null,
+          weak && row.inTruncated
+            ? h('p', { className: 'dbmcp-hint' }, fmt(t('stage.inTruncated'), { n: (row.inValues || []).length }))
+            : null,
+          /* Feedback belongs to real steps only: a missed stage or a weak row
+             has no edge behind it to judge, so only an edge row offers it. */
+          row.missed || row.incomplete || weak
+            ? null
             : stageNeedsFeedback(row)
               ? h(
                   'div',
@@ -5850,11 +6315,23 @@ function groupTables(tables) {
       const renderStages = (stages) => {
         const rows = (stages && stages.rows) || []
         const other = (stages && stages.other) || []
+        const weak = (stages && stages.weak) || []
         return h(
           'div',
           { className: 'dbmcp-stage-view' },
           h('p', { className: 'dbmcp-hint' }, fmt(t('stage.sceneName'), { name: stages.scene || '' })),
           rows.map(renderStageRow),
+          /* A weak match never walks, so it is read after the stages as a hint
+             rather than inside them — with the rule it matched on, so nobody
+             mistakes it for a join the walk followed. */
+          weak.length > 0
+            ? h(
+                'div',
+                { className: 'dbmcp-stage-other dbmcp-stage-weak' },
+                h('p', { className: 'dbmcp-label' }, t('stage.weakTitle')),
+                weak.map((row, index) => renderStageRow(row, rows.length + other.length + index)),
+              )
+            : null,
           other.length > 0
             ? h(
                 'div',

@@ -106,6 +106,36 @@ report of each version in more detail.
   **按场景运行 / free trace** switch: the scene mode reads one row per stage,
   keeps feedback only on pending edges, abnormal fanout and empty steps, and
   folds the rest behind a `⋯` menu.
+- **A scene can name its business keys, and match loosely where no join exists.**
+  `save_scene` now takes `aliases` (`{"流水号": [{"table": "t_order", "column":
+  "order_no"}]}`, up to 20 keys and 50 columns per key), `input_alias` (which key the
+  typed value is typed into, required as soon as a stage locates by alias) and
+  `weak_match` (`{ fromStage, fromColumn, toColumn, op }` with `op` equal, same day
+  or within N minutes). A stage whose term is not a column name can therefore be
+  reached by `locate: "alias"` — the value is bound to each target column by its
+  family, so the same key works whether the column is text or numeric, and a value a
+  column cannot hold is skipped with a warning instead of failing the walk. A
+  `locate: "weak"` stage is reported under `stages.weak` with the rule it matched on
+  and its IN list capped at 50 values, but never becomes a walk step: it does not
+  seed the walk, is not counted in `tablesHit` or `steps`, and is never written into
+  the relation graph. Every alias and weak lookup runs bounded, parameter-bound and
+  under the statement timeout; a timeout marks the stage `incomplete` instead of
+  "no row". A scene whose member or column disappeared marks the key `stale` rather
+  than dropping it silently.
+- **`preview_aliases` tries a saved scene's business keys before you trust them.**
+  It returns one row per alias column — table, column, type, hits, a few real
+  samples, the time it took and a warning — with a 0-hit key called out, a
+  disagreeing type family flagged, and a stale catalog name reported instead of
+  guessed at. Names are whitelisted against a live `describe_table`, so a scene file
+  cannot name a column that reaches SQL, and neither samples nor hit counts are ever
+  written to the audit log. The Scenes page runs it from the editor: the Save button
+  asks for an explicit acknowledgement when a previewed key found nothing.
+- **The scene editor and the stage rows show the new reading.** The Scenes page gains
+  a **business keys** block (one card per key, a column picker per member table and a
+  radio marking the input key), a **preview** table and a **weak links** block. The
+  Trace tab's stage rows carry a dashed style for a weak row, a warning style plus the
+  reason for an incomplete one, the matched-on rule text, and an "IN list was
+  truncated" note — so a loose match is visibly a hint, not a walked step.
 
 ### Changed
 

@@ -32,6 +32,9 @@ import writes
 import store
 
 DEFAULT_MAX_ROWS = int(os.environ.get("DB_MCP_MAX_ROWS") or 200)
+# A business-key preview only needs to prove "this value reaches this column";
+# a handful of rows is enough, and it keeps the bounded query cheap.
+PREVIEW_LIMIT = 10
 HARD_MAX_ROWS = int(os.environ.get("DB_MCP_MAX_ROWS_HARD") or 2000)
 
 USAGE = """usage: main.py [--stdio | --http | --sse] [--host HOST] [--port PORT] [--path PATH]
@@ -895,6 +898,9 @@ def save_scene(
     note: Optional[str] = None,
     scene_id: Optional[str] = None,
     stages: Optional[list[dict]] = None,
+    aliases: Optional[dict] = None,
+    input_alias: Optional[str] = None,
+    weak_match: Optional[list[dict]] = None,
 ) -> dict:
     """Create or update a named table set.
 
@@ -906,13 +912,132 @@ def save_scene(
     `stages` optionally declares the reading order: `[{name, table, locate,
     displayColumns, statusColumn, statusLabels, amountColumn, timeColumn}]`. Omit
     it to leave the existing stages alone; pass `[]` to clear them.
+
+    `aliases` maps a business-key name to the columns carrying it, for example
+    `{"流水号": [{"table": "t_order", "column": "order_no"}]}`; `input_alias`
+    names the key the panel input supplies, which a `locate: "alias"` stage is
+    filled from; `weak_match` declares loose column pairs
+    `[{fromStage, fromColumn, toColumn, op}]` that are read but never walk.
+    Structural checks only — whether a column exists or its type fits is a live
+    question, answered by `preview_aliases`.
     """
     try:
         profile, _secrets = store.resolve(datasource)
         result = scenes.save_scene(
-            profile, name, tables, note=note, scene_id=scene_id, stages=stages
+            profile, name, tables, note=note, scene_id=scene_id, stages=stages,
+            aliases=aliases, input_alias=input_alias, weak_match=weak_match,
         )
         return {"ok": True, "datasource": _source(profile), **result}
+    except Exception as error:  # noqa: BLE001
+        return _error(error)
+
+
+@mcp.tool()
+@_audited
+def preview_aliases(
+    scene_id: str,
+    value: str,
+    datasource: Optional[str] = None,
+    limit: int = 10,
+) -> dict:
+    """Trial-run a scene's business-key aliases before saving them.
+
+    For every alias column this reports the live type, a bounded hit count for
+    `value`, a few sample values and a warning when the column is missing or its
+    type disagrees with its siblings. Type compatibility is a warning here only
+    — `save_scene` still accepts any structurally valid alias. Sample values and
+    hit counts stay in this return value and are never written to the audit log.
+    The catalog is read live once per call; nothing is cached across sessions.
+    """
+    try:
+        capped = max(1, min(int(limit), PREVIEW_LIMIT))
+        profile, (connection, close) = _open(datasource)
+        try:
+            chosen = scenes.resolve(profile, scene_id)
+            if chosen is None:
+                return _error(store.StoreError("user_error", f"no scene {scene_id!r}", "save one first"))
+            known = scenes._table_list(chosen.get("tables"))
+            allowed = set()
+            for table in known:
+                try:
+                    info = engines.describe_table(profile, connection, table, None)
+                except engines.DbError:
+                    continue
+                for column in info.get("columns") or []:
+                    allowed.add((scenes._fold(table), scenes._fold(column.get("name"))))
+            result = []
+            for name, columns in (chosen.get("aliases") or {}).items():
+                families = []
+                for item in columns:
+                    table = item.get("table")
+                    column = item.get("column")
+                    entry = {
+                        "alias": name,
+                        "table": table,
+                        "column": column,
+                        "type": None,
+                        "hits": 0,
+                        "samples": [],
+                        "ms": 0,
+                        "warning": None,
+                    }
+                    if scenes._fold(table) not in {scenes._fold(t) for t in known}:
+                        entry["warning"] = "stale — table left the scene"
+                        result.append(entry)
+                        continue
+                    try:
+                        info = engines.describe_table(profile, connection, table, None)
+                    except engines.DbError as error:
+                        entry["warning"] = f"stale — {error}"
+                        result.append(entry)
+                        continue
+                    field = next(
+                        (c for c in info.get("columns") or [] if scenes._fold(c.get("name")) == scenes._fold(column)),
+                        None,
+                    )
+                    if field is None:
+                        entry["warning"] = "stale — column is gone from the catalog"
+                        result.append(entry)
+                        continue
+                    entry["type"] = field.get("type")
+                    family = engines.column_family(field.get("type"))
+                    families.append(family)
+                    started = time.perf_counter()
+                    # Two cheap questions: does the typed value reach this column
+                    # (a bounded equality count), and what does the column hold
+                    # (a bounded sample, no DISTINCT and no COUNT(*)). A value the
+                    # column's family cannot represent is reported, not thrown.
+                    bound = engines.bind_value(value, family)
+                    try:
+                        if bound is None:
+                            entry["warning"] = (
+                                f"value {value!r} is not a {family} value; this column was not queried"
+                            )
+                        else:
+                            hits = engines.count_matching(
+                                profile, connection, table, column, bound, allowed, limit=capped
+                            )
+                            entry["hits"] = int(hits.get("hits") or 0)
+                            entry["truncated"] = bool(hits.get("truncated"))
+                            sample = engines.sample_values(
+                                profile, connection, table, column, allowed, limit=capped
+                            )
+                            entry["samples"] = sample.get("values") or []
+                    except engines.DbError as error:
+                        entry["warning"] = f"query failed: {error}"
+                    entry["ms"] = int((time.perf_counter() - started) * 1000)
+                    result.append(entry)
+                distinct = {f for f in families if f != "any"}
+                if len(distinct) > 1:
+                    for entry in result:
+                        if entry["alias"] == name and entry["warning"] is None:
+                            entry["warning"] = "type families disagree across this alias"
+                for entry in result:
+                    if entry["alias"] == name and entry["warning"] is None and not entry["hits"]:
+                        entry["warning"] = "0 hits for this value — confirm before saving"
+            return {"ok": True, "datasource": _source(profile), "value": value, "keys": result}
+        finally:
+            close()
     except Exception as error:  # noqa: BLE001
         return _error(error)
 

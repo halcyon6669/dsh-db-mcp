@@ -187,7 +187,11 @@ class StageLayout(unittest.TestCase):
              "statusLabels": {"paid": "Paid"}, "amountColumn": "amount", "timeColumn": "created_at"},
             {"name": "Payment", "table": "t_trans", "locate": "alias"},
         ]
-        result = scenes.save_scene(self.profile, "cash", ["t_order", "t_trans"], stages=stages)
+        result = scenes.save_scene(
+            self.profile, "cash", ["t_order", "t_trans"], stages=stages,
+            aliases={"serial": [{"table": "t_trans", "column": "order_no"}]},
+            input_alias="serial",
+        )
         saved = result["scene"]["stages"]
         self.assertEqual([s["name"] for s in saved], ["Order", "Payment"])
         self.assertEqual(saved[0]["statusLabels"], {"paid": "Paid"})
@@ -225,6 +229,37 @@ class StageLayout(unittest.TestCase):
         )
         again = scenes.save_scene(self.profile, "cash", ["t_order", "t_trans"])
         self.assertEqual(len(again["scene"]["stages"]), 1)
+
+    def test_an_empty_input_alias_clears_it_instead_of_meaning_leave_alone(self):
+        """The panel posts '' when its key is removed; that must clear, not keep.
+
+        Guarding the column removal is the reason: leaving the old inputAlias
+        behind made the next save fail with "inputAlias ... is not one of the
+        scene's aliases" because the key it named had already gone.
+        """
+        scenes.save_scene(
+            self.profile, "cash", ["t_order", "t_trans"],
+            stages=[{"name": "Payment", "table": "t_trans", "locate": "alias"}],
+            aliases={"serial": [{"table": "t_trans", "column": "order_no"}]},
+            input_alias="serial",
+        )
+        dropped = scenes.save_scene(
+            self.profile, "cash", ["t_order", "t_trans"],
+            stages=[{"name": "Payment", "table": "t_trans", "locate": "edge"}],
+            aliases={},
+            input_alias="",
+        )
+        self.assertNotIn("inputAlias", dropped["scene"])
+        self.assertNotIn("aliases", dropped["scene"])
+
+    def test_leaving_input_alias_out_keeps_the_old_one(self):
+        scenes.save_scene(
+            self.profile, "cash", ["t_order", "t_trans"],
+            aliases={"serial": [{"table": "t_trans", "column": "order_no"}]},
+            input_alias="serial",
+        )
+        again = scenes.save_scene(self.profile, "cash", ["t_order", "t_trans"])
+        self.assertEqual(again["scene"]["inputAlias"], "serial")
 
     def test_an_empty_stage_list_clears_them(self):
         scenes.save_scene(

@@ -437,6 +437,18 @@ check(
     /catalogue\.slice\(0, CATALOG_LIMIT\)/.test(sceneCard) &&
     /fmt\(t\('scene\.moreTables'\), \{ n: hiddenCount \}\)/.test(sceneCard),
 )
+// The business-key rows offer a column picker for every member, so their
+// columns must be read when the scene opens — not only for the one table whose
+// candidate list was expanded. Missing that left every picker saying "checking"
+// for ever, which the Phase C screenshot pass caught.
+check(
+  'scenes page: the columns of every member are read, not only the expanded one',
+  /const sceneMemberKey = \(\(sceneEdit && sceneEdit\.tables\) \|\| \[\]\)\.map\(\(name\) => foldName\(name\)\)\.sort\(\)\.join\('\|'\)/.test(
+    sceneLogic,
+  ) &&
+    /for \(const name of \(sceneEdit && sceneEdit\.tables\) \|\| \[\]\) void loadSceneColumns\(name\)/.test(sceneLogic) &&
+    /setSceneColumns\(\{\}\)[\s\S]{0,160}\[sceneTarget\]/.test(sceneLogic),
+)
 check(
   'scenes page: the join path wraps at narrow width instead of ellipsis',
   /\.dbmcp-scene-link \.dbmcp-edge-path \{[\s\S]{0,220}overflow-wrap: anywhere;/.test(source) &&
@@ -1571,9 +1583,18 @@ check(
   /const renderStages = \(stages\) =>/.test(traceCard) &&
     /const renderStageRow = \(row, index\) =>/.test(traceCard) &&
     /rows\.map\(renderStageRow\)/.test(traceCard) &&
-    /className: `dbmcp-stage-row\$\{row\.missed \? ' is-missed' : ''\}\$\{nested \? ' is-nested' : ''\}`/.test(traceCard) &&
+    /className: `dbmcp-stage-row\$\{row\.missed \? ' is-missed' : ''\}\$\{nested \? ' is-nested' : ''\}\$\{weak \? ' is-weak' : ''\}\$\{row\.incomplete \? ' is-incomplete' : ''\}`/.test(
+      traceCard,
+    ) &&
     /stage\.sceneName/.test(source) &&
     /stage\.notFound/.test(source),
+)
+check(
+  'trace page: a weak match is shown after the stages, never inside them',
+  /const weak = \(stages && stages\.weak\) \|\| \[\]/.test(traceCard) &&
+    /dbmcp-stage-other dbmcp-stage-weak/.test(traceCard) &&
+    /weak\.map\(\(row, index\) => renderStageRow\(row, rows\.length \+ other\.length \+ index\)\)/.test(traceCard) &&
+    /stage\.weakTitle/.test(source),
 )
 check(
   'trace page: feedback sits only where a decision is needed, else behind "..."',

@@ -351,3 +351,29 @@ the broken link is visible; SQL, bound values, timing and the edge stay folded i
 row's `⋯` menu. Feedback buttons appear only where a decision is needed — a pending
 edge, an unusually wide fanout or a step with no rows; confirmed steps just read
 clean. Switch back to **自由追踪** any time for the usual left-to-right graph.
+
+### Business keys and weak links
+
+Not every business term is a column name, and not every link is a join. The editor
+has two blocks for that.
+
+**Business keys** name a term once and say which column carries it in each member
+table — `流水号` may be `order_no` here and `order_id` there. Add a key, pick a column
+per table (leave a table empty when it does not carry the key), and mark one key as
+the **input** key: that is where the value you type into the Trace tab goes. A stage
+whose locate kind is `alias` is then reached through that key, with no join at all —
+which is how a table gets read when the graph has no edge to it yet.
+
+**Try it** runs the keys against the live catalogue with a value you supply, before
+the scene is saved. Each key shows its column, type, hit count, a few real values and
+how long it took; a key that finds nothing is highlighted, and Save asks you to tick a
+box before storing it. A value a column cannot hold (a word into a numeric key) is
+reported rather than guessed at, and a column that has since left the catalogue is
+marked stale.
+
+**Weak links** describe a match that is worth showing but not worth walking: same
+day, or within N minutes, between a column on one stage and a column on another
+table. A weak row appears under the stage rows in a dashed style with the rule it
+matched on, and is never counted as a step, never seeds the walk and never writes an
+edge. It exists so the reader sees the plausible link and can make the join real on
+the Relations page if it is one.

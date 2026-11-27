@@ -31,11 +31,20 @@ TABLE_LIMIT = 500
 # mean exactly what the walker will follow.
 LINK_STATUSES = ("confirmed", "trusted")
 
-# How a scene stage locates its rows. `edge` is the only kind phase B can fill;
-# `alias` and `weak` are reserved for business-key / weak associations (phase C).
+# How a scene stage locates its rows. `edge` follows a confirmed join; `alias`
+# locates straight on a business key; `weak` is a deliberately loose association
+# that is never used as a walk seed (phase C).
 LOCATE_KINDS = ("edge", "alias", "weak")
 STAGE_LIMIT = 50
 DISPLAY_COLUMN_LIMIT = 4
+
+# Business-key aliases: one key name mapped to its column in several tables, so
+# a value can locate a table with no foreign key between them.
+ALIAS_LIMIT = 20
+ALIAS_KEY_LIMIT = 50
+WEAK_MATCH_LIMIT = 20
+IN_VALUE_CAP = 50
+WEAK_OPS = ("eq", "same_day", "within_minutes")
 
 
 def _fold(text) -> str:
@@ -253,6 +262,168 @@ def _stage_list(stages) -> list[dict]:
     return chosen
 
 
+def _alias_map(aliases) -> dict:
+    """Validate and normalise a scene's business-key aliases.
+
+    An alias is one business key (a name like 流水号) mapped to the columns that
+    carry that value across tables — T_A.SERIAL_NO, T_B.TRACE_NO, T_C.REF_NO.
+    A value can therefore locate a table with no foreign key between them.
+    Structural checks only: whether the column exists in the catalogue is a live
+    question answered by `describe_aliases`, not by saving.
+    """
+    if aliases is None:
+        return {}
+    if isinstance(aliases, str):
+        try:
+            aliases = json.loads(aliases)
+        except (TypeError, ValueError) as error:
+            raise store.StoreError(
+                "user_error",
+                "aliases must be a JSON object",
+                "pass aliases as an object of key name to [{table, column}]",
+            ) from error
+    if not isinstance(aliases, dict):
+        raise store.StoreError(
+            "user_error",
+            "aliases must be an object",
+            "map each business key to the columns that carry it",
+        )
+    if len(aliases) > ALIAS_LIMIT:
+        raise store.StoreError(
+            "user_error",
+            f"a scene holds at most {ALIAS_LIMIT} aliases, got {len(aliases)}",
+            "keep only the keys this question actually matches on",
+        )
+    chosen: dict[str, list[dict]] = {}
+    total = 0
+    for key, columns in aliases.items():
+        name = str(key or "").strip()
+        if not name:
+            raise store.StoreError(
+                "user_error", "an alias needs a name", "name the business key, for example 流水号"
+            )
+        # A {table: column} object is a convenient shorthand for [{table, column}].
+        if isinstance(columns, dict):
+            columns = [{"table": table, "column": column} for table, column in columns.items()]
+        if not isinstance(columns, (list, tuple)):
+            raise store.StoreError(
+                "user_error",
+                f"alias {name} must be a list of columns",
+                "pass [{table, column}] for each table that carries the key",
+            )
+        entries: list[dict] = []
+        for item in columns:
+            if isinstance(item, (list, tuple)) and len(item) == 2:
+                item = {"table": item[0], "column": item[1]}
+            if not isinstance(item, dict):
+                raise store.StoreError(
+                    "user_error",
+                    f"alias {name} has a malformed column",
+                    "each column is {table, column}",
+                )
+            table = str(item.get("table") or "").strip()
+            column = str(item.get("column") or "").strip()
+            if not table or not column:
+                raise store.StoreError(
+                    "user_error",
+                    f"alias {name} has a column without a table or column name",
+                    "give each entry both a table and a column",
+                )
+            entries.append({"table": table, "column": column})
+        if not entries:
+            raise store.StoreError(
+                "user_error",
+                f"alias {name} has no columns",
+                "list at least one table.column that carries this key",
+            )
+        total += len(entries)
+        chosen[name] = entries
+    if total > ALIAS_KEY_LIMIT:
+        raise store.StoreError(
+            "user_error",
+            f"a scene holds at most {ALIAS_KEY_LIMIT} alias columns, got {total}",
+            "keep only the columns this question actually matches on",
+        )
+    return chosen
+
+
+def _input_alias(value) -> str | None:
+    """The alias the panel input supplies, or None when there is none."""
+    return str(value or "").strip() or None
+
+
+def _weak_match_list(weak) -> list[dict]:
+    """Validate loose column-pair matches. These never seed the walk."""
+    if weak is None:
+        return []
+    if isinstance(weak, str):
+        try:
+            weak = json.loads(weak)
+        except (TypeError, ValueError) as error:
+            raise store.StoreError(
+                "user_error",
+                "weakMatch must be a JSON array",
+                "pass weakMatch as [{fromStage, fromColumn, toColumn, op}]",
+            ) from error
+    if not isinstance(weak, (list, tuple)):
+        raise store.StoreError(
+            "user_error",
+            "weakMatch must be a list",
+            "pass weakMatch as [{fromStage, fromColumn, toColumn, op}]",
+        )
+    if len(weak) > WEAK_MATCH_LIMIT:
+        raise store.StoreError(
+            "user_error",
+            f"a scene holds at most {WEAK_MATCH_LIMIT} weak matches, got {len(weak)}",
+            "keep only the loose matches a reader actually needs",
+        )
+    chosen: list[dict] = []
+    for item in weak:
+        if not isinstance(item, dict):
+            raise store.StoreError(
+                "user_error", "each weak match must be an object", "pass fromStage, fromColumn, toColumn and op"
+            )
+        from_stage = str(item.get("fromStage") or "").strip()
+        from_column = str(item.get("fromColumn") or "").strip()
+        to_column = str(item.get("toColumn") or "").strip()
+        raw_op = str(item.get("op") or "eq").strip().lower()
+        if not from_stage or not from_column or not to_column:
+            raise store.StoreError(
+                "user_error",
+                "a weak match needs fromStage, fromColumn and toColumn",
+                "name the stage whose row supplies the value, and the column to compare",
+            )
+        minutes = None
+        if raw_op.startswith("within_minutes"):
+            if "(" in raw_op:
+                try:
+                    minutes = int(raw_op.split("(", 1)[1].split(")")[0])
+                except ValueError as error:
+                    raise store.StoreError(
+                        "user_error",
+                        "within_minutes needs a whole number",
+                        "for example within_minutes(30)",
+                    ) from error
+                raw_op = "within_minutes"
+            if minutes is None:
+                minutes = 60
+            if minutes <= 0:
+                raise store.StoreError(
+                    "user_error", "within_minutes must be positive", "for example within_minutes(30)"
+                )
+        elif raw_op not in ("eq", "same_day"):
+            raise store.StoreError(
+                "user_error",
+                f"unknown weak match op: {raw_op}",
+                "op must be eq, same_day or within_minutes(N)",
+            )
+        match = {"fromStage": from_stage, "fromColumn": from_column, "toColumn": to_column, "op": raw_op}
+        if minutes is not None:
+            match["minutes"] = minutes
+        chosen.append(match)
+    return chosen
+
+
 def list_scenes(profile: dict, with_links: bool = True) -> dict:
     """Every scene of one datasource, with the joins its members already share.
 
@@ -316,6 +487,20 @@ def _described(scene: dict, edges: list[dict]) -> dict:
         )
     )
     isolated = [name for name in tables if _fold(name) not in touched]
+    stages = _stage_list(scene.get("stages"))
+    aliases = _alias_map(scene.get("aliases"))
+    weak = _weak_match_list(scene.get("weakMatch"))
+    stage_names = {_fold(stage["name"]) for stage in stages}
+    # Structural staleness we can answer without the catalogue: an alias column
+    # on a table that is no longer a member, or a weak match whose fromStage is
+    # gone. Column-level staleness (the column was dropped) needs a live read and
+    # is reported by `describe_aliases`.
+    members = {_fold(name) for name in tables}
+    for key, columns in aliases.items():
+        for column in columns:
+            column["stale"] = _fold(column["table"]) not in members
+    for match in weak:
+        match["stale"] = _fold(match["fromStage"]) not in stage_names
     return {
         "id": scene.get("id"),
         "name": scene.get("name"),
@@ -326,7 +511,10 @@ def _described(scene: dict, edges: list[dict]) -> dict:
         "updatedAt": scene.get("updatedAt"),
         "edges": links,
         "isolated": isolated,
-        "stages": _stage_list(scene.get("stages")),
+        "stages": stages,
+        "aliases": aliases,
+        "inputAlias": _input_alias(scene.get("inputAlias")),
+        "weakMatch": weak,
     }
 
 
@@ -370,6 +558,9 @@ def save_scene(
     note: str | None = None,
     scene_id: str | None = None,
     stages=None,
+    aliases=None,
+    input_alias=None,
+    weak_match=None,
 ) -> dict:
     """Create a scene, or replace the tables of the one this name already owns.
 
@@ -405,24 +596,82 @@ def save_scene(
                 "stages reference tables outside the scene: " + ", ".join(stray),
                 "add those tables to the scene first, or remove the stages",
             )
+    # Phase C: aliases, the entry alias and loose matches are all optional. None
+    # leaves an existing scene's values alone; an explicit empty value clears them.
+    alias_update = _alias_map(aliases) if aliases is not None else None
+    weak_update = _weak_match_list(weak_match) if weak_match is not None else None
+    # An empty string is a caller saying "there is no entry alias", which must
+    # clear it; only None means "did not ask". Collapsing both to None would
+    # make the panel unable to drop the input key, and removing that key would
+    # then fail validation as an alias the scene no longer carries.
+    input_update = (_input_alias(input_alias) or "") if input_alias is not None else None
+    members = {_fold(table) for table in chosen}
+    if alias_update:
+        for key, columns in alias_update.items():
+            stray = [f"{c['table']}.{c['column']}" for c in columns if _fold(c["table"]) not in members]
+            if stray:
+                raise store.StoreError(
+                    "user_error",
+                    f"alias {key} references tables outside the scene: " + ", ".join(stray),
+                    "add those tables to the scene first, or remove those columns",
+                )
     doc = load(profile)
     scenes = doc.get("scenes") or []
     now = _now()
     target_id = str(scene_id or "").strip() or _uuid(wanted)
+
+    def apply_fields(scene: dict, creating: bool) -> None:
+        """Write all optional fields onto a scene, then validate their links."""
+        scene["name"] = wanted
+        scene["tables"] = chosen
+        if note is not None:
+            scene["note"] = str(note).strip() or None
+        if stage_update is not None:
+            if stage_update:
+                scene["stages"] = stage_update
+            else:
+                scene.pop("stages", None)
+        if alias_update is not None:
+            if alias_update:
+                scene["aliases"] = alias_update
+            else:
+                scene.pop("aliases", None)
+        if weak_update is not None:
+            if weak_update:
+                scene["weakMatch"] = weak_update
+            else:
+                scene.pop("weakMatch", None)
+        if input_update is not None:
+            if input_update:
+                scene["inputAlias"] = input_update
+            else:
+                scene.pop("inputAlias", None)
+        # A stage that locates by alias can only be filled by the entry alias
+        # with the scene input value. Structural checks only — type compatibility
+        # is a live question answered by preview_aliases.
+        stages_now = scene.get("stages") or []
+        if any(stage.get("locate") == "alias" for stage in stages_now):
+            alias_now = scene.get("aliases") or {}
+            input_now = scene.get("inputAlias")
+            if not input_now:
+                raise store.StoreError(
+                    "user_error",
+                    "a stage locates by alias but the scene has no inputAlias",
+                    "set inputAlias to the key the panel input supplies",
+                )
+            if input_now not in alias_now:
+                raise store.StoreError(
+                    "user_error",
+                    f"inputAlias {input_now} is not one of the scene's aliases",
+                    "name one of the keys in aliases as the input alias",
+                )
+        scene["updatedAt"] = now
+
     for scene in scenes:
         same_id = str(scene.get("id")) == target_id
         same_name = str(scene.get("name") or "").casefold() == wanted.casefold()
         if same_id or same_name:
-            scene["name"] = wanted
-            scene["tables"] = chosen
-            if note is not None:
-                scene["note"] = str(note).strip() or None
-            if stage_update is not None:
-                if stage_update:
-                    scene["stages"] = stage_update
-                else:
-                    scene.pop("stages", None)
-            scene["updatedAt"] = now
+            apply_fields(scene, creating=False)
             doc["scenes"] = scenes
             save(profile, doc)
             return {"scene": scene, "created": False}
@@ -434,14 +683,10 @@ def save_scene(
         )
     scene = {
         "id": target_id,
-        "name": wanted,
-        "tables": chosen,
         "note": str(note).strip() if note else None,
         "createdAt": now,
-        "updatedAt": now,
     }
-    if stage_update:
-        scene["stages"] = stage_update
+    apply_fields(scene, creating=True)
     scenes.append(scene)
     doc["scenes"] = scenes
     save(profile, doc)

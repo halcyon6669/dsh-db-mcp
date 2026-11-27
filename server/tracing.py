@@ -322,7 +322,330 @@ def _nodes(steps) -> list[dict]:
     return [node_of(index) for index in roots]
 
 
-def _stage_view(chosen_scene, steps) -> dict | None:
+def _convert_binding(value, family):
+    """Coerce one bind value into a target column's family.
+
+    The rule lives in `engines.bind_value` so a trace bind and a preview bind can
+    never drift apart: char and date values stay text (so a leading-zero business
+    key keeps its zeros), a numeric target gets a real number, and a value that
+    cannot be coerced returns None — the caller skips that key with a warning
+    rather than failing the whole walk.
+    """
+    return engines.bind_value(value, family)
+
+
+def _column_family(info: dict, column: str) -> str:
+    for item in (info.get("columns") or []):
+        if _fold(item.get("name")) == _fold(column):
+            return engines.column_family(item.get("type"))
+    return "any"
+
+
+def _alias_rows(
+    profile, connection, chosen_scene, text, row_limit, describe, warnings
+) -> list[dict]:
+    """Locate alias stages straight on the scene's input business key.
+
+    Only the input alias is used, with the scene input value (decision 3): an
+    alias stage never depends on a graph edge, so it still runs when the edge
+    chain breaks. Each query is bounded by LIMIT and the statement timeout; a
+    timeout becomes a flagged, incomplete stage rather than a silent zero.
+    """
+    if not chosen_scene:
+        return []
+    declared = scenes._stage_list(chosen_scene.get("stages"))
+    aliases = chosen_scene.get("aliases") or {}
+    input_alias = chosen_scene.get("inputAlias")
+    if not any(stage.get("locate") == "alias" for stage in declared):
+        return []
+    if not input_alias or input_alias not in aliases:
+        return []
+    rows: list[dict] = []
+    for stage in declared:
+        if stage.get("locate") != "alias":
+            continue
+        table = stage["table"]
+        targets = [c for c in aliases[input_alias] if _fold(c.get("table")) == _fold(table)]
+        if not targets:
+            warnings.append(
+                {
+                    "code": "alias_no_column",
+                    "message": f"stage {stage['name']}: input alias {input_alias!r} has no column on {table}",
+                }
+            )
+            continue
+        binds = []
+        columns_used = []
+        for target in targets:
+            column = target["column"]
+            info = describe(table)
+            value = _convert_binding(text, _column_family(info, column))
+            if value is None:
+                warnings.append(
+                    {
+                        "code": "alias_bind_failed",
+                        "message": f"{table}.{column}: could not convert {text!r} for this column; skipped",
+                    }
+                )
+                continue
+            binds.append(value)
+            columns_used.append(column)
+        if not binds:
+            continue
+        # One query per distinct column; combine the results into one stage.
+        combined = {"columns": [], "rows": [], "sql": "", "truncated": False}
+        timed_out = False
+        total_ms = 0
+        for column, value in zip(columns_used, binds):
+            started = time.perf_counter()
+            try:
+                found = engines.fetch_matching(
+                    profile, connection, table, column, [value], row_limit
+                )
+            except engines.DbError as error:
+                if engines._is_timeout(error):
+                    timed_out = True
+                    warnings.append(
+                        {
+                            "code": "alias_timeout",
+                            "message": f"{table}.{column}: the alias lookup timed out; stage left incomplete",
+                        }
+                    )
+                else:
+                    warnings.append(
+                        {"code": "alias_failed", "message": f"{table}.{column}: {error}"}
+                    )
+                continue
+            if not combined["columns"]:
+                combined["columns"] = found["columns"]
+            for row in found["rows"]:
+                if row not in combined["rows"]:
+                    combined["rows"].append(row)
+            combined["sql"] = combined["sql"] + ("\n" if combined["sql"] else "") + found["sql"]
+            combined["truncated"] = combined["truncated"] or found["truncated"]
+            total_ms += int((time.perf_counter() - started) * 1000)
+        rows.append(
+            {
+                "stage": stage["name"],
+                "table": table,
+                "locate": "alias",
+                "found": len(combined["rows"]),
+                "missed": not combined["rows"] and not timed_out,
+                "incomplete": timed_out,
+                "matchRule": f"input alias {input_alias}",
+                "parent": None,
+                "step": None,
+                "sample": _sample(combined["columns"], combined["rows"], [], columns_used[0]),
+                "sql": combined["sql"],
+                "ms": total_ms,
+                "truncated": combined["truncated"],
+                "display": stage.get("displayColumns", []),
+                "statusLabels": stage.get("statusLabels", {}),
+                "amountColumn": stage.get("amountColumn"),
+                "timeColumn": stage.get("timeColumn"),
+                "statusColumn": stage.get("statusColumn"),
+            }
+        )
+    return rows
+
+
+def _weak_rows(
+    profile, connection, chosen_scene, declared, stage_steps, warnings
+) -> list[dict]:
+    """Read loose (weak) stage matches without feeding them back into the walk.
+
+    Weak rows are not BFS seeds, are not counted in the hit tables, and never
+    write a relation edge (decision 2). They are read with a bounded scan and a
+    statement timeout, filtered in Python by the declared op, and carry the
+    match rule text so a reader can see why they are only weak.
+    """
+    if not chosen_scene or not declared:
+        return []
+    weak = chosen_scene.get("weakMatch") or []
+    if not weak:
+        return []
+    by_name = {stage["name"]: stage for stage in declared}
+    rows: list[dict] = []
+    for match in weak:
+        stage = by_name.get(match.get("fromStage"))
+        if stage is None:
+            continue
+        # toColumn is "table.column"; the stage whose table it names is the one
+        # this weak match fills. A loose match between two declared stages is
+        # reported on the destination stage.
+        dest_table, dest_column = _split_table_column(match.get("toColumn"))
+        if not dest_table or not dest_column:
+            warnings.append(
+                {"code": "weak_bad_column", "message": f"weak match {match!r} has no table.column target"}
+            )
+            continue
+        dest_stage = next(
+            (s for s in declared if _fold(s["table"]) == _fold(dest_table)), None
+        )
+        source = stage_steps.get(stage["name"])
+        if not source:
+            continue
+        op = match.get("op")
+        minutes = match.get("minutes") or 60
+        rule_text = _weak_rule(match, op, minutes)
+        # Source values come from the fromStage hit rows.
+        src_values = _row_values(source, match.get("fromColumn"))
+        if not src_values:
+            continue
+        started = time.perf_counter()
+        try:
+            found = engines.scan_bounded(
+                profile, connection, dest_table, scenes.IN_VALUE_CAP
+            )
+        except engines.DbError as error:
+            flag = engines._is_timeout(error)
+            warnings.append(
+                {
+                    "code": "weak_timeout" if flag else "weak_failed",
+                    "message": f"{dest_table}: weak lookup {'timed out; stage left incomplete' if flag else str(error)}",
+                }
+            )
+            rows.append(
+                {
+                    "stage": (dest_stage or {}).get("name", dest_table),
+                    "table": dest_table,
+                    "locate": "weak",
+                    "found": 0,
+                    "missed": False,
+                    "incomplete": flag,
+                    "matchRule": rule_text,
+                    "parent": stage["name"],
+                    "step": None,
+                    "sample": {"columns": [], "rows": []},
+                    "sql": "",
+                    "ms": int((time.perf_counter() - started) * 1000),
+                    "truncated": False,
+                    "weak": True,
+                }
+            )
+            continue
+        col_index = _column_index(found["columns"], dest_column)
+        matched = []
+        if col_index is not None:
+            for row in found["rows"]:
+                if col_index >= len(row):
+                    continue
+                if _weak_compare(row[col_index], src_values, op, minutes):
+                    matched.append(row)
+        rows.append(
+            {
+                "stage": (dest_stage or {}).get("name", dest_table),
+                "table": dest_table,
+                "locate": "weak",
+                "found": len(matched),
+                "missed": not matched,
+                "weak": True,
+                "matchRule": rule_text,
+                "parent": stage["name"],
+                "step": None,
+                "sample": _sample(found["columns"], matched, [], dest_column),
+                "sql": found["sql"],
+                "ms": int((time.perf_counter() - started) * 1000),
+                "truncated": found["truncated"],
+                "inValues": src_values[: scenes.IN_VALUE_CAP],
+                "inTruncated": len(src_values) > scenes.IN_VALUE_CAP,
+            }
+        )
+    return rows
+
+
+def _split_table_column(value):
+    text = str(value or "").strip()
+    if "." not in text:
+        return None, None
+    table, column = text.rsplit(".", 1)
+    return table.strip(), column.strip()
+
+
+def _row_values(source, column):
+    sample = source.get("sample") or {}
+    columns = [str(name) for name in (sample.get("columns") or [])]
+    index = _column_index(columns, column)
+    if index is None:
+        return []
+    values = []
+    for row in sample.get("rows") or []:
+        if index < len(row) and row[index] is not None and str(row[index]) not in {str(v) for v in values}:
+            values.append(row[index])
+    return values
+
+
+def _weak_compare(candidate, sources, op, minutes):
+    if candidate is None:
+        return False
+    for source in sources:
+        if op == "eq":
+            if str(candidate) == str(source):
+                return True
+        elif op == "same_day":
+            if str(candidate)[:10] == str(source)[:10]:
+                return True
+        elif op == "within_minutes":
+            try:
+                import datetime
+                a = datetime.datetime.fromisoformat(str(candidate)[:19])
+                b = datetime.datetime.fromisoformat(str(source)[:19])
+                if abs((a - b).total_seconds()) <= minutes * 60:
+                    return True
+            except (ValueError, TypeError):
+                continue
+    return False
+
+
+def _weak_rule(match, op, minutes):
+    parts = [f"{match.get('fromStage')}.{match.get('fromColumn')} → {match.get('toColumn')}"]
+    if op == "same_day":
+        parts.append("same day")
+    elif op == "within_minutes":
+        parts.append(f"within {minutes} minutes")
+    else:
+        parts.append("equal")
+    return " + ".join(parts)
+
+
+def _stage_display(stage, sample):
+    """Pull the reader-facing cells out of one sample for a declared stage."""
+    columns = [str(name) for name in (sample.get("columns") or [])]
+    first_row = (sample.get("rows") or [None])[0]
+    display = {}
+    if first_row is not None:
+        for name in stage.get("displayColumns", []):
+            for index, column in enumerate(columns):
+                if _fold(column) == _fold(name):
+                    display[name] = first_row[index] if index < len(first_row) else None
+                    break
+    status_value = None
+    status_text = None
+    status_column = stage.get("statusColumn")
+    if status_column:
+        for index, column in enumerate(columns):
+            if _fold(column) == _fold(status_column):
+                status_value = first_row[index] if first_row and index < len(first_row) else None
+                status_text = stage.get("statusLabels", {}).get(str(status_value), status_value)
+                break
+    amount = None
+    amount_column = stage.get("amountColumn")
+    if amount_column:
+        for index, column in enumerate(columns):
+            if _fold(column) == _fold(amount_column):
+                amount = first_row[index] if first_row and index < len(first_row) else None
+                break
+    when = None
+    time_column = stage.get("timeColumn")
+    if time_column:
+        for index, column in enumerate(columns):
+            if _fold(column) == _fold(time_column):
+                when = first_row[index] if first_row and index < len(first_row) else None
+                break
+    return display, status_text, status_value, amount, when
+
+
+def _stage_view(chosen_scene, steps, alias_rows=None, weak_rows=None) -> dict | None:
     """The walk read in the scene's business order, one row per declared stage.
 
     The BFS walk answers "what value reaches what", which is the right shape for a
@@ -331,12 +654,19 @@ def _stage_view(chosen_scene, steps) -> dict | None:
     declaration order: the same hit is never printed twice, a stage the walk did
     not reach becomes a grey placeholder, and the expensive detail (SQL, binds,
     timing, edge) stays on the step for the panel to unfold on demand.
+
+    With Phase C a stage's declared `locate` decides where its row comes from:
+    `edge` uses the BFS step, `alias` the input-alias lookup, `weak` the loose
+    match. Only one of them is read per table (decision 9), so a table reachable
+    both ways is never reported twice.
     """
     if not chosen_scene:
         return None
     declared = scenes._stage_list(chosen_scene.get("stages"))
     if not declared:
         return None
+    alias_by_name = {row["stage"]: row for row in (alias_rows or [])}
+    weak_by_name = {row["stage"]: row for row in (weak_rows or [])}
     by_table: dict[str, list[dict]] = {}
     for step in steps:
         by_table.setdefault(_fold(step.get("table")), []).append(step)
@@ -344,90 +674,91 @@ def _stage_view(chosen_scene, steps) -> dict | None:
     rows: list[dict] = []
     previous: str | None = None
     for stage in declared:
-        matches = by_table.get(_fold(stage["table"]), [])
-        step = next((item for item in matches if item["index"] not in used), None)
-        if step is None:
-            rows.append(
+        locate = stage.get("locate", "edge")
+        # Claim all BFS steps for this table up front: a stage's declared locate
+        # wins, so a table reachable both by edge and by alias is read once only
+        # (decision 9). Unclaimed steps are listed under "other" at the end.
+        table_steps = by_table.get(_fold(stage["table"]), [])
+        for item in table_steps:
+            used.add(item["index"])
+        base = {
+            "stage": stage["name"],
+            "table": stage["table"],
+            "locate": locate,
+            "found": 0,
+            "missed": True,
+            "parent": previous,
+            "step": None,
+            "detail": None,
+            "display": stage.get("displayColumns", []),
+            "statusLabels": stage.get("statusLabels", {}),
+            "amountColumn": stage.get("amountColumn"),
+            "timeColumn": stage.get("timeColumn"),
+        }
+
+        if locate in ("alias", "weak"):
+            source = (alias_by_name if locate == "alias" else weak_by_name).get(stage["name"])
+            if source:
+                display, status, status_value, amount, when = _stage_display(
+                    stage, source.get("sample") or {}
+                )
+                base.update(
+                    {
+                        "found": source.get("found", 0),
+                        "missed": bool(source.get("missed")),
+                        "incomplete": bool(source.get("incomplete")),
+                        "matchRule": source.get("matchRule"),
+                        "weak": locate == "weak",
+                        "status": status,
+                        "statusValue": status_value,
+                        "amount": amount,
+                        "time": when,
+                        "display": display,
+                        "detail": {
+                            "sql": source.get("sql"),
+                            "ms": source.get("ms"),
+                            "truncated": source.get("truncated"),
+                            "inValues": source.get("inValues"),
+                            "inTruncated": source.get("inTruncated"),
+                        },
+                    }
+                )
+            rows.append(base)
+            previous = stage["name"]
+            continue
+
+        step = table_steps[0] if table_steps else None
+        if step is not None:
+            sample = step.get("sample") or {}
+            display, status, status_value, amount, when = _stage_display(stage, sample)
+            base.update(
                 {
-                    "stage": stage["name"],
-                    "table": stage["table"],
-                    "locate": stage.get("locate", "edge"),
-                    "found": 0,
-                    "missed": True,
-                    "parent": previous,
-                    "step": None,
-                    "detail": None,
-                    "display": stage.get("displayColumns", []),
-                    "statusLabels": stage.get("statusLabels", {}),
-                    "amountColumn": stage.get("amountColumn"),
-                    "timeColumn": stage.get("timeColumn"),
+                    "found": step.get("rows") or 0,
+                    "missed": False,
+                    "step": step["index"],
+                    "status": status,
+                    "statusValue": status_value,
+                    "amount": amount,
+                    "time": when,
+                    "display": display,
+                    "detail": {
+                        "sql": step.get("sql"),
+                        "condition": step.get("condition"),
+                        "ms": step.get("ms"),
+                        "edge": step.get("edge"),
+                        "fanout": step.get("fanout"),
+                        "values": (step.get("condition") or {}).get("binds") or [],
+                    },
+                    "feedback": {
+                        "pending": bool((step.get("edge") or {}).get("status") == "pending"),
+                        "abnormalFanout": bool((step.get("fanout") or 0) > 10),
+                        "empty": not (step.get("rows") or 0),
+                    },
                 }
             )
-            continue
-        used.add(step["index"])
-        sample = step.get("sample") or {}
-        columns = [str(name) for name in (sample.get("columns") or [])]
-        first_row = (sample.get("rows") or [None])[0]
-        display = {}
-        if first_row is not None:
-            for name in stage.get("displayColumns", []):
-                for index, column in enumerate(columns):
-                    if _fold(column) == _fold(name):
-                        display[name] = first_row[index] if index < len(first_row) else None
-                        break
-        status_value = None
-        status_text = None
-        status_column = stage.get("statusColumn")
-        if status_column:
-            for index, column in enumerate(columns):
-                if _fold(column) == _fold(status_column):
-                    status_value = first_row[index] if first_row and index < len(first_row) else None
-                    status_text = stage.get("statusLabels", {}).get(str(status_value), status_value)
-                    break
-        amount = None
-        amount_column = stage.get("amountColumn")
-        if amount_column:
-            for index, column in enumerate(columns):
-                if _fold(column) == _fold(amount_column):
-                    amount = first_row[index] if first_row and index < len(first_row) else None
-                    break
-        when = None
-        time_column = stage.get("timeColumn")
-        if time_column:
-            for index, column in enumerate(columns):
-                if _fold(column) == _fold(time_column):
-                    when = first_row[index] if first_row and index < len(first_row) else None
-                    break
-        rows.append(
-            {
-                "stage": stage["name"],
-                "table": stage["table"],
-                "locate": stage.get("locate", "edge"),
-                "found": step.get("rows") or 0,
-                "missed": False,
-                "parent": previous,
-                "step": step["index"],
-                "status": status_text,
-                "statusValue": status_value,
-                "amount": amount,
-                "time": when,
-                "display": display,
-                "detail": {
-                    "sql": step.get("sql"),
-                    "condition": step.get("condition"),
-                    "ms": step.get("ms"),
-                    "edge": step.get("edge"),
-                    "fanout": step.get("fanout"),
-                    "values": (step.get("condition") or {}).get("binds") or [],
-                },
-                "feedback": {
-                    "pending": bool((step.get("edge") or {}).get("status") == "pending"),
-                    "abnormalFanout": bool((step.get("fanout") or 0) > 10),
-                    "empty": not (step.get("rows") or 0),
-                },
-            }
-        )
+        rows.append(base)
         previous = stage["name"]
+
     # A table outside the declared stages is still a hit; list it under an
     # explicit tail group rather than dropping it from the report.
     extra = []
@@ -458,6 +789,7 @@ def _stage_view(chosen_scene, steps) -> dict | None:
         "scene": chosen_scene.get("name"),
         "rows": rows,
         "other": extra,
+        "weak": weak_rows or [],
     }
 
 
@@ -915,6 +1247,24 @@ def trace(
                 }
             )
 
+    # Phase C: alias stages are located straight on the input business key and
+    # weak stages are loose, look-ahead matches. Neither feeds the BFS queue, so
+    # both run after the walk and are reported only in the stage view.
+    declared_stages = scenes._stage_list(chosen_scene.get("stages")) if chosen_scene else []
+    alias_rows = _alias_rows(profile, connection, chosen_scene, text, row_limit, describe, warnings)
+    # Weak matches read their source values from the hit rows of an earlier
+    # stage, which came from the BFS walk (alias stages have no step).
+    stage_steps = {}
+    for stage in declared_stages:
+        match = next(
+            (item for item in steps if _fold(item.get("table")) == _fold(stage["table"])), None
+        )
+        if match:
+            stage_steps[stage["name"]] = match
+    weak_rows = _weak_rows(
+        profile, connection, chosen_scene, declared_stages, stage_steps, warnings
+    )
+
     return {
         "value": text,
         "direction": heading,
@@ -936,5 +1286,5 @@ def trace(
         "pending": hints,
         "warnings": warnings,
         "stoppedAt": stopped,
-        "stages": _stage_view(chosen_scene, steps),
+        "stages": _stage_view(chosen_scene, steps, alias_rows, weak_rows),
     }

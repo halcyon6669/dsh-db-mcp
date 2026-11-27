@@ -325,6 +325,126 @@ class SceneTools(unittest.TestCase):
 
 
 @unittest.skipUnless(HAVE_MAIN, "the MCP SDK is not installed for this interpreter")
+class AliasPreview(unittest.TestCase):
+    """`preview_aliases` answers "would this business key work?" without saving.
+
+    The point of the tool is that the answer is a *warning*, not a refusal: a
+    key that finds nothing, a column whose type disagrees with its siblings, and
+    a column that has been dropped from the catalog all come back as rows with a
+    warning attached. Only a scene that cannot be resolved at all is an error.
+    """
+
+    def setUp(self):
+        import json
+        import os
+        import sqlite3
+        import tempfile
+
+        self.tmp = tempfile.TemporaryDirectory()
+        self.saved = os.environ.get("DB_MCP_RUNTIME")
+        os.environ["DB_MCP_RUNTIME"] = self.tmp.name
+        path = Path(self.tmp.name) / "shop.db"
+        seed = sqlite3.connect(str(path))
+        try:
+            seed.executescript(
+                "create table t_order (id integer primary key, order_no text, code text);"
+                "create table t_trans (id integer primary key, order_no integer, amount numeric(12,2));"
+                "insert into t_order (id, order_no, code) values (1, 'SO-1', 'A001'), (2, 'SO-2', 'A002');"
+                "insert into t_trans (id, order_no, amount) values (10, 1, 9.5), (11, 1, 3.0);"
+            )
+            seed.commit()
+        finally:
+            seed.close()
+        registry = {
+            "schemaVersion": 1,
+            "datasources": [
+                {
+                    "id": "shop",
+                    "name": "shop",
+                    "kind": "sqlite",
+                    "config": {"file": str(path)},
+                    "readOnly": True,
+                    "isDefault": True,
+                }
+            ],
+        }
+        (Path(self.tmp.name) / "datasources.json").write_text(json.dumps(registry), encoding="utf-8")
+
+    def tearDown(self):
+        import os
+
+        if self.saved is None:
+            os.environ.pop("DB_MCP_RUNTIME", None)
+        else:
+            os.environ["DB_MCP_RUNTIME"] = self.saved
+        self.tmp.cleanup()
+
+    def _scene(self, aliases, tables=None):
+        return main.save_scene(
+            "order keys",
+            tables or ["t_order", "t_trans"],
+            aliases=aliases,
+            input_alias="serial",
+        )["scene"]
+
+    def test_every_alias_column_reports_its_type_hits_and_samples(self):
+        scene = self._scene(
+            {"serial": [{"table": "t_order", "column": "order_no"}, {"table": "t_trans", "column": "order_no"}]}
+        )
+        payload = main.preview_aliases(scene["id"], "1")
+        self.assertTrue(payload["ok"], payload)
+        self.assertEqual(payload["value"], "1")
+        keys = payload["keys"]
+        self.assertEqual(len(keys), 2)
+        first = keys[0]
+        self.assertEqual(
+            set(first),
+            {"alias", "table", "column", "type", "hits", "samples", "ms", "warning", "truncated"},
+        )
+        self.assertEqual(first["alias"], "serial")
+        self.assertEqual(first["table"], "t_order")
+        self.assertEqual(first["column"], "order_no")
+        self.assertEqual(first["type"], "TEXT", "the catalog's own spelling, passed through")
+        self.assertEqual(first["hits"], 0, "no t_order.order_no holds the text '1' — the column is text")
+        self.assertEqual(first["samples"], ["SO-1", "SO-2"], "the sample is the column, not the value")
+        second = keys[1]
+        self.assertEqual(second["hits"], 2, "t_trans.order_no is numeric: both rows hold 1")
+
+    def test_a_key_that_finds_nothing_says_so_without_blocking_the_save(self):
+        scene = self._scene({"serial": [{"table": "t_order", "column": "order_no"}]})
+        payload = main.preview_aliases(scene["id"], "no-such-order")
+        self.assertTrue(payload["ok"], payload)
+        self.assertEqual(payload["keys"][0]["hits"], 0)
+        self.assertIn("0 hits", payload["keys"][0]["warning"])
+
+    def test_a_value_the_column_cannot_hold_is_reported_not_queried(self):
+        scene = self._scene({"serial": [{"table": "t_trans", "column": "order_no"}]})
+        payload = main.preview_aliases(scene["id"], "SO-1")
+        self.assertTrue(payload["ok"], payload)
+        entry = payload["keys"][0]
+        self.assertEqual(entry["hits"], 0)
+        self.assertIn("not a number value", entry["warning"])
+
+    def test_a_dropped_column_is_stale_instead_of_an_error(self):
+        scene = self._scene({"serial": [{"table": "t_order", "column": "gone_column"}]})
+        payload = main.preview_aliases(scene["id"], "SO-1")
+        self.assertTrue(payload["ok"], payload)
+        self.assertIn("stale", payload["keys"][0]["warning"])
+        self.assertEqual(payload["keys"][0]["hits"], 0)
+
+    def test_an_unknown_scene_is_a_user_error(self):
+        payload = main.preview_aliases("s_nope", "SO-1")
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["error"]["code"], "user_error")
+
+    def test_the_limit_is_capped(self):
+        scene = self._scene({"serial": [{"table": "t_order", "column": "order_no"}]})
+        payload = main.preview_aliases(scene["id"], "SO-1", limit=500)
+        self.assertTrue(payload["ok"], payload)
+        self.assertLessEqual(len(payload["keys"][0]["samples"]), 10)
+
+
+@unittest.skipUnless(HAVE_MAIN, "the MCP SDK is not installed for this interpreter")
 class MiningTheAuditLog(unittest.TestCase):
     """`mine_relations` turns past statements into pending edges.
 

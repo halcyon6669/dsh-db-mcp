@@ -732,6 +732,73 @@
         font-size: 11px;
         color: var(--dsw-alias-label-secondary);
       }
+      /* Business keys: one card per key — the name and the "input" radio on the
+         first line, one column choice per member table under it. */
+      .dbmcp-scene-aliases {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .dbmcp-scene-alias {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        padding: 8px;
+        border: 1px solid var(--dsw-alias-border-l1);
+        border-radius: 10px;
+        background: var(--dsw-alias-bg-layer-1);
+      }
+      .dbmcp-scene-alias .dbmcp-input {
+        min-width: 120px;
+        flex: 0 1 auto;
+      }
+      .dbmcp-scene-alias-input {
+        align-items: center;
+        gap: 6px;
+        flex: 0 0 auto;
+        font-size: 12px;
+        color: var(--dsw-alias-label-secondary);
+      }
+      .dbmcp-scene-alias-cols {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 6px;
+      }
+      /* The preview answers "does this value live in these columns", so the row
+         that found nothing is the one to look at: it is tinted, never hidden. */
+      .dbmcp-scene-preview {
+        width: 100%;
+        font-size: 12px;
+      }
+      .dbmcp-scene-preview tr.is-zero td {
+        background: color-mix(in srgb, var(--dsw-alias-state-warning-primary) 8%, transparent);
+      }
+      /* Weak links: a flat row of small controls — stage, its column, the column
+         to compare, the rule, and the minutes box only for that rule. */
+      .dbmcp-scene-weak {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .dbmcp-scene-weak-row {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 8px;
+        border: 1px dashed var(--dsw-alias-border-l2);
+        border-radius: 8px;
+        background: var(--dsw-alias-bg-layer-1);
+      }
+      .dbmcp-scene-weak-row .dbmcp-input,
+      .dbmcp-scene-weak-row .dbmcp-select {
+        flex: 0 1 auto;
+        min-width: 110px;
+      }
+      .dbmcp-scene-weak-minutes {
+        min-width: 64px;
+        flex: 0 0 auto;
+      }
       .dbmcp-scene-actions {
         align-items: center;
         flex-wrap: wrap;
@@ -2481,11 +2548,34 @@
         border: 1px solid var(--dsw-alias-border-color-secondary);
         border-radius: 4px;
       }
+      /* Paragraphs inside a row sit on the row's own 2px rhythm: a
+         browser-default margin would turn a weak hint into a tall banner
+         with three lines floating apart. */
+      .dbmcp-stage-row p {
+        margin: 0;
+      }
       .dbmcp-stage-row.is-nested {
         margin-left: 16px;
       }
       .dbmcp-stage-row.is-missed {
         opacity: 0.6;
+      }
+      /* A weak row is evidence, not a step: dashed on the left, and it never
+         borrows the strong row's border. An unfinished row is tinted instead of
+         greyed — "the query ran out of time" is not the same as "no rows". */
+      .dbmcp-stage-row.is-weak {
+        border-style: dashed;
+        border-left-width: 3px;
+      }
+      .dbmcp-stage-row.is-incomplete {
+        border-color: color-mix(in srgb, var(--dsw-alias-state-warning-primary) 55%, var(--dsw-alias-border-color-secondary));
+        background: color-mix(in srgb, var(--dsw-alias-state-warning-primary) 6%, transparent);
+      }
+      .dbmcp-stage-warning {
+        color: var(--dsw-alias-state-warning-primary);
+      }
+      .dbmcp-stage-weakrule {
+        font-size: 11px;
       }
       .dbmcp-stage-main {
         display: flex;
@@ -2517,6 +2607,18 @@
       }
       .dbmcp-stage-other {
         margin-top: 8px;
+      }
+      /* A loose match is a hint, so its box stops where its words stop: a
+         full-width dashed band reads like a step that failed. */
+      .dbmcp-stage-weak {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 4px;
+        max-width: 100%;
+      }
+      .dbmcp-stage-weak .dbmcp-stage-row {
+        max-width: 100%;
       }
       .dbmcp-trace-summary {
         display: flex;

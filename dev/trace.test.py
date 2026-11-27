@@ -573,7 +573,7 @@ class ScenesNarrowTheWalk(_Walk):
             self.profile, "cash", ["t_order", "t_orphan"],
             stages=[
                 {"name": "Order", "table": "t_order", "locate": "edge"},
-                {"name": "Orphan", "table": "t_orphan", "locate": "alias"},
+                {"name": "Orphan", "table": "t_orphan", "locate": "edge"},
             ],
         )
         result = self._trace(
@@ -598,6 +598,239 @@ class ScenesNarrowTheWalk(_Walk):
         self._chain()
         result = self._trace("1", entry_table="t_order", entry_column="id", direction="down")
         self.assertIsNone(result["stages"])
+
+
+class PhaseCBusinessKeys(_Walk):
+    """Phase C: a stage can be located by a business key or a loose match.
+
+    The rules these cases guard are the ones that keep the new locators honest:
+    an alias stage must work with no edge at all, a value the column's family
+    cannot hold must be skipped with a warning instead of failing the walk, weak
+    matches must never feed the BFS counters, and a table reachable both by edge
+    and by alias must be read once.
+    """
+
+    def _scene(self, stages, aliases=None, input_alias=None, weak=None, tables=None):
+        return scenes.save_scene(
+            self.profile,
+            "cash",
+            tables or ["t_order", "t_trans", "t_shared"],
+            stages=stages,
+            aliases=aliases,
+            input_alias=input_alias,
+            weak_match=weak,
+        )["scene"]
+
+    # -- decision 1: an alias stage needs no edge -------------------------
+
+    def test_an_alias_stage_is_located_without_any_edge(self):
+        scene = self._scene(
+            [
+                {"name": "Order", "table": "t_order", "locate": "edge"},
+                {"name": "Payment", "table": "t_trans", "locate": "alias"},
+            ],
+            aliases={"serial": [{"table": "t_trans", "column": "order_id"}]},
+            input_alias="serial",
+            tables=["t_order", "t_trans"],
+        )
+        result = self._trace(
+            "1", entry_table="t_order", entry_column="id", direction="down", scene=scene["id"]
+        )
+        # No join between the two tables at all: the walk alone reads t_order.
+        self.assertEqual([step["table"] for step in result["steps"]], ["t_order"])
+        rows = {row["stage"]: row for row in result["stages"]["rows"]}
+        self.assertEqual(rows["Payment"]["locate"], "alias")
+        self.assertEqual(rows["Payment"]["found"], 2, "order_id = 1 holds two rows")
+        self.assertFalse(rows["Payment"]["missed"])
+        self.assertIn("serial", rows["Payment"]["matchRule"])
+
+    # -- decision 4: inputAlias is required -------------------------------
+
+    def test_a_stage_that_locates_by_alias_needs_an_input_alias(self):
+        with self.assertRaises(Exception) as caught:
+            self._scene(
+                [{"name": "Payment", "table": "t_trans", "locate": "alias"}],
+                aliases={"serial": [{"table": "t_trans", "column": "order_id"}]},
+                tables=["t_order", "t_trans"],
+            )
+        self.assertEqual(getattr(caught.exception, "code", None), "user_error")
+        self.assertIn("inputAlias", str(caught.exception))
+
+    def test_the_input_alias_must_be_one_of_the_aliases(self):
+        with self.assertRaises(Exception) as caught:
+            self._scene(
+                [{"name": "Payment", "table": "t_trans", "locate": "alias"}],
+                aliases={"serial": [{"table": "t_trans", "column": "order_id"}]},
+                input_alias="unknown",
+                tables=["t_order", "t_trans"],
+            )
+        self.assertEqual(getattr(caught.exception, "code", None), "user_error")
+
+    # -- decision 5: convert by column family, skip with a warning --------
+
+    def test_a_binding_is_converted_to_the_target_column_family(self):
+        self.assertEqual(tracing._convert_binding("1", "number"), 1)
+        self.assertEqual(tracing._convert_binding("1.5", "number"), 1.5)
+        self.assertEqual(tracing._convert_binding("A001", "char"), "A001")
+        self.assertEqual(tracing._convert_binding("A001", "date"), "A001")
+        self.assertIsNone(tracing._convert_binding("not a number", "number"))
+
+    def test_a_value_the_column_cannot_hold_is_skipped_with_a_warning(self):
+        scene = self._scene(
+            [{"name": "Payment", "table": "t_trans", "locate": "alias"}],
+            aliases={"serial": [{"table": "t_trans", "column": "order_id"}]},
+            input_alias="serial",
+            tables=["t_order", "t_trans"],
+        )
+        # t_order.code is text (so "A001" is a valid entry) while the alias
+        # target t_trans.order_id is an integer: the key cannot be bound there.
+        result = self._trace(
+            "A001",
+            entry_table="t_order",
+            entry_column="code",
+            direction="down",
+            scene=scene["id"],
+        )
+        codes = [warning.get("code") for warning in result["warnings"]]
+        self.assertIn("alias_bind_failed", codes)
+        row = result["stages"]["rows"][0]
+        self.assertEqual(row["found"], 0)
+        self.assertTrue(row["missed"])
+
+    # -- decision 2: weak rows never seed and never count ------------------
+
+    def test_a_weak_match_is_reported_but_never_walked(self):
+        scene = self._scene(
+            [
+                {"name": "Order", "table": "t_order", "locate": "edge"},
+                {"name": "Shared", "table": "t_shared", "locate": "weak"},
+            ],
+            weak=[{"fromStage": "Order", "fromColumn": "id", "toColumn": "t_shared.left_id", "op": "eq"}],
+            tables=["t_order", "t_shared"],
+        )
+        result = self._trace(
+            "1", entry_table="t_order", entry_column="id", direction="down", scene=scene["id"]
+        )
+        step_tables = [step["table"] for step in result["steps"]]
+        self.assertNotIn("t_shared", step_tables, "a weak match must not be a walk step")
+        self.assertEqual(result["summary"]["steps"], len(result["steps"]))
+        self.assertEqual(
+            result["summary"]["tablesHit"],
+            len({step["table"] for step in result["steps"]}),
+            "weak tables must not join the hit count",
+        )
+        weak = result["stages"]["weak"]
+        self.assertEqual(len(weak), 1)
+        self.assertEqual(weak[0]["table"], "t_shared")
+        self.assertTrue(weak[0]["weak"])
+
+    # -- decision 6: the loose ops and their rule text ---------------------
+
+    def test_same_day_and_within_minutes_filter_loosely(self):
+        self.assertTrue(tracing._weak_compare("2026-01-01 10:00:00", ["2026-01-01"], "same_day", 60))
+        self.assertFalse(tracing._weak_compare("2026-01-02 10:00:00", ["2026-01-01"], "same_day", 60))
+        self.assertTrue(
+            tracing._weak_compare("2026-01-01 10:20:00", ["2026-01-01 10:00:00"], "within_minutes", 30)
+        )
+        self.assertFalse(
+            tracing._weak_compare("2026-01-01 10:45:00", ["2026-01-01 10:00:00"], "within_minutes", 30)
+        )
+        self.assertTrue(tracing._weak_compare("7", ["7"], "eq", 0))
+        self.assertFalse(tracing._weak_compare(None, ["7"], "eq", 0))
+
+    def test_the_weak_rule_says_what_it_matched_on(self):
+        match = {"fromStage": "Order", "fromColumn": "created_at", "toColumn": "t_ship.created_at"}
+        self.assertIn("Order.created_at", tracing._weak_rule(match, "same_day", 60))
+        self.assertIn("same day", tracing._weak_rule(match, "same_day", 60))
+        self.assertIn("within 30 minutes", tracing._weak_rule(match, "within_minutes", 30))
+        self.assertIn("equal", tracing._weak_rule(match, "eq", 60))
+
+    # -- decision 7: the IN cap is 50, and truncation is reported ----------
+
+    def test_the_weak_in_list_is_capped_and_says_so(self):
+        declared = [
+            {"name": "Order", "table": "t_order", "locate": "edge"},
+            {"name": "Shared", "table": "t_shared", "locate": "weak"},
+        ]
+        scene = {
+            "stages": declared,
+            "weakMatch": [
+                {"fromStage": "Order", "fromColumn": "id", "toColumn": "t_shared.left_id", "op": "eq"}
+            ],
+        }
+        source = {"sample": {"columns": ["id"], "rows": [[index] for index in range(60)]}}
+        # tracing imports engines through sys.path, which is a different module
+        # object from the one this test file loaded: patch the one it calls.
+        original = tracing.engines.scan_bounded
+        tracing.engines.scan_bounded = lambda *args, **kwargs: {
+            "columns": ["left_id"], "rows": [[900]], "truncated": False, "sql": "select * from t_shared"
+        }
+        try:
+            warnings = []
+            rows = tracing._weak_rows(
+                self.profile, self.connection, scene, declared, {"Order": source}, warnings
+            )
+        finally:
+            tracing.engines.scan_bounded = original
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(len(rows[0]["inValues"]), scenes.IN_VALUE_CAP)
+        self.assertTrue(rows[0]["inTruncated"], "60 source values do not fit the cap")
+
+    # -- decision 8: a timeout is an incomplete stage, not an empty one ----
+
+    def test_a_timed_out_weak_lookup_is_incomplete_not_zero(self):
+        declared = [
+            {"name": "Order", "table": "t_order", "locate": "edge"},
+            {"name": "Shared", "table": "t_shared", "locate": "weak"},
+        ]
+        scene = {
+            "stages": declared,
+            "weakMatch": [
+                {"fromStage": "Order", "fromColumn": "id", "toColumn": "t_shared.left_id", "op": "eq"}
+            ],
+        }
+        source = {"sample": {"columns": ["id"], "rows": [[1]]}}
+        # Same reason as above: tracing calls the sys.path engines module.
+        original = tracing.engines.scan_bounded
+
+        def boom(*args, **kwargs):
+            raise tracing.engines.DbError("timeout", "canceling statement due to statement timeout")
+
+        tracing.engines.scan_bounded = boom
+        try:
+            warnings = []
+            rows = tracing._weak_rows(
+                self.profile, self.connection, scene, declared, {"Order": source}, warnings
+            )
+        finally:
+            tracing.engines.scan_bounded = original
+        self.assertEqual(len(rows), 1)
+        self.assertTrue(rows[0]["incomplete"])
+        self.assertFalse(rows[0]["missed"], "a timeout is not the same as no match")
+        self.assertEqual(rows[0]["found"], 0)
+        self.assertIn("weak_timeout", [warning.get("code") for warning in warnings])
+
+    # -- decision 9: a declared locate wins over an edge -------------------
+
+    def test_a_table_reachable_both_ways_is_read_once(self):
+        self._edge("t_trans", "order_id", "t_order", "id")
+        scene = self._scene(
+            [
+                {"name": "Order", "table": "t_order", "locate": "edge"},
+                {"name": "Payment", "table": "t_trans", "locate": "alias"},
+            ],
+            aliases={"serial": [{"table": "t_trans", "column": "order_id"}]},
+            input_alias="serial",
+            tables=["t_order", "t_trans"],
+        )
+        result = self._trace(
+            "1", entry_table="t_order", entry_column="id", direction="down", scene=scene["id"]
+        )
+        stage_rows = result["stages"]["rows"]
+        self.assertEqual([row["stage"] for row in stage_rows], ["Order", "Payment"])
+        self.assertEqual(len(stage_rows), 2, "the edge hit and the alias hit must not both be printed")
+        self.assertEqual(result["stages"]["other"], [], "the claimed step is not re-listed as other")
+        self.assertEqual(stage_rows[1]["locate"], "alias")
 
 
 class TheTreeShape(_Walk):

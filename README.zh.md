@@ -98,6 +98,7 @@ dsh plugin --profile web add dsh-db-mcp       # Web 端
 | `mcp__db__list_scenes` | 一个数据源的场景：命名的表集合，追踪可以限定在里面走 |
 | `mcp__db__save_scene` | 新建或更新一个场景 |
 | `mcp__db__delete_scene` | 删除一个场景——关系图里的边一条都不会少 |
+| `mcp__db__preview_aliases` | 保存前先拿场景的业务键到实时目录里试一遍 |
 | `mcp__db__feedback_relation` | 追踪一步之后确认、否定或作废一条 join |
 | `mcp__db__set_relation_condition` | 给一条 join 加上它成立所需的条件 |
 | `mcp__db__delete_edge` | 从关系图里彻底删掉一条边 |
@@ -121,6 +122,8 @@ dsh plugin --profile web add dsh-db-mcp       # Web 端
 ## 按值追踪与场景
 
 **追踪**页从一个值出发，沿已确认的边走；**场景**页保存命名的表集合，把这次追踪限定在一个业务流程里。面板用法见[指南的场景一节](docs/guide.zh.md#场景)，工具字段与路由见[参考手册的 `trace_by_key` 契约](docs/reference.md#how-tracebykey-walks)和[场景一节](docs/reference.md#scenes)。
+
+场景还可以声明表在业务里叫什么——比如「流水号」在一张表里是 `order_no`、在另一张表里是 `order_id`——并在没有 join 的地方做宽松匹配（同一天、N 分钟之内）。按键定位的阶段不依赖任何 join；宽松匹配只作为提示出现，永远不会被走成一步。编辑器里的「试一下」会先拿业务键到实时目录里跑一遍，所以找不到行的键在保存之前就能看见。
 
 ## 安全
 

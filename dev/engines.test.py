@@ -46,7 +46,7 @@ class FakeCursor:
         self.closed = False
         self.fail_with: Exception | None = None
 
-    def execute(self, sql: str) -> None:
+    def execute(self, sql: str, params=None) -> None:
         self.executed.append(sql)
         if self.fail_with is not None:
             raise self.fail_with
@@ -1055,6 +1055,96 @@ class TableSchemaLookup(unittest.TestCase):
         engines.execute_sql(profile("postgres"), connection, "set search_path to public", 200)
         self.assertEqual(connection.named_calls, 0)
         self.assertEqual(plain.executed, ["set search_path to public"])
+
+
+class BusinessKeyLookups(unittest.TestCase):
+    """The three helpers a business key needs: family, a count, a few samples.
+
+    All three are read-only and all three take a whitelist from the catalogue, so
+    a scene file can never name a column that reaches SQL. The value always
+    travels as a bind parameter — the count case below asserts that the statement
+    text does not contain it.
+    """
+
+    def test_a_type_name_maps_to_a_binding_family(self):
+        self.assertEqual(engines.column_family("character varying(16)"), "char")
+        self.assertEqual(engines.column_family("VARCHAR2"), "char")
+        self.assertEqual(engines.column_family("numeric(12,2)"), "number")
+        self.assertEqual(engines.column_family("integer"), "number")
+        self.assertEqual(engines.column_family("timestamp without time zone"), "date")
+        self.assertEqual(engines.column_family("date"), "date")
+        self.assertEqual(engines.column_family("jsonb"), "any")
+        self.assertEqual(engines.column_family(""), "any")
+        self.assertEqual(engines.column_family(None), "any")
+
+    def test_a_value_is_bound_by_family(self):
+        self.assertEqual(engines.bind_value("1", "number"), 1)
+        self.assertEqual(engines.bind_value("1.5", "number"), 1.5)
+        self.assertEqual(engines.bind_value("007", "char"), "007", "leading zeros survive")
+        self.assertEqual(engines.bind_value("A001", "date"), "A001")
+        self.assertIsNone(engines.bind_value("not a number", "number"))
+
+    def test_a_column_outside_the_catalogue_is_refused_before_any_sql(self):
+        cursor = FakeCursor()
+        payload = engines.sample_values(
+            profile("sqlite"), FakeConnection(cursor), "t_order", "note", {("t_order", "id")}
+        )
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["reason"], "unknown_table_or_column")
+        self.assertEqual(payload["values"], [])
+        self.assertEqual(cursor.executed, [], "no statement may be built for an unknown column")
+
+    def test_a_count_outside_the_catalogue_is_refused_before_any_sql(self):
+        cursor = FakeCursor()
+        payload = engines.count_matching(
+            profile("sqlite"), FakeConnection(cursor), "t_order", "note", "x", {("t_order", "id")}
+        )
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["reason"], "unknown_table_or_column")
+        self.assertEqual(payload["hits"], 0)
+        self.assertEqual(cursor.executed, [])
+
+    def test_the_count_binds_its_value_instead_of_printing_it(self):
+        cursor = FakeCursor(
+            description=[("id",), ("code",)], rows=[(1, "A001"), (2, "A001")], rowcount=2
+        )
+        payload = engines.count_matching(
+            profile("sqlite"),
+            FakeConnection(cursor),
+            "t_order",
+            "code",
+            "A001",
+            {("t_order", "code")},
+            limit=10,
+        )
+        self.assertTrue(payload["ok"], payload)
+        self.assertEqual(payload["hits"], 2)
+        self.assertFalse(payload["truncated"])
+        self.assertEqual(len(cursor.executed), 1)
+        self.assertIn("?", cursor.executed[0], "sqlite wants a placeholder")
+        self.assertNotIn("A001", cursor.executed[0], "the value must not be in the statement")
+
+    def test_one_row_past_the_limit_is_reported_as_truncated(self):
+        cursor = FakeCursor(
+            description=[("id",)], rows=[(1,), (2,), (3,)], rowcount=3
+        )
+        payload = engines.count_matching(
+            profile("sqlite"), FakeConnection(cursor), "t_order", "code", 1, {("t_order", "code")}, limit=2
+        )
+        self.assertTrue(payload["ok"], payload)
+        self.assertEqual(payload["hits"], 2, "the extra row proves there are more but is not counted")
+        self.assertTrue(payload["truncated"])
+
+    def test_samples_skip_nulls_and_dedupe_in_python(self):
+        cursor = FakeCursor(description=[("code",)], rows=[("A001",), ("A001",), (None,), ("A002",)])
+        payload = engines.sample_values(
+            profile("sqlite"), FakeConnection(cursor), "t_order", "code", {("t_order", "code")}, limit=10
+        )
+        self.assertTrue(payload["ok"], payload)
+        self.assertEqual(payload["values"], ["A001", "A002"])
+        statement = cursor.executed[0]
+        self.assertIn("IS NOT NULL", statement)
+        self.assertNotIn("DISTINCT", statement.upper(), "no DISTINCT: it would scan the whole table")
 
 
 class CellPolicy(unittest.TestCase):

@@ -119,9 +119,10 @@ memory before `max_rows` trims it; writes keep the ordinary cursor.
 | `set_relation_condition` | `edge_id`, `condition?`, `datasource?` | `{ edge, changed }` — an empty `condition` clears it |
 | `delete_edge` | `edge_id`, `datasource?` | `{ deleted, counts }` |
 | `trace_by_key` | `value`, `datasource?`, `entry_table?`, `entry_column?`, `scene?`, `max_depth=3`, `max_rows_per_table=20`, `direction=both`, `confirm_slow=false` | `{ value, direction, elapsedMs, scene, entry, summary, nodes, steps, stages, outside, pending, warnings, stoppedAt }` — walks only `confirmed` and `trusted` edges; `scene` narrows the walk to that scene's tables and reports the rest under `outside`; `nodes` is the same walk as a parent/child tree; `stages` is the scene's business-order reading (null for a free walk); `confirm_slow` allows a step that would scan a whole table; see below |
-| `list_scenes` | `datasource?` | `{ scenes: [{ id, name, tables, tableCount, note, createdAt, updatedAt, edges, isolated, stages }], total }` — a scene is a named set of tables, nothing more; `edges` are the confirmed/trusted joins between its members (`{ id, from: { table, column }, to: { table, column }, status }`, read from the relation graph, never stored) and `isolated` lists the members no such join reaches; `stages` is its business-order reading |
-| `save_scene` | `name`, `tables`, `datasource?`, `note?`, `scene_id?`, `stages?` | `{ scene, created }` — updates the scene with that `scene_id`, else the one with that name, else creates one; `stages` optionally declares the business reading order (omit to keep, `[]` to clear); a scene holds no joins, so deleting one never loses an edge |
+| `list_scenes` | `datasource?` | `{ scenes: [{ id, name, tables, tableCount, note, createdAt, updatedAt, edges, isolated, stages, aliases, inputAlias, weakMatch }], total }` — a scene is a named set of tables, nothing more; `edges` are the confirmed/trusted joins between its members (`{ id, from: { table, column }, to: { table, column }, status }`, read from the relation graph, never stored) and `isolated` lists the members no such join reaches; `stages` is its business-order reading, `aliases` its declared business keys, `inputAlias` the key the typed value goes into, and `weakMatch` its loose links (an alias column or a weak match whose table or stage has left the scene carries `stale: true`) |
+| `save_scene` | `name`, `tables`, `datasource?`, `note?`, `scene_id?`, `stages?`, `aliases?`, `input_alias?`, `weak_match?` | `{ scene, created }` — updates the scene with that `scene_id`, else the one with that name, else creates one; `stages` optionally declares the business reading order, `aliases` the business keys, `input_alias` the key the value is typed into, `weak_match` the loose links (each omit to keep, `[]`/empty to clear); structural checks only — a live compatibility question is `preview_aliases`; a scene holds no joins, so deleting one never loses an edge |
 | `delete_scene` | `scene_id`, `datasource?` | `{ deleted }` — removes the table set only; the relation graph keeps every edge |
+| `preview_aliases` | `scene_id`, `value`, `datasource?`, `limit=10` | `{ value, keys: [{ alias, table, column, type, hits, samples, ms, truncated, warning }] }` — trial-runs a saved scene's business keys against the live catalog without saving anything; `hits` is a bounded equality count for `value`, `samples` a few real column values, and `warning` covers a stale column, disagreeing type families, a value the column cannot hold and 0 hits; samples and hit counts never reach the audit log |
 | `sample_rows` | `table`, `datasource?`, `limit=20`, `schema?` | `{ columns, rows, rowCount, truncated }` |
 | `execute_sql` | `sql`, `datasource?`, `max_rows?`, `full_text?` | `{ columns, rows, rowCount, truncated, elapsedMs }`, or `{ affectedRows }` for a write |
 | `explain_query` | `sql`, `datasource?` | `{ sql, plan }` (engine-specific text) |
@@ -382,18 +383,70 @@ the word a reader sees, and every stage table must be a scene member. Passing
 `stages=None` leaves them alone and `stages=[]` clears them; `list_scenes` returns
 them under each scene's `stages`.
 
+#### Business keys and weak links
+
+A stage whose business term is not a column name can be located two other ways.
+`locate: "alias"` means the stage is reached through a declared business key, and
+`locate: "weak"` means through a loose match that is reported but never walked.
+
+`save_scene(..., aliases={...})` declares the keys: a name mapped to the columns
+that carry it, `{"流水号": [{"table": "t_order", "column": "order_no"}]}`. A key may
+name several tables — that is the point, since the same business number is stored
+under different column names in different tables. Up to 20 keys and 50 columns per
+key; every named column must be a scene member. `input_alias` names the one key the
+typed value is typed into, and it is required whenever any stage locates by alias
+(`save_scene` refuses the save with `user_error` instead of guessing). Omitting
+`input_alias` leaves an existing one alone; sending it empty (`""`) clears it, which
+is how the panel drops the input key when that key is deleted.
+
+At trace time the typed value is bound to each target column by its *family*
+(`char` / `number` / `date`, from `engines.column_family` on the live type) rather
+than by its exact type, so a key stored as `VARCHAR` in one table and `NUMBER` in
+another still compares. A value a column's family cannot hold is skipped with an
+`alias_bind_failed` warning — a bad key must not fail the walk. Each alias lookup
+is a bounded, bound-parameter query under the statement timeout; a timeout makes the
+stage `incomplete` (with an `alias_timeout` warning) rather than zero rows.
+
+`save_scene(..., weak_match=[...])` declares the loose matches:
+`{ fromStage, fromColumn, toColumn, op }` with `op` one of `eq`, `same_day`,
+`within_minutes` (a positive minute count, default 60), up to 20 entries. `toColumn`
+is written `table.column`. A weak match reads at most `IN_VALUE_CAP` (50) distinct
+source values and does a bounded scan of the destination, filtering in Python; when
+the source holds more than that the row says `inTruncated: true` and shows the cap.
+Weak rows appear under `stages.weak` and *never* as a walk step: they do not seed
+the BFS, do not enter `summary.tablesHit` or `summary.steps`, and are never written
+into the relation graph. Each carries `matchRule` — the text a reader sees, such as
+`Order.created_at → t_ship.created_at + same day`.
+
+`preview_aliases(scene_id, value)` trial-runs the declared keys before saving. It
+returns one row per alias column — `{ alias, table, column, type, hits, samples, ms,
+truncated, warning }` — where `hits` is a bounded equality count for `value` and
+`samples` a few real values of the column (no `DISTINCT` and no `COUNT(*)`, so an
+unindexed key is not a table scan). Warnings cover a column that has left the
+catalog (`stale`), a family that disagrees with its siblings, a value the column
+cannot hold, and 0 hits. None of these blocks the save; the panel simply asks for an
+explicit acknowledgement when a previewed key found nothing. Catalog names are
+whitelisted against a live `describe_table`, so a scene file cannot name a column
+that reaches SQL. Samples and hit counts stay in the tool's return value and are
+never written to the audit log.
+
+A table reachable both by a confirmed edge and by a declared alias is read once: the
+declared locate wins, and the walk's own step for that table is not printed a second
+time in `stages.rows`.
+
 When a scene has stages, `trace_by_key` returns a `stages` view beside `steps`:
-`{ mode: "scene", scene, rows, other }`. `rows` has one entry per declared stage
-in business order — `{ stage, table, locate, found, missed, parent, step, status,
-statusValue, amount, time, display, detail, feedback }`. A stage the walk did not
-reach is a grey placeholder (`missed: true`, `found: 0`, `step: null`) so the broken
-link is visible; a hit carries its sample values through `display`, `status`,
-`amount` and `time`, and keeps the SQL, binds, timing and edge in `detail` for the
-panel to unfold. Tables outside the declared stages are listed under `other`
-instead of being dropped. A free walk, or a scene with no stages, has no `stages`
-field. The panel's Trace tab switches between this **按场景运行** reading and the
-ordinary free graph, and never shows an internal verdict token where a person
-expects a word.
+`{ mode: "scene", scene, rows, other, weak }`. `rows` has one entry per declared
+stage in business order — `{ stage, table, locate, found, missed, parent, step,
+status, statusValue, amount, time, display, detail, feedback }`. A stage the walk
+did not reach is a grey placeholder (`missed: true`, `found: 0`, `step: null`) so
+the broken link is visible; an alias or weak stage adds `matchRule`, and a timeout
+adds `incomplete: true` (`missed` stays false, because a timeout is not the same as
+"no row"). A hit carries its sample values through `display`, `status`, `amount`
+and `time`, and keeps the SQL, binds, timing and edge in `detail` for the panel to
+unfold. Tables outside the declared stages are listed under `other` instead of being
+dropped. A free walk, or a scene with no stages, has no `stages` field. The panel's
+Trace tab switches between this **按场景运行** reading and the ordinary free graph,
+and never shows an internal verdict token where a person expects a word.
 
 ### How an edge earns trust
 

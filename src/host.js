@@ -3542,6 +3542,26 @@ export function createHost(options = {}) {
           scene_id: trimmed(payload.scene_id) || undefined,
           // Stages are optional: undefined leaves them alone, [] clears them.
           stages: Array.isArray(payload.stages) ? payload.stages : undefined,
+          // Business keys: undefined leaves them alone, explicit [] clears them.
+          // `aliases` is an object of key name to columns, not a list — checking
+          // it with Array.isArray dropped every business key on the way in.
+          aliases:
+            payload.aliases && typeof payload.aliases === "object" && !Array.isArray(payload.aliases)
+              ? payload.aliases
+              : Array.isArray(payload.aliases)
+                ? {}
+                : undefined,
+          input_alias: typeof payload.input_alias === "string" ? payload.input_alias.trim() : undefined,
+          weak_match: Array.isArray(payload.weak_match) ? payload.weak_match : undefined,
+        });
+        return sendJson(response, result.status, result.body);
+      }
+      if (route === "/scenes/preview-aliases") {
+        const result = await callTool("preview_aliases", {
+          scene_id: trimmed(payload.scene_id),
+          value: trimmed(payload.value),
+          datasource: trimmed(payload.datasource) || undefined,
+          limit: typeof payload.limit === "number" ? payload.limit : undefined,
         });
         return sendJson(response, result.status, result.body);
       }
