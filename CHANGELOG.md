@@ -147,13 +147,33 @@ report of each version in more detail.
   catalogue — each labelled `table.column` with the reason "same column name" — and
   only writes a pending edge when a suggestion is clicked. Where no column matches, the
   old add-join form is still one click away.
+- **A join suggestion ignores a column every table happens to have.** Offering
+  `id → id` for two unrelated tables is noise: nearly every table carries one, so the
+  match says nothing about how they relate. Candidate columns now skip the bare
+  `id`, `code`, `name`, `status`, `type`, `created_at` and `updated_at`; a prefixed
+  name such as `order_id` or `customer_code` still counts, because that prefix is
+  the evidence.
+- **`npm test` now covers the MCP client too.** `dev/mcp.test.mjs` already checked
+  the tool surface an agent sees, but nothing ran it: it is part of `npm test` now.
+  Its query checks need a SQLite source, which a machine without one cannot offer, so
+  that one check reports itself as skipped instead of failing — a green run no longer
+  depends on what happens to be registered here.
+- **The README says exactly what the panel runs.** The old line claimed the panel
+  only did catalogue reads, which stopped being true when the Trace and Scenes pages
+  arrived: both run read-only statements built server-side from the relation graph,
+  and the structure browser is the one that only forwards `list_tables` and
+  `describe_table`. Both READMEs now say that, and `docs.check` fails if their tool
+  tables drift from the tools actually registered — so a new tool cannot ship
+  undocumented.
 - **The Scenes page was looked at in a browser, both themes.** A screenshot pass over
   the picked scene, a new draft, the walk's save-as-scene form and a relation jump
   caught three things a source-level test cannot: join paths were cut off at 420px and
   now wrap, the table picker showed every table in a wide schema at once and now shows
   twenty with a count of the rest, and the save-as-scene form had two *Cancel* buttons
   — the opener now steps aside once the form is open. Jumping to a join also marks its
-  row as focused.
+  row as focused. The data that pass needed — a scene with one member nothing joins and
+  one whose joins all lead out of it — is checked in under `dev/fixtures/scenes-isolated/`,
+  so the pass can be repeated and the fixture itself is guarded by tests.
 
 ### Fixed
 

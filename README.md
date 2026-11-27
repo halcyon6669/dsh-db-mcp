@@ -203,6 +203,14 @@ back asking whether to scan the whole table, and **Run it anyway** re-runs the t
 with `confirm_slow`. Neither page accepts SQL; the statements come from the graph and
 are bound server-side.
 
+## Trace by value, and scenes
+
+The **Trace** tab starts from one value and walks confirmed joins; the **Scenes** tab
+holds named sets of tables that narrow that walk to one business process. See the
+[guide's Scenes section](docs/guide.md#scenes) for the panel workflow, and the
+[reference's `trace_by_key` contract](docs/reference.md#how-tracebykey-walks) and
+[Scenes section](docs/reference.md#scenes) for the tool fields and routes.
+
 ## Safety
 
 - **Read-only by default**, with three independent gates: a global write switch in the
@@ -221,8 +229,10 @@ are bound server-side.
   allowlist rather than the whole DSH environment.
 - **Every tool call is audited** to `logs/audit.jsonl` — tool, source, duration, row
   count, SQL. Result rows are never logged.
-- **Nothing runs from the panel except catalog reads.** The structure browser only
-  forwards `list_tables` and `describe_table`.
+- **The panel accepts no SQL.** The Trace and Scenes pages run read-only queries
+  through server-side tools (`trace_by_key`, `list_scenes`, `list_edges` and catalog
+  reads); every statement is built from the graph and bound server-side. The
+  structure browser only forwards `list_tables` and `describe_table`.
 
 ## Documentation
 

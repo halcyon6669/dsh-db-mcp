@@ -15,13 +15,14 @@ client.js           browser half, generated from client.parts/ — do not edit d
 client.parts/       source of client.js: header, DICT, CSS, then the components
 dev/build-client.mjs concatenates the parts back into client.js (and checks freshness)
 locale/{en,zh}.json package metadata (title/description) shown by the plugin card
-server/main.py      FastMCP server: nine tools
+server/main.py      FastMCP server: twenty tools
 server/engines.py   per-engine connect / introspect / query / DDL
 server/writes.py    write guard: refuses DDL unless the source's allowDdl switch is on
 server/secretbox.py opens the envelopes written by src/secretbox.js
 server/store.py     reads the registry written by the Host
 cordis.patch.yml    one Loader row with id "db-mcp"
 dev/                test suites and the version bump script
+dev/fixtures/       small JSON payloads a browser pass renders (checked, so it can be repeated)
 docs/               this documentation
 asset/              screenshots and diagram exports used by the READMEs
 ```
@@ -67,7 +68,7 @@ reflects edits immediately; one installed from npm needs a release.
 ## Tests
 
 ```sh
-npm test              # everything below except mcp.test.mjs
+npm test              # everything below
 npm run test:ci       # the portable subset the publish workflow runs
 node dev/build-client.mjs        # rebuild client.js from client.parts/
 node dev/build-client.mjs --check # fail if the committed client.js is stale
@@ -89,12 +90,15 @@ npm run test:changelog # the changelog's structure and its per-version sections
 | `dev/render.test.mjs` | components rendered with a stub React: tab bar, form fields, list, bulk bar, breadcrumbs |
 | `dev/i18n.test.mjs` | en/zh key parity, no dead keys, no stray copy outside the dictionaries |
 | `dev/p5.test.mjs` | settings, audit rotation, Python environment discovery |
-| `dev/mcp.test.mjs` | real stdio handshake, all nine tools, read-only refusal, login failures |
+| `dev/mcp.test.mjs` | real stdio handshake, every published tool, read-only refusal, login failures |
 | `dev/docs.check.mjs` | balanced code fences, table column counts, relative links and headings in every Markdown file |
 | `dev/changelog.mjs` | the changelog's structure: one dated section per released version, newest first, each with a link target |
 
 Suites that need external services skip rather than fail: `mcp.test.mjs` probes the
-Oracle port and prints `skip 鈥?is not listening` when the container is down.
+Oracle port and reports a skip when the container is down, and it skips its query checks
+when no SQLite source is registered on this machine, so a green `npm test` never depends
+on what happens to be configured here. The DBeaver check in `selftest.mjs` works the same
+way: the suite writes its own DBeaver home instead of reading the editor's.
 
 ## Releasing
 
