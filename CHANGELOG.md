@@ -251,6 +251,50 @@ report of each version in more detail.
   one whose joins all lead out of it — is checked in under `dev/fixtures/scenes-isolated/`,
   so the pass can be repeated and the fixture itself is guarded by tests.
 
+### Behavior changes
+
+These change what an existing caller observes; they are collected here so an
+upgrade can be reviewed before the version is cut. No version number is changed
+by this section.
+
+- **`confirm_slow` is now a list of edge ids, not a boolean.** It used to be
+  `confirm_slow: true` meaning "run everything"; it now takes exactly the ids the
+  caller has agreed to pay for (`confirm_slow: ["e_1a2b", …]`), and only those
+  steps run. On the **agent** path a bare `true` is deliberately ignored — a
+  blanket yes is how a whole table gets read by accident — so an agent that still
+  sends the old boolean must change to the list and, before doing so, must ask the
+  person which joins they agree to. The **panel** HTTP route is the one caller
+  allowed to waive the check; it collects the ids from the checkbox bar, so people
+  using the UI need do nothing. The result now also carries `confirmTargets` —
+  every hop that was refused, with its edge id and reason — where before a refusal
+  was only a warning line. Approvals are written to the audit log as edge ids and a
+  count, never the rows they returned.
+- **Trust needs three consecutive confirmations after the last rejection.**
+  `trusted` used to require "no rejection left standing", which permanently
+  blocked an edge that had ever been rejected. It now requires `confirmCount >= 3`
+  *since the most recent rejection*: `too_many` and `missing` reset that run, so
+  the next three `ok` verdicts re-earn the badge. `rejectCount` is no longer a
+  gate — it is kept for the audit trail and the panel only. `irrelevant` no longer
+  counts as evidence about the join either: "this edge has nothing to do with
+  this value" says nothing about whether the join is correct, and that verdict is
+  still undone by proposing the edge again.
+- **Trust can be withdrawn from measured cost.** A `trusted` edge whose majority
+  of recent timing samples exceed the slow threshold now drops back to `confirmed`
+  when a trace reports its timings, with one `trust withdrawn` line in the edge
+  history; a single slow sample among fast ones does not. `cost_of` also returns
+  the `timings` window, not just `lastMs`/`avgMs`.
+- **How old files are handled on upgrade.** Existing `relations/*.json` and
+  `scenes/*.json` are read as-is — no migration step, no file rewrite on load. An
+  old edge has no `timings`, `indexed` or `rowEstimate`: it keeps its saved
+  `status` (an old `trusted` edge is **not** demoted just by upgrading, and an old
+  `confirmed` edge is **not** promoted without new measurements), its cost reads
+  as `timings: []` / `needsConfirm: false` / unknown row estimate, and the first
+  trace that walks it fills in the timings. An old scene has no `stages`,
+  `aliases`, `inputAlias` or `weakMatch`: these read as empty lists / no input
+  alias, and saving after the upgrade adds them without losing the scene's id or
+  membership. `dev/upgrade.test.py` writes the exact 1.1.0 file shapes and asserts
+  all of the above, so the behaviour is checked on every test run.
+
 ### Fixed
 
 - **The self-test no longer reads this machine's DBeaver.** Its DBeaver check pointed
