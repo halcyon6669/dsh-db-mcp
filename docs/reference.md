@@ -118,8 +118,8 @@ memory before `max_rows` trims it; writes keep the ordinary cursor.
 | `feedback_relation` | `edge_id`, `verdict`, `reason?`, `note?`, `datasource?`, `fanout?`, `ms?` | `{ edge, cost, previousStatus, indexed, unique }` — `verdict` is `ok`, `too_many`, `missing` or `irrelevant`; `ms` records how long this step took; see below |
 | `set_relation_condition` | `edge_id`, `condition?`, `datasource?` | `{ edge, changed }` — an empty `condition` clears it |
 | `delete_edge` | `edge_id`, `datasource?` | `{ deleted, counts }` |
-| `trace_by_key` | `value`, `datasource?`, `entry_table?`, `entry_column?`, `scene?`, `max_depth=3`, `max_rows_per_table=20`, `direction=both`, `confirm_slow=false` | `{ value, direction, elapsedMs, scene, entry, summary, nodes, steps, stages, outside, pending, warnings, stoppedAt }` — walks only `confirmed` and `trusted` edges; `scene` narrows the walk to that scene's tables and reports the rest under `outside`; `nodes` is the same walk as a parent/child tree; `stages` is the scene's business-order reading (null for a free walk); `confirm_slow` allows a step that would scan a whole table; see below |
-| `list_scenes` | `datasource?` | `{ scenes: [{ id, name, tables, tableCount, note, createdAt, updatedAt, edges, isolated, stages, aliases, inputAlias, weakMatch }], total }` — a scene is a named set of tables, nothing more; `edges` are the confirmed/trusted joins between its members (`{ id, from: { table, column }, to: { table, column }, status }`, read from the relation graph, never stored) and `isolated` lists the members no such join reaches; `stages` is its business-order reading, `aliases` its declared business keys, `inputAlias` the key the typed value goes into, and `weakMatch` its loose links (an alias column or a weak match whose table or stage has left the scene carries `stale: true`) |
+| `trace_by_key` | `value`, `datasource?`, `entry_table?`, `entry_column?`, `scene?`, `max_depth=3`, `max_rows_per_table=20`, `direction=both`, `confirm_slow?` | `{ value, direction, elapsedMs, scene, entry, summary, nodes, steps, stages, outside, pending, warnings, stoppedAt, confirmTargets }` — walks only `confirmed` and `trusted` edges; `scene` narrows the walk to that scene's tables and reports the rest under `outside`; `nodes` is the same walk as a parent/child tree; `stages` is the scene's business-order reading (null for a free walk); `confirm_slow` takes the **edge ids** whose full scan the caller has agreed to pay for, and `confirmTargets` lists every scan that was refused so one decision covers all of them; see below |
+| `list_scenes` | `datasource?` | `{ scenes: [{ id, name, tables, tableCount, note, createdAt, updatedAt, edges, isolated, costly, stages, aliases, inputAlias, weakMatch }], total }` — a scene is a named set of tables, nothing more; `edges` are the confirmed/trusted joins between its members (`{ id, from: { table, column }, to: { table, column }, status }`, read from the relation graph, never stored) and `isolated` lists the members no such join reaches; `costly` names the joins here that would read a whole table (`{ edge, table, column, rowEstimate, reason }`), read off the edge facts so listing a scene runs no statement; `stages` is its business-order reading, `aliases` its declared business keys, `inputAlias` the key the typed value goes into, and `weakMatch` its loose links (an alias column or a weak match whose table or stage has left the scene carries `stale: true`) |
 | `save_scene` | `name`, `tables`, `datasource?`, `note?`, `scene_id?`, `stages?`, `aliases?`, `input_alias?`, `weak_match?` | `{ scene, created }` — updates the scene with that `scene_id`, else the one with that name, else creates one; `stages` optionally declares the business reading order, `aliases` the business keys, `input_alias` the key the value is typed into, `weak_match` the loose links (each omit to keep, `[]`/empty to clear); structural checks only — a live compatibility question is `preview_aliases`; a scene holds no joins, so deleting one never loses an edge |
 | `delete_scene` | `scene_id`, `datasource?` | `{ deleted }` — removes the table set only; the relation graph keeps every edge |
 | `preview_aliases` | `scene_id`, `value`, `datasource?`, `limit=10` | `{ value, keys: [{ alias, table, column, type, hits, samples, ms, truncated, warning }] }` — trial-runs a saved scene's business keys against the live catalog without saving anything; `hits` is a bounded equality count for `value`, `samples` a few real column values, and `warning` covers a stale column, disagreeing type families, a value the column cannot hold and 0 hits; samples and hit counts never reach the audit log |
@@ -330,9 +330,20 @@ connect". It starts at one column, then follows graph edges one hop at a time:
 - **A full scan asks first.** A join whose target column has no index and whose
   table the catalog estimates at a million rows or more is not run: the step comes
   back as `status: "needs_confirm"` with `sql` empty, `rows: 0`, and the cost it
-  would pay, and `summary.needsConfirm` counts them. Run the trace again with
-  `confirm_slow: true` to allow it. An unknown row estimate or an unknown index
-  never blocks — a catalog that cannot be read must not freeze the walk.
+  would pay, and `summary.needsConfirm` counts them. An unknown row estimate or an
+  unknown index never blocks — a catalog that cannot be read must not freeze the
+  walk. An edge whose last few steps are *all* far over the slow threshold also asks,
+  whatever the catalog thinks of its size: five bad samples in a row say more about
+  the next walk than any estimate.
+- **One decision for every refused step.** `confirmTargets` lists each refused hop
+  with its `table`, `column`, `rowEstimate`, `edge` id and the reason it was refused,
+  so five expensive steps need one answer, not five separate runs. Pass the edge ids
+  you approve as `confirm_slow: ["e_1a2b", …]`; only those steps run, and the rest
+  still come back as `needs_confirm`. A boolean `true` is deliberately not honoured
+  by the agent tool — a blanket yes is how a whole table gets read by accident — it
+  exists only for the panel's own route. An approved scan still obeys the statement
+  timeout and the row cap, and a step that times out is marked `timedOut` with a note
+  rather than quietly reported as empty.
 - **Every step is timed.** Each step reports `ms`, and a finished trace writes the
   durations of the steps it actually ran onto their edges, where `lastMs` / `avgMs`
   keep the last `cost.timingWindow` (five by default).
@@ -461,19 +472,29 @@ the verdict decides what happens next:
 | `irrelevant` | — | `rejected` | blacklisted; only proposing it again lifts it |
 
 `trusted` is recomputed on every `ok`, never latched, and needs all four: three
-confirmations, no rejection left standing, an average fanout of 5 or less, and the
-last few measured steps all faster than the slow threshold (`cost.slowMs`, 200ms by
-default) — at least `cost.trustSamples` (three) of them, so an edge nobody timed
-cannot be trusted. An index is a bonus, not a condition: an unindexed column that is
-genuinely fast earns trust all the same. An edge whose fanout later grows, or whose
-steps slow down, falls back to `confirmed` — which still walks, but stays visible as
-something a person vouched for rather than something measured.
+confirmations **in a row**, an average fanout of 5 or less, and the last few measured
+steps all faster than the slow threshold (`cost.slowMs`, 200ms by default) — at
+least `cost.trustSamples` (three) of them, so an edge nobody timed cannot be trusted.
+An index is a bonus, not a condition: an unindexed column that is genuinely fast
+earns trust all the same. `too_many` and `missing` clear the run of confirmations, so
+the count starts again from zero; `irrelevant` does not — "this edge has nothing to
+do with the value" says nothing about whether the join is right, and it is undone by
+proposing the edge again. `rejectCount` is kept for the history and the panel, not as
+a gate.
+
+Trust is withdrawn when the measurements turn against the edge. When a trace writes
+its timings, a trusted edge whose **majority** of recent samples are over the slow
+threshold drops back to `confirmed` and the change is written into the edge history
+once ("trust withdrawn"). One slow sample among four fast ones is noise and changes
+nothing; a growing fanout does the same thing through the next verdict. `confirmed`
+still walks, but stays visible as something a person vouched for rather than
+something measured.
 
 Three of those thresholds are editable on the relation graph page, together with the
 large-table cut-off (`cost.bigTableRows`, a million rows by default); the fanout cap
-stays a constant. They live in `settings.json` under `cost`, and the Python server
-re-reads them each time it decides, so a change applies to the next trace without a
-restart.
+and the "five times the slow threshold" factor stay constants. They live in
+`settings.json` under `cost`, and the Python server re-reads them each time it
+decides, so a change applies to the next trace without a restart.
 
 A `stale` edge returns to `pending` when it is proposed again or when
 `discover_relations` finds its key in the catalog; the next trace then has to earn

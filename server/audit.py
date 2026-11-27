@@ -36,6 +36,8 @@ AUDIT_FILE = Path("logs") / "audit.jsonl"
 AUDIT_LIMIT_BYTES = 512 * 1024
 # A statement is the useful part of a line; the tail of a huge one is not.
 MAX_SQL = 2000
+# An approved scan is worth recording, but a line should stay a line.
+MAX_CONFIRM = 20
 TOOL_PREFIX = "mcp__db__"
 
 
@@ -164,6 +166,14 @@ def entry(name: str, args, started: float, outcome, error, now: float | None = N
     table = call.get("table")
     if isinstance(table, str):
         record["table"] = table
+    # Approving an expensive step is a decision worth a trace of its own: the log
+    # names the joins that were allowed and how many, and nothing about what they
+    # returned. A row sample never reaches this file.
+    approved = call.get("confirm_slow")
+    if isinstance(approved, (list, tuple)) and approved:
+        ids = [str(item) for item in approved if item][:MAX_CONFIRM]
+        record["confirm"] = ids
+        record["confirmCount"] = len(ids)
     if error is not None:
         record["error"] = f"{type(error).__name__}: {error}"
         return record

@@ -339,13 +339,72 @@ class RelationGraph(unittest.TestCase):
         result = relations.feedback(source(), edge["id"], "ok", indexed=True, fanout=12.0, ms=10)
         self.assertEqual(result["edge"]["status"], "confirmed", "trust is recomputed, not latched")
 
-    def test_a_standing_rejection_blocks_trust(self):
+    def test_a_rejection_clears_the_run_of_confirmations(self):
+        # Trust is earned by a run of confirmations, not by a lifetime tally: a
+        # rejection says the join was wrong, so whatever it counted before no
+        # longer stands. `rejectCount` stays as evidence of what happened.
         edge = self._edge()
-        relations.feedback(source(), edge["id"], "too_many", reason="not_unique")
+        relations.feedback(source(), edge["id"], "ok", indexed=True, fanout=1.0, ms=10)
+        relations.feedback(source(), edge["id"], "ok", indexed=True, fanout=1.0, ms=10)
+        rejected = relations.feedback(source(), edge["id"], "too_many", reason="not_unique")
+        self.assertEqual(rejected["edge"]["status"], "stale")
+        self.assertEqual(rejected["edge"]["stats"]["confirmCount"], 0)
+        self.assertEqual(rejected["edge"]["stats"]["rejectCount"], 1)
+        # Three more confirmations in a row are needed again, and they are enough.
+        for _ in range(2):
+            relations.feedback(source(), edge["id"], "ok", indexed=True, fanout=1.0, ms=10)
+        self.assertEqual(self._stored(edge["id"])["status"], "confirmed", "two of three is not a run yet")
+        result = relations.feedback(source(), edge["id"], "ok", indexed=True, fanout=1.0, ms=10)
+        self.assertEqual(result["edge"]["status"], "trusted")
+        self.assertEqual(result["edge"]["stats"]["confirmCount"], 3)
+
+    def test_an_irrelevant_verdict_is_not_evidence_about_the_join(self):
+        # "This edge has nothing to do with the value" is a fact about one walk,
+        # not about the join: it blacklists the edge but must not spend the run of
+        # confirmations, otherwise a single stray click silently resets trust.
+        edge = self._edge()
+        relations.feedback(source(), edge["id"], "ok", indexed=True, fanout=1.0, ms=10)
+        relations.feedback(source(), edge["id"], "ok", indexed=True, fanout=1.0, ms=10)
+        rejected = relations.feedback(source(), edge["id"], "irrelevant")
+        self.assertEqual(rejected["edge"]["status"], "rejected")
+        self.assertEqual(rejected["edge"]["stats"]["confirmCount"], 2, "the run is untouched")
+        self.assertEqual(rejected["edge"]["stats"]["rejectCount"], 0, "rejectCount is for join evidence only")
+        result = relations.feedback(source(), edge["id"], "ok", indexed=True, fanout=1.0, ms=10)
+        self.assertEqual(result["edge"]["status"], "trusted", "the third confirmation completes the run")
+
+    def test_one_sporadic_slow_sample_does_not_withdraw_trust(self):
+        edge = self._edge()
         for _ in range(3):
-            result = relations.feedback(source(), edge["id"], "ok", indexed=True, fanout=1.0, ms=10)
+            relations.feedback(source(), edge["id"], "ok", indexed=True, fanout=1.0, ms=10)
+        self.assertEqual(self._stored(edge["id"])["status"], "trusted")
+        relations.note_timings(source(), {edge["id"]: 900})
+        self.assertEqual(
+            self._stored(edge["id"])["status"],
+            "trusted",
+            "one bad sample among fast ones is noise, not a trend",
+        )
+
+    def test_a_majority_of_slow_samples_withdraws_trust(self):
+        edge = self._edge()
+        for _ in range(3):
+            relations.feedback(source(), edge["id"], "ok", indexed=True, fanout=1.0, ms=10)
+        self.assertEqual(self._stored(edge["id"])["status"], "trusted")
+        relations.note_timings(source(), {edge["id"]: 900})
+        relations.note_timings(source(), {edge["id"]: 800})
+        self.assertEqual(self._stored(edge["id"])["status"], "trusted", "two of five is not a majority yet")
+        relations.note_timings(source(), {edge["id"]: 700})
+        stored = self._stored(edge["id"])
+        self.assertEqual(stored["status"], "confirmed", "three of five slow is a trend")
+        actions = [entry["action"] for entry in stored["history"]]
+        self.assertEqual(actions.count("trust withdrawn"), 1, "the fall-back is written down once, not per trace")
+        self.assertIn("mostly over the slow threshold", stored["history"][-1]["note"])
+
+    def test_a_rejection_that_already_happened_blocks_trust_until_three_more(self):
+        edge = self._edge()
+        relations.feedback(source(), edge["id"], "missing")
+        result = relations.feedback(source(), edge["id"], "ok", indexed=True, fanout=1.0, ms=10)
         self.assertEqual(result["edge"]["status"], "confirmed")
-        self.assertEqual(result["edge"]["stats"]["rejectCount"], 1)
+        self.assertEqual(result["edge"]["stats"]["confirmCount"], 1)
 
     def test_too_many_needs_a_known_reason(self):
         edge = self._edge()

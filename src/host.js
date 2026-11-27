@@ -3589,6 +3589,13 @@ export function createHost(options = {}) {
         });
       }
       if (route === "/trace") {
+        // The panel is the one caller allowed to say "I approve this step": it
+        // shows the costs as checkboxes and sends back the edge ids the user
+        // ticked. The agent's tool path never gets the boolean shorthand, so a
+        // model cannot wave a full table scan through by typing `true`.
+        const approved = Array.isArray(payload.confirm_slow)
+          ? payload.confirm_slow.filter((item) => typeof item === "string" && item.trim()).map((item) => item.trim())
+          : [];
         const result = await callTool("trace_by_key", {
           value: trimmed(payload.value),
           datasource: trimmed(payload.datasource) || undefined,
@@ -3598,7 +3605,7 @@ export function createHost(options = {}) {
           max_rows_per_table:
             typeof payload.max_rows_per_table === "number" ? payload.max_rows_per_table : undefined,
           direction: trimmed(payload.direction) || undefined,
-          confirm_slow: payload.confirm_slow === true ? true : undefined,
+          confirm_slow: approved.length ? approved : undefined,
           scene: trimmed(payload.scene) || undefined,
         });
         return sendJson(response, result.status, result.body);

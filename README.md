@@ -200,9 +200,11 @@ places as starting chips. A **scene** narrows a walk to a named set of tables: j
 leading out of the set are not followed, the tables they would reach are listed
 outside it, and one button folds a table into the scene and re-runs. A join whose
 target column has no index and whose table looks large is not run: that step comes
-back asking whether to scan the whole table, and **Run it anyway** re-runs the trace
-with `confirm_slow`. Neither page accepts SQL; the statements come from the graph and
-are bound server-side.
+back asking whether to scan the whole table, and every refused step is listed together
+with a checkbox each, so one answer covers them all — the smallest table is ticked for
+you, and only what you tick is run (`confirm_slow` names those joins). A scan that
+hits the statement timeout comes back marked unfinished instead of empty. Neither page
+accepts SQL; the statements come from the graph and are bound server-side.
 
 ## Trace by value, and scenes
 

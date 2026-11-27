@@ -316,6 +316,8 @@ def _nodes(steps) -> list[dict]:
             "edge": step.get("edge"),
             "note": step.get("note"),
             "cost": step.get("cost"),
+            "confirmed": step.get("confirmed", False),
+            "timedOut": step.get("timedOut", False),
             "children": [node_of(child) for child in children.get(index, [])],
         }
 
@@ -802,7 +804,7 @@ def trace(
     max_depth=3,
     max_rows_per_table=20,
     direction="both",
-    confirm_slow: bool = False,
+    confirm_slow: bool | list | None = False,
     scene: str | None = None,
 ) -> dict:
     """Follow one value across every confirmed join that touches it."""
@@ -814,6 +816,14 @@ def trace(
             "trace_by_key needs a value to look for",
             "pass the key itself, for example an order id or a customer code",
         )
+    # `confirm_slow` names the steps the caller has agreed to pay for. The panel
+    # sends the edge ids it showed as checkboxes, so approving one expensive hop
+    # does not approve the next one; `True` stays accepted for an older panel and
+    # for a caller that really does mean "all of them".
+    approved: set[str] = set()
+    if isinstance(confirm_slow, (list, tuple, set, frozenset)):
+        approved = {str(item) for item in confirm_slow if item}
+    allow_all = confirm_slow is True
     depth_limit = _clamp(max_depth, 1, MAX_DEPTH_LIMIT, 3)
     row_limit = _clamp(max_rows_per_table, 1, MAX_ROWS_LIMIT, 20)
     heading = _direction(direction)
@@ -890,6 +900,7 @@ def trace(
             "warnings": warnings,
             "stoppedAt": [],
             "stages": _stage_view(chosen_scene, []),
+            "confirmTargets": [],
         }
 
     # One metadata read per table, reused for the sample and the pending hints.
@@ -907,6 +918,9 @@ def trace(
     steps: list[dict] = []
     stopped: list[dict] = []
     outside: list[dict] = []
+    # Every expensive hop this walk refused to pay for, so one decision can cover
+    # all of them instead of one trace per step.
+    confirm_targets: list[dict] = []
     seen: set[tuple[str, str, str]] = set()
     hit_tables: set[str] = set()
     visited_tables: set[str] = set()
@@ -975,11 +989,25 @@ def trace(
 
         # An unindexed column on a big table turns one hop into a full scan. That
         # is a cost the operator should agree to, not one a trace spends on their
-        # behalf: stop here, say so, and let the panel run it again with
-        # `confirm_slow`. The step is reported rather than skipped, so the answer
-        # still shows where the walk wanted to go.
+        # behalf: stop here, say so, and let the panel run it again with the edges
+        # this reader ticked off (`confirm_slow` as a list of ids). The step is
+        # reported rather than skipped, so the answer still shows where the walk
+        # wanted to go — and every refusal in this walk is listed in
+        # `summary.confirmTargets`, so five expensive hops need one decision
+        # instead of five separate traces.
         cost = relations.cost_of(edge) if edge is not None else {}
-        if not confirm_slow and cost.get("needsConfirm"):
+        edge_id = (edge or {}).get("id")
+        if cost.get("needsConfirm") and not allow_all and edge_id not in approved:
+            if not any(item.get("edge") == edge_id for item in confirm_targets):
+                confirm_targets.append(
+                    {
+                        "table": table,
+                        "column": column,
+                        "rowEstimate": cost.get("rowEstimate"),
+                        "edge": edge_id,
+                        "reason": relations.why_confirm(edge) if edge else None,
+                    }
+                )
             steps.append(
                 {
                     "index": len(steps) + 1,
@@ -1010,9 +1038,9 @@ def trace(
                 {
                     "code": "needs_confirm",
                     "message": (
-                        f"{table}.{column} has no index and the table holds about "
-                        f"{cost.get('rowEstimate')} rows — that step is a full scan. "
-                        "Run the trace again with confirm_slow to allow it."
+                        f"{table}.{column}: {relations.why_confirm(edge) if edge else 'this step is expensive'}"
+                        " — that step is a full scan. Approve it in the panel, or run "
+                        "the trace again with confirm_slow set to its edge id."
                     ),
                 }
             )
@@ -1020,7 +1048,14 @@ def trace(
             continue
 
         failure = None
+        # This step is being paid for because the caller approved it. Marking it
+        # is not decoration: a step that ran after a confirmation has to be
+        # distinguishable from one that ran because it was cheap, and if the
+        # approved scan then times out the reader must see that it was cut short
+        # rather than that the table held nothing.
+        approved_here = bool(cost.get("needsConfirm")) and (allow_all or edge_id in approved)
         step_started = time.perf_counter()
+        timed_out = False
         try:
             found = engines.fetch_matching(
                 profile,
@@ -1036,10 +1071,12 @@ def trace(
             found = {"columns": [], "rows": [], "truncated": False, "sql": "", "binds": fresh}
             status = "error"
             failure = str(error)
+            timed_out = engines._is_timeout(error)
         except Exception as error:  # a driver error the guard did not classify
             found = {"columns": [], "rows": [], "truncated": False, "sql": "", "binds": fresh}
             status = "error"
             failure = str(error)
+            timed_out = False
         # A condition is a user's guess about a column that may not exist. Losing
         # the whole trace over a typo in it would be worse than losing the
         # narrowing: retry without it, say so, and keep walking. The step then
@@ -1111,6 +1148,17 @@ def trace(
             "note": None,
             "inside": inside is None or _fold(table) in inside,
         }
+        if approved_here:
+            step["confirmed"] = True
+            if timed_out:
+                # The caller said yes to a full scan and the statement was still cut
+                # off by the timeout. That is not "the table held nothing" and not
+                # "the scan finished": say so, and keep the step out of the timing
+                # window it would otherwise poison.
+                step["timedOut"] = True
+                step["note"] = (
+                    "the approved scan hit the statement timeout; this step is unfinished"
+                )
         if status == "empty":
             step["note"] = "0 rows, the chain breaks here"
             stopped.append({"table": table, "reason": f"no row held the value in {column}"})
@@ -1217,7 +1265,10 @@ def trace(
     measured = {
         step["edge"]["id"]: step["ms"]
         for step in steps
-        if step.get("edge") and step.get("edge", {}).get("id") and step.get("status") in ("hit", "empty")
+        if step.get("edge")
+        and step.get("edge", {}).get("id")
+        and step.get("status") in ("hit", "empty")
+        and not step.get("timedOut")
     }
     try:
         relations.note_timings(profile, measured)
@@ -1280,6 +1331,7 @@ def trace(
             "needsConfirm": sum(1 for step in steps if step.get("status") == NEEDS_CONFIRM),
             "outside": len(outside),
         },
+        "confirmTargets": confirm_targets,
         "nodes": _nodes(steps),
         "steps": steps,
         "outside": outside,

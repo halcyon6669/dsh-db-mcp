@@ -2632,6 +2632,52 @@
         gap: 8px;
         margin: 2px 0;
       }
+      /* The list of steps that need a decision. It reads as a form, not a banner:
+         one row per target, each with its own tick. */
+      .dbmcp-trace-confirm {
+        background: var(--dsw-alias-bg-layer-2);
+        border: 1px solid var(--dsw-alias-border-l2);
+        border-radius: 6px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        margin: 6px 0;
+        padding: 8px 10px;
+      }
+      .dbmcp-trace-confirm-list {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        list-style: none;
+        margin: 0;
+        padding: 0;
+      }
+      .dbmcp-trace-confirm-row {
+        align-items: center;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      .dbmcp-trace-confirm-row .dbmcp-cell {
+        align-items: center;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      .dbmcp-scene-costly-list {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+        list-style: none;
+        margin: 0;
+        padding: 0;
+      }
+      .dbmcp-scene-costly-list li {
+        align-items: baseline;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
       .dbmcp-trace-scene-form {
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));

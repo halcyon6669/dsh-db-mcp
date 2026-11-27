@@ -128,6 +128,26 @@ class ToolSurface(unittest.TestCase):
         self.assertIn("outside", text)
         self.assertIn("save_scene", text)
 
+    def test_the_trace_tool_asks_for_consent_before_a_full_scan(self):
+        # An agent may pass the ids the user agreed to, but the docstring has to
+        # say so out loud: approving a scan is a decision, not a default.
+        text = main.trace_by_key.__doc__ or ""
+        self.assertIn("confirmTargets", text)
+        self.assertIn("explicit consent", text)
+        self.assertIn("edge id", text)
+
+    def test_a_boolean_confirm_slow_never_means_scan_everything(self):
+        # `confirm_slow=True` used to waive every check. It now names no step, so it
+        # must be ignored — only a list of edge ids approves anything. The panel
+        # route is the one place allowed to send the boolean, and it does not.
+        import inspect
+
+        parameter = inspect.signature(main.trace_by_key).parameters["confirm_slow"]
+        self.assertIsNone(parameter.default, "the tool must not default to approving scans")
+        self.assertNotIn("bool", str(parameter.annotation))
+        source = inspect.getsource(main.trace_by_key)
+        self.assertIn("isinstance(confirm_slow, (list, tuple, set))", source)
+
     def test_the_scanner_tool_explains_what_it_skips(self):
         text = main.scan_code_relations.__doc__ or ""
         self.assertIn("mapper XML", text)
@@ -317,6 +337,36 @@ class SceneTools(unittest.TestCase):
         self.assertEqual(payload["deleted"], scene["id"])
         self.assertEqual(main.list_scenes()["scenes"], [])
         self.assertEqual([row["id"] for row in main.list_edges()["edges"]], [edge["id"]])
+
+    def test_the_scene_cost_hint_asks_the_database_nothing(self):
+        # The hint is a label, not a query: it is read off the edge facts already
+        # on disk. Connecting at all would make opening a scene as expensive as the
+        # walk it is warning about, so the test forbids a connection outright.
+        import relations as graph
+
+        edge = main.propose_relation("t_trans", "order_id", "t_order", "id")["edge"]
+        doc = graph.load({"id": "shop", "name": "shop", "kind": "sqlite", "config": {}})
+        for item in doc["edges"]:
+            item["status"] = "confirmed"
+            item["stats"]["indexed"] = False
+            item["stats"]["rowEstimate"] = 9_000_000
+        graph.save({"id": "shop", "name": "shop", "kind": "sqlite", "config": {}}, doc)
+        scene = main.save_scene("flow", ["t_order", "t_trans"])["scene"]
+
+        real = main.engines.connect
+
+        def refuse(*args, **kwargs):
+            raise AssertionError("listing a scene must not open a connection")
+
+        main.engines.connect = refuse
+        try:
+            listed = main.list_scenes()
+        finally:
+            main.engines.connect = real
+        described = [item for item in listed["scenes"] if item["id"] == scene["id"]][0]
+        self.assertEqual(len(described["costly"]), 1, "the expensive join is named")
+        self.assertEqual(described["costly"][0]["edge"], edge["id"])
+        self.assertEqual(described["costly"][0]["rowEstimate"], 9_000_000)
 
     def test_an_unknown_scene_comes_back_as_a_user_error(self):
         payload = main.delete_scene("s_nope")

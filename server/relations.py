@@ -55,6 +55,12 @@ TIMING_WINDOW = 5
 # promote an edge; three samples is the least that says anything.
 TRUST_SAMPLES = 3
 
+# A step that keeps taking this many times `slowMs` is treated as expensive even
+# when nobody could read a row estimate: five bad samples in a row say more about
+# what the next walk will pay than any catalog guess. One slow sample, or two,
+# is noise — a cache miss, a lock — and does not stop the walk.
+SLOW_FACTOR = 5
+
 # Above this many rows an unindexed column means a full table scan. The estimate
 # comes from the catalog (pg_class.reltuples, information_schema.TABLES.TABLE_ROWS,
 # ALL_TABLES.NUM_ROWS) — never a count(*), which would cost what it is trying to
@@ -348,8 +354,15 @@ def note_timings(profile: dict, measured: dict[str, float]) -> int:
 
     A trace is the only place that sees how long a hop really took, so it reports
     them back here rather than the operator having to file a verdict per step.
-    Edges that no longer exist are skipped; nothing else about the edge moves —
-    a timing is not a confirmation.
+    Edges that no longer exist are skipped.
+
+    A timing is not a confirmation — the counts do not move — but it can take a
+    badge away: a `trusted` edge whose recent window is mostly over the slow
+    threshold falls back to `confirmed`, because the promise of "walk this without
+    asking" was about cost and the cost changed. The window is what makes that
+    decision honest; one slow sample does not do it (see `mostly_slow`), and an
+    edge already `confirmed` writes nothing, so a slow streak leaves one line in
+    the history rather than one per trace.
     """
     if not measured:
         return 0
@@ -359,7 +372,11 @@ def note_timings(profile: dict, measured: dict[str, float]) -> int:
         ms = measured.get(edge.get("id"))
         if ms is None:
             continue
-        _timed(_stats_of(edge), ms)
+        stats = _stats_of(edge)
+        _timed(stats, ms)
+        if edge.get("status") == "trusted" and mostly_slow(stats):
+            edge["status"] = "confirmed"
+            _record(edge, "trust withdrawn", note="the recent steps are mostly over the slow threshold")
         touched += 1
     if touched:
         save(profile, doc)
@@ -578,12 +595,61 @@ def _timed(stats: dict, ms, window: int | None = None) -> None:
     stats["avgMs"] = round(sum(timings) / len(timings), 1)
 
 
+def _samples(stats: dict) -> list[float]:
+    """The measured durations of the window, oldest first, ignoring noise."""
+    timings = stats.get("timings")
+    if not isinstance(timings, list):
+        return []
+    return [
+        float(sample)
+        for sample in timings
+        if isinstance(sample, (int, float)) and not isinstance(sample, bool)
+    ]
+
+
+def mostly_slow(stats: dict) -> bool:
+    """Whether most of the recent window is over the slow threshold.
+
+    A majority, not one sample: a single 800ms hop is a cache miss or a lock
+    wait, and withdrawing a badge for it would make trust flicker on every busy
+    afternoon. Half the window is not enough either — `2 of 4` is a tie, and a
+    tie does not say the edge got slower, only that it is sometimes slow.
+    """
+    samples = _samples(stats)
+    if not samples:
+        return False
+    slow = sum(1 for sample in samples if sample >= cost_settings()["slowMs"])
+    return slow * 2 > len(samples)
+
+
+def persistently_slow(stats: dict) -> bool:
+    """Whether every recent sample is many times over the slow threshold.
+
+    This is the cost signal that needs no catalogue: five samples all past
+    `SLOW_FACTOR * slowMs` say what the next walk will pay even when nobody could
+    read a row estimate for the target table. One sample is not "persistently"
+    anything, so a window of one is ignored; two in a row already says the same
+    query did it twice.
+    """
+    samples = _samples(stats)
+    if len(samples) < 2:
+        return False
+    limit = cost_settings()["slowMs"] * SLOW_FACTOR
+    return all(sample > limit for sample in samples)
+
+
 def _earns_trust(stats: dict) -> bool:
     """Whether an edge has earned the right to be walked without asking again.
 
     All four have to hold, and none of them is a guess about the schema: three
     confirmations, no rejection left standing, a fanout the walker can absorb, and
     a measured cost whose recent samples are all under the slow threshold.
+
+    `confirmCount` counts *consecutive* confirmations — a rejection clears it — so
+    "three confirmations" means three in a row after the last rejection. That is
+    what `rejectCount == 0` used to approximate, except `rejectCount` only ever
+    grew: an edge rejected once could never earn trust again, however many correct
+    walks followed. `rejectCount` is now kept for the audit trail and the panel.
 
     An index is **not** required. It used to be, on the theory that only an
     indexed reference column could be cheap — but that is the wrong question. A
@@ -594,7 +660,7 @@ def _earns_trust(stats: dict) -> bool:
     """
     cost = cost_settings()
     fanout = stats.get("avgFanout")
-    if not (stats.get("confirmCount", 0) >= TRUST_CONFIRMS and stats.get("rejectCount", 0) == 0):
+    if int(stats.get("confirmCount") or 0) < TRUST_CONFIRMS:
         return False
     if not isinstance(fanout, (int, float)) or float(fanout) > TRUST_FANOUT:
         return False
@@ -611,7 +677,12 @@ def needs_confirm(stats: dict) -> bool:
     a scan is not free. The answer for an unknown row estimate is "no": refusing
     to walk a table whose size nobody can read would block the trace entirely,
     which is worse than one slow step.
+
+    A window of persistently slow measurements is the second reason, and it does
+    not depend on the row estimate — the walk itself is the evidence.
     """
+    if persistently_slow(stats):
+        return True
     row_estimate = stats.get("rowEstimate")
     if not isinstance(row_estimate, (int, float)):
         return False
@@ -620,8 +691,30 @@ def needs_confirm(stats: dict) -> bool:
     return stats.get("indexed") is False
 
 
+def why_confirm(edge: dict) -> str | None:
+    """The short sentence a caller shows next to a step it wants approved.
+
+    None when the edge is cheap enough to walk without asking, so the caller can
+    use the return value as the test itself. The wording says which of the two
+    reasons fired, because "no index on a big table" and "the last five walks were
+    slow" call for different decisions.
+    """
+    stats = _stats_of(edge)
+    if persistently_slow(stats):
+        slow = cost_settings()["slowMs"]
+        return f"the recent steps are all over {slow * SLOW_FACTOR}ms"
+    if needs_confirm(stats):
+        return f"no index, and the table holds about {stats.get('rowEstimate')} rows"
+    return None
+
+
 def cost_of(edge: dict) -> dict:
-    """The cost facts a caller — a tool, the panel — needs about one edge."""
+    """The cost facts a caller — a tool, the panel — needs about one edge.
+
+    `timings` is the window itself, newest last, not just its average: one 900ms
+    sample among four fast ones is exactly the thing an average hides, and it is
+    what makes the next walk ask.
+    """
     stats = _stats_of(edge)
     return {
         "indexed": stats.get("indexed"),
@@ -629,6 +722,7 @@ def cost_of(edge: dict) -> dict:
         "rowEstimate": stats.get("rowEstimate"),
         "lastMs": stats.get("lastMs"),
         "avgMs": stats.get("avgMs"),
+        "timings": list(stats.get("timings") or []),
         "needsConfirm": needs_confirm(stats),
     }
 
@@ -705,11 +799,19 @@ def feedback(
         else:
             _record(edge, "reconfirmed", note=note)
     elif wanted_verdict == "irrelevant":
-        stats["rejectCount"] = int(stats.get("rejectCount") or 0) + 1
+        # "This edge has nothing to do with the value" is not evidence about the
+        # cost or the correctness of the join, so it does not touch the
+        # confirmation run. It is a statement about this walk, and the blacklist it
+        # produces is undone by proposing the edge again.
         stats["lastFailure"] = {"verdict": wanted_verdict, "reason": wanted_reason, "at": now}
         edge["status"] = "rejected"
         _record(edge, "rejected", note=note or wanted_reason)
     else:
+        # A rejection is evidence that the last confirmations were wrong, so the
+        # run starts again from zero: trust needs three confirmations *in a row*
+        # after the most recent rejection, not three ever. `rejectCount` keeps
+        # counting for the audit trail and the panel; it no longer gates anything.
+        stats["confirmCount"] = 0
         stats["rejectCount"] = int(stats.get("rejectCount") or 0) + 1
         stats["lastFailure"] = {"verdict": wanted_verdict, "reason": wanted_reason, "at": now}
         edge["status"] = "stale"

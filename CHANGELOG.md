@@ -136,9 +136,39 @@ report of each version in more detail.
   Trace tab's stage rows carry a dashed style for a weak row, a warning style plus the
   reason for an incomplete one, the matched-on rule text, and an "IN list was
   truncated" note — so a loose match is visibly a hint, not a walked step.
+- **Every refused scan is one decision, not one run per step.** `trace_by_key` now
+  returns `confirmTargets`: each hop it declined to run, with the table, column, the
+  catalog's row estimate, the edge id and why it was refused (no index on a large
+  table, or a timing window that is persistently far over the slow threshold — a
+  series of bad samples now asks on its own, whatever the table's size). `confirm_slow`
+  takes the **edge ids** the caller has agreed to pay for; only those steps run, and
+  the rest still come back as `needs_confirm`. A bare `true` names no step, so the
+  agent tool ignores it — the panel is the one caller allowed to waive the check, and
+  it asks with one checkbox per target, smallest table ticked by default, no "run
+  all". Every approval is written to the audit log as edge ids and a count, never the
+  rows they read, and an approved scan that hits the statement timeout comes back
+  marked `timedOut` instead of looking like an empty result.
+- **A scene says what it would cost before you walk it.** `list_scenes` returns
+  `costly` — the joins inside the scene that would read a whole table, each with its
+  edge, table, column, row estimate and reason. It is computed from the join facts
+  already on disk, so opening or saving a scene runs no statement at all. The Scenes
+  page shows it above the isolated members, and the cost hint is a label, not a query.
 
 ### Changed
 
+- **Trust is withdrawn when the measurements turn, and a rejection resets the count.**
+  `trusted` used to need three confirmations and "no rejection left standing", which
+  meant one rejected edge could never earn trust again however many times it was
+  confirmed. It now needs three confirmations **in a row** after the most recent
+  rejection: `too_many` and `missing` clear the run, while `irrelevant` — "this edge
+  has nothing to do with the value" — no longer counts as evidence about the join at
+  all, and `rejectCount` is kept for the history and the panel rather than as a gate.
+  In the other direction, a trusted edge whose majority of recent samples are over the
+  slow threshold drops back to `confirmed` and says so once in its history; a single
+  slow sample among fast ones still changes nothing, because an average that hides the
+  one bad step is exactly what the timing window exists to prevent. `cost_of` now also
+  returns the `timings` list, so the panel can show the samples rather than only their
+  average.
 - **Numbers and verdicts read as words, not internal tokens.** A judgement notice
   now says *Confirmed this step* / *Flagged: too many rows* instead of printing
   `ok` / `too_many`, and a step status is shown through the scene's own labels.

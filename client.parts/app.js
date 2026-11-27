@@ -2191,6 +2191,18 @@ function groupTables(tables) {
         keepResult('traceFocus', value)
         setTraceFocusState(value)
       }
+      /* Which expensive steps the reader has ticked to pay for. One decision for
+         many refused hops: tick the smallest table so the cheap end of the list
+         is one click away, and leave the rest to the reader rather than
+         pre-approving five full scans. A re-opened panel restores the walk from
+         memory, so seed it the same way as a fresh run — otherwise the bar says
+         one is ticked by default while none is. */
+      const smallestConfirmEdge = (result) => {
+        const targets = (result && Array.isArray(result.confirmTargets) && result.confirmTargets) || []
+        const sized = targets.filter((item) => item && typeof item.rowEstimate === 'number' && item.edge)
+        return sized.length ? [sized.slice().sort((a, b) => a.rowEstimate - b.rowEstimate)[0].edge] : []
+      }
+      const [traceApproved, setTraceApproved] = React.useState(() => smallestConfirmEdge(readResult('trace')))
       /* How much the graph is magnified. A walk that fans out into five lanes does
          not fit any card, and shrinking the text to fit makes the labels unreadable,
          so the picture keeps its own size and the reader scales it. */
@@ -3246,6 +3258,12 @@ function groupTables(tables) {
           setTraceError(t('trace.needValue'))
           return
         }
+        // What the reader ticked in the confirmation bar: edge ids, because an
+        // approved hop is a specific hop, not a blanket "yes". A bare `true` is
+        // only still accepted from the old single-step button.
+        const approved = Array.isArray(confirmSlow)
+          ? confirmSlow.filter((item) => typeof item === 'string' && item.trim())
+          : []
         const entryTable = startAt && startAt.table ? startAt.table : traceTable.trim()
         const entryColumn = startAt && startAt.column ? startAt.column : traceColumn.trim()
         setTraceBusy(true)
@@ -3261,7 +3279,7 @@ function groupTables(tables) {
             entry_table: entryTable || undefined,
             entry_column: entryColumn || undefined,
             direction: traceDirection,
-            confirm_slow: confirmSlow === true ? true : undefined,
+            confirm_slow: approved.length ? approved : confirmSlow === true ? true : undefined,
             scene: traceScene || undefined,
           })
           if (payload && payload.ok === false) {
@@ -3272,6 +3290,12 @@ function groupTables(tables) {
             return
           }
           setTrace(payload || null)
+          // One decision, not one per step: tick the smallest table by default so
+          // the cheap end of the list is one click away, and leave the rest to the
+          // reader rather than pre-approving five full scans.
+          const targets = (payload && Array.isArray(payload.confirmTargets) && payload.confirmTargets) || []
+          const sized = targets.filter((item) => item && typeof item.rowEstimate === 'number' && item.edge)
+          setTraceApproved(sized.length ? [sized.slice().sort((a, b) => a.rowEstimate - b.rowEstimate)[0].edge] : [])
         } catch (error) {
           const body = (error && error.payload) || {}
           const failure = body.error || {}
@@ -4855,6 +4879,10 @@ function groupTables(tables) {
         const draft = sceneEdit || null
         const links = (stored && stored.edges) || []
         const isolated = (stored && stored.isolated) || []
+        /* The one cost fact a scene states without asking the database: how many of
+           its joins would read a whole table. Derived server-side from edge facts
+           already on disk, so opening this page runs no statement. */
+        const costly = (stored && stored.costly) || []
         const members = (draft && draft.tables) || []
         const needle = sceneQuery.trim().toLowerCase()
         const catalogue = (sceneCatalog || []).filter(
@@ -5143,6 +5171,34 @@ function groupTables(tables) {
                         ),
                   )
                 }),
+              ),
+            )
+
+        /* A scene can be perfectly connected and still be expensive: a join into an
+           unindexed big table reads that table whole. The count comes from facts
+           already on the edge, so this is a label, not a query — opening the scene
+           costs nothing. */
+        const costlyBlock = costly.length === 0
+          ? null
+          : h(
+              'div',
+              { className: 'dbmcp-scene-block dbmcp-scene-costly' },
+              h('p', { className: 'dbmcp-label' }, fmt(t('scene.costlyTitle'), { n: costly.length })),
+              h('p', { className: 'dbmcp-hint' }, t('scene.costlyHint')),
+              h(
+                'ul',
+                { className: 'dbmcp-scene-costly-list' },
+                costly.slice(0, 6).map((item) =>
+                  h(
+                    'li',
+                    { key: item.edge || `${item.table}.${item.column}` },
+                    h('code', null, `${item.table}${item.column ? `.${item.column}` : ''}`),
+                    typeof item.rowEstimate === 'number'
+                      ? h('span', { className: 'dbmcp-hint' }, fmt(t('trace.confirmRows'), { n: item.rowEstimate }))
+                      : null,
+                    item.reason ? h('span', { className: 'dbmcp-hint dbmcp-edge-why' }, item.reason) : null,
+                  ),
+                ),
               ),
             )
 
@@ -5560,6 +5616,7 @@ function groupTables(tables) {
               draft.id ? aliasBlock : null,
               previewBlock,
               draft.id ? weakBlock : null,
+              draft.id ? costlyBlock : null,
               draft.id ? isolatedBlock : null,
             )
 
@@ -5806,7 +5863,9 @@ function groupTables(tables) {
                     className: 'dbmcp-btn is-small',
                     disabled: traceBusy,
                     onClick: () => {
-                      void runTrace(true)
+                      // Approving this hop means this hop: send its edge id, so a
+                      // blanket "yes" cannot be passed on to the next scan.
+                      void runTrace(node.edge && node.edge.id ? [node.edge.id] : undefined)
                     },
                   },
                   t('trace.continueAnyway'),
@@ -5814,6 +5873,9 @@ function groupTables(tables) {
               )
             : null,
           slow ? null : node.note ? h('p', { className: 'dbmcp-hint dbmcp-trace-note' }, node.note) : null,
+          node.timedOut
+            ? h('p', { className: 'dbmcp-hint dbmcp-stage-warning' }, t('trace.timedOut'))
+            : null,
           slow || rows === 0
             ? null
             : h(
@@ -6353,6 +6415,78 @@ function groupTables(tables) {
         const stopped = (trace && trace.stoppedAt) || []
         const entry = (trace && trace.entry) || null
         const candidates = (entry && Array.isArray(entry.candidates)) ? entry.candidates : []
+        const confirmTargets = (trace && Array.isArray(trace.confirmTargets)) ? trace.confirmTargets : []
+        /* The steps this walk refused to pay for, as one list with one button.
+           A trace that hits five unindexed big tables used to need five separate
+           runs; here the reader ticks what they agree to and runs once. There is
+           deliberately no "run all": the point of the list is that each scan is
+           chosen. */
+        const confirmBlock =
+          confirmTargets.length > 0
+            ? h(
+                'div',
+                { className: 'dbmcp-trace-confirm' },
+                h('p', { className: 'dbmcp-label' }, t('trace.confirmTitle')),
+                h('p', { className: 'dbmcp-hint' }, t('trace.confirmWhy')),
+                h(
+                  'ul',
+                  { className: 'dbmcp-trace-confirm-list' },
+                  confirmTargets.map((item, index) => {
+                    const ticked = traceApproved.includes(item.edge)
+                    const smallest =
+                      confirmTargets
+                        .filter((other) => typeof other.rowEstimate === 'number')
+                        .sort((a, b) => a.rowEstimate - b.rowEstimate)[0] === item
+                    return h(
+                      'li',
+                      { key: `confirm-${item.edge || index}`, className: 'dbmcp-trace-confirm-row' },
+                      h(
+                        'label',
+                        { className: 'dbmcp-cell' },
+                        h('input', {
+                          type: 'checkbox',
+                          checked: ticked,
+                          disabled: traceBusy,
+                          'aria-label': `${t('trace.confirmTick')}: ${item.table}.${item.column}`,
+                          onChange: () =>
+                            setTraceApproved(
+                              ticked
+                                ? traceApproved.filter((id) => id !== item.edge)
+                                : traceApproved.concat(item.edge),
+                            ),
+                        }),
+                        h('code', null, `${item.table}.${item.column}`),
+                        h(
+                          'span',
+                          { className: 'dbmcp-hint' },
+                          typeof item.rowEstimate === 'number'
+                            ? fmt(t('trace.confirmRows'), { n: item.rowEstimate })
+                            : t('trace.confirmUnknownRows'),
+                        ),
+                        smallest ? h('span', { className: 'dbmcp-pill' }, t('trace.confirmSmallest')) : null,
+                      ),
+                      item.reason ? h('span', { className: 'dbmcp-hint dbmcp-edge-why' }, item.reason) : null,
+                    )
+                  }),
+                ),
+                h(
+                  'div',
+                  { className: 'dbmcp-inline' },
+                  h(
+                    'button',
+                    {
+                      type: 'button',
+                      className: 'dbmcp-btn is-small is-primary',
+                      disabled: traceBusy || traceApproved.length === 0,
+                      onClick: () => void runTrace(traceApproved.slice()),
+                    },
+                    traceApproved.length
+                      ? fmt(t('trace.confirmRun'), { n: traceApproved.length })
+                      : t('trace.confirmNone'),
+                  ),
+                ),
+              )
+            : null
         const sceneOn = Boolean(traceScene)
         /* What "save as a scene" records: the tables this walk actually read.
            A table reached from two parents is still one member. */
@@ -6583,6 +6717,7 @@ function groupTables(tables) {
                 summary.needsConfirm
                   ? h('p', { className: 'dbmcp-hint dbmcp-edge-why' }, fmt(t('trace.needsConfirmSome'), { n: summary.needsConfirm }))
                   : null,
+                confirmBlock,
                 h(
                   'div',
                   { className: 'dbmcp-inline dbmcp-trace-save' },

@@ -795,7 +795,7 @@ def trace_by_key(
     max_depth: int = 3,
     max_rows_per_table: int = 20,
     direction: str = "both",
-    confirm_slow: bool = False,
+    confirm_slow: Optional[list[str]] = None,
     scene: Optional[str] = None,
 ) -> dict:
     """Follow one value across the joins the relation graph trusts.
@@ -816,10 +816,19 @@ def trace_by_key(
     children) or `both`. `max_depth` is clamped to 6 and `max_rows_per_table` to
     200.
 
-    A step whose column has no index and whose table is very large is a full table
-    scan. The trace does not pay for it on its own: that step comes back with
-    `status: "needs_confirm"` and `summary.needsConfirm` counts them. Look at which
-    table and how big, then call again with `confirm_slow=True` to allow it.
+    A step that would scan a whole table — no index on a big target, or a window of
+    consistently slow walks — is not paid for on its own: it comes back with
+    `status: "needs_confirm"`, and every such step in this walk is listed in
+    `confirmTargets` as `{table, column, rowEstimate, edge, reason}`, so one
+    decision can cover all of them instead of one trace per step. To allow a step,
+    pass its edge id in `confirm_slow` (a list of ids, e.g. `["e_1a2b3c"]`) and run
+    the trace again.
+
+    **Do not set `confirm_slow` without the user's explicit consent.** Every
+    approved step may read a whole table, which is exactly the cost this parameter
+    exists to keep from happening by accident. The panel asks first, with one
+    checkbox per target; an agent should ask in conversation and pass only the ids
+    the user agreed to.
 
     `scene` names a table set saved with `save_scene`. The walk then only reads
     tables inside it; a join that would leave the scene is listed under `outside`
@@ -838,6 +847,15 @@ def trace_by_key(
     try:
         profile, (connection, close) = _open(datasource)
         try:
+            # A bare `true` is not a consent: it names no step, and the one caller
+            # allowed to waive the check is the panel, which sends the edge ids the
+            # user ticked. Anything else that arrives as a boolean is ignored
+            # rather than turned into "scan everything".
+            allowed = (
+                [str(item) for item in confirm_slow if item]
+                if isinstance(confirm_slow, (list, tuple, set))
+                else None
+            )
             result = tracing.trace(
                 profile,
                 connection,
@@ -847,7 +865,7 @@ def trace_by_key(
                 max_depth=max_depth,
                 max_rows_per_table=max_rows_per_table,
                 direction=direction,
-                confirm_slow=confirm_slow,
+                confirm_slow=allowed or False,
                 scene=scene,
             )
         finally:

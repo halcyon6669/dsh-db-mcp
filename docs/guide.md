@@ -337,8 +337,10 @@ The right-hand pane edits the set:
 
 The same set is what `trace_by_key` accepts as `scene`; a walk then stays inside those
 tables and reports every table it could not enter under `outside`. An agent can read a
-scene before it queries: `list_scenes` returns each scene's `edges` and `isolated`
-members, so the shape of the set is visible without guessing.
+scene before it queries: `list_scenes` returns each scene's `edges`, `isolated` and
+`costly` members, so the shape of the set is visible without guessing — `costly` names
+the joins in the scene that would read a whole table, read off the facts already on
+disk, so opening a scene costs nothing.
 
 A scene can also describe **stages** — the order a person follows the business in,
 such as order → lines → payment → shipment. Save `stages` through `save_scene`, each
@@ -351,6 +353,18 @@ the broken link is visible; SQL, bound values, timing and the edge stay folded i
 row's `⋯` menu. Feedback buttons appear only where a decision is needed — a pending
 edge, an unusually wide fanout or a step with no rows; confirmed steps just read
 clean. Switch back to **自由追踪** any time for the usual left-to-right graph.
+
+A join that would read a whole table is not run on its own: the step stops and lists
+itself under **steps that need your say-so**, with the table and column, the catalog's
+row estimate and why it was refused. Every refused step lands in that one list with a
+checkbox, so five expensive hops need one answer rather than five separate runs. Only
+the smallest table is ticked for you; tick the others you are willing to pay for and
+press the button, and only those scans run — the rest still stop. The `⋯` menu keeps a
+per-step button for the same thing. An approved scan still obeys the statement timeout
+and the row cap; if it times out, the step is marked unfinished instead of being shown
+as no rows. On the Scenes page, a scene whose joins include such a table says so up
+front (**joins here that would read a whole table: N**) — read off the join facts, so
+looking at a scene never queries anything.
 
 ### Business keys and weak links
 

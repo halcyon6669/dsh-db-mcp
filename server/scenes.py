@@ -487,6 +487,31 @@ def _described(scene: dict, edges: list[dict]) -> dict:
         )
     )
     isolated = [name for name in tables if _fold(name) not in touched]
+    # The one cost fact a scene can state without asking the database: how many of
+    # its joins point at a table that would be scanned whole. It is read off the
+    # edge facts already on disk (index flag, row estimate, recent samples), so
+    # opening or saving a scene never runs a statement to find out.
+    import relations
+
+    costly = []
+    for edge in edges:
+        if str(edge.get("status") or "") not in LINK_STATUSES:
+            continue
+        if _fold((edge.get("from") or {}).get("table")) not in members:
+            continue
+        if _fold((edge.get("to") or {}).get("table")) not in members:
+            continue
+        cost = relations.cost_of(edge)
+        if cost.get("needsConfirm"):
+            costly.append(
+                {
+                    "edge": edge.get("id"),
+                    "table": (edge.get("to") or {}).get("table"),
+                    "column": (edge.get("to") or {}).get("column"),
+                    "rowEstimate": cost.get("rowEstimate"),
+                    "reason": relations.why_confirm(edge),
+                }
+            )
     stages = _stage_list(scene.get("stages"))
     aliases = _alias_map(scene.get("aliases"))
     weak = _weak_match_list(scene.get("weakMatch"))
@@ -511,6 +536,7 @@ def _described(scene: dict, edges: list[dict]) -> dict:
         "updatedAt": scene.get("updatedAt"),
         "edges": links,
         "isolated": isolated,
+        "costly": costly,
         "stages": stages,
         "aliases": aliases,
         "inputAlias": _input_alias(scene.get("inputAlias")),

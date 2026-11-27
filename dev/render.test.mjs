@@ -1502,12 +1502,30 @@ check(
 )
 check(
   'trace page: the stopped step offers the one way to allow it',
-  /trace\.continueAnyway/.test(traceCard) && /runTrace\(true\)/.test(traceCard),
+  /trace\.continueAnyway/.test(traceCard) && /runTrace\(node\.edge && node\.edge\.id \? \[node\.edge\.id\] : undefined\)/.test(traceCard),
 )
 check(
   'trace page: only that button sends confirm_slow',
-  /confirm_slow: confirmSlow === true \? true : undefined/.test(traceLogic) &&
+  /confirm_slow: approved\.length \? approved : confirmSlow === true \? true : undefined/.test(traceLogic) &&
     (traceLogic.match(/confirm_slow/g) || []).length === 1,
+)
+/* One decision for many expensive steps: the refused hops come back as
+   `confirmTargets`, the reader ticks what they agree to, and there is no
+   "run all" — each scan is chosen on purpose. */
+check(
+  'trace page: the refused steps are one list with one decision',
+  /const confirmTargets = \(trace && Array\.isArray\(trace\.confirmTargets\)\) \? trace\.confirmTargets : \[\]/.test(traceCard) &&
+    /trace\.confirmTitle/.test(traceCard) &&
+    /trace\.confirmTick/.test(traceCard) &&
+    /trace\.confirmRun/.test(traceCard) &&
+    /trace\.confirmNone/.test(traceCard) &&
+    /onClick: \(\) => void runTrace\(traceApproved\.slice\(\)\)/.test(traceCard),
+)
+check(
+  'trace page: only the smallest table is ticked for the reader',
+  /const sized = targets\.filter\(\(item\) => item && typeof item\.rowEstimate === 'number' && item\.edge\)/.test(traceLogic) &&
+    /sized\.slice\(\)\.sort\(\(a, b\) => a\.rowEstimate - b\.rowEstimate\)\[0\]\.edge/.test(traceLogic) &&
+    !/trace\.confirmAll/.test(source),
 )
 check(
   'trace page: each step reports how long it took',

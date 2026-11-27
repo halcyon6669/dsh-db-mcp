@@ -450,6 +450,107 @@ class TraceOnARealDatabase(_Walk):
         self.assertEqual(stopped["cost"]["rowEstimate"], 5_000_000)
         self.assertEqual([str(item) for item in stopped["condition"]["binds"]], ["1"], "the parent id the walk arrived with")
 
+    def test_a_refused_scan_is_listed_as_a_target_to_confirm(self):
+        # One trace collects every expensive hop it met, so the reader can decide
+        # once. The list is what the panel turns into checkboxes: which join, what
+        # it would cost, and why it is expensive.
+        self._chain()
+        edge_id = self._costly()
+        result = self._trace("10", entry_table="t_trans", entry_column="id", direction="up")
+        targets = result["confirmTargets"]
+        self.assertEqual(len(targets), 1)
+        target = targets[0]
+        self.assertEqual(target["table"], "t_order")
+        self.assertEqual(target["column"], "id")
+        self.assertEqual(target["edge"], edge_id)
+        self.assertEqual(target["rowEstimate"], 5_000_000)
+        self.assertIn("no index", target["reason"])
+
+    def test_no_confirmation_asked_means_an_empty_target_list(self):
+        self._chain()
+        result = self._trace("1", entry_table="t_order", entry_column="id", direction="down")
+        self.assertEqual(result["confirmTargets"], [])
+
+    def test_approving_one_edge_runs_only_that_edge(self):
+        # The list is a set of ids, not a switch: approving the hop the reader
+        # ticked must not wave through a different expensive hop further on.
+        self._chain()
+        approved_id = self._costly()
+        doc = relations.load(self.profile)
+        for edge in doc["edges"]:
+            edge["stats"]["indexed"] = False
+            edge["stats"]["rowEstimate"] = 5_000_000
+        relations.save(self.profile, doc)
+        result = self._trace(
+            "10",
+            entry_table="t_trans",
+            entry_column="id",
+            direction="up",
+            confirm_slow=[approved_id],
+        )
+        statuses = [(step["table"], step["status"]) for step in result["steps"]]
+        self.assertEqual(statuses[1], ("t_order", "hit"), "the approved hop ran")
+        approved = [step for step in result["steps"] if step["status"] == "hit" and step.get("confirmed")]
+        self.assertTrue(approved, "the step says it was approved, not that it was free")
+
+    def test_an_unapproved_edge_still_stops_the_walk(self):
+        self._chain()
+        self._costly()
+        other = "e_not_this_one"
+        result = self._trace(
+            "10",
+            entry_table="t_trans",
+            entry_column="id",
+            direction="up",
+            confirm_slow=[other],
+        )
+        statuses = [(step["table"], step["status"]) for step in result["steps"]]
+        self.assertEqual(statuses[1], ("t_order", "needs_confirm"), "an unknown id approves nothing")
+
+    def test_an_approved_scan_that_times_out_is_marked_unfinished(self):
+        # Approving a scan buys the attempt, not the answer: if the statement hits
+        # its timeout the step must read as unfinished rather than as "0 rows".
+        self._chain()
+        edge_id = self._costly()
+        real = tracing.engines.fetch_matching
+
+        def explode(profile, connection, table, column, *args, **kwargs):
+            # Only the expensive hop may fail: the entry probe runs through the same
+            # call, and blowing that up would test "no entry" instead.
+            if str(table).lower() == "t_order":
+                raise tracing.engines.DbError("timeout", "canceling statement due to statement timeout")
+            return real(profile, connection, table, column, *args, **kwargs)
+
+        tracing.engines.fetch_matching = explode
+        try:
+            result = self._trace(
+                "10",
+                entry_table="t_trans",
+                entry_column="id",
+                direction="up",
+                confirm_slow=[edge_id],
+            )
+        finally:
+            tracing.engines.fetch_matching = real
+        step = [item for item in result["steps"] if item["table"] == "t_order"][0]
+        self.assertTrue(step.get("timedOut"), "a cut-short scan is not a zero-row answer")
+        self.assertIn("statement timeout", str(step.get("note") or ""))
+
+    def test_persistently_slow_samples_ask_even_with_a_small_table(self):
+        # A small table that takes seconds every single time is worth asking about
+        # just as much as a big one; the rule does not depend on the row estimate.
+        self._chain()
+        doc = relations.load(self.profile)
+        edge = next(item for item in doc["edges"] if item["to"]["table"] == "t_order")
+        edge["stats"]["indexed"] = True
+        edge["stats"]["rowEstimate"] = 100
+        edge["stats"]["timings"] = [1500, 1600, 1700]
+        relations.save(self.profile, doc)
+        result = self._trace("10", entry_table="t_trans", entry_column="id", direction="up")
+        statuses = [(step["table"], step["status"]) for step in result["steps"]]
+        self.assertEqual(statuses[1], ("t_order", "needs_confirm"), "indexed and small, but slow every time")
+        self.assertIn("1000ms", result["confirmTargets"][0]["reason"])
+
     def test_confirm_slow_runs_the_scan(self):
         self._chain()
         self._costly()
@@ -996,6 +1097,7 @@ class TraceShape(unittest.TestCase):
                 "pending",
                 "warnings",
                 "stoppedAt",
+                "confirmTargets",
             },
         )
         self.assertEqual(
