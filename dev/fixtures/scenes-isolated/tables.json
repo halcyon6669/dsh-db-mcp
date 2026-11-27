@@ -1,0 +1,13 @@
+{
+  "ok": true,
+  "datasource": "trace-demo",
+  "target": "127.0.0.1:15432/trace_demo",
+  "tables": [
+    { "schema": "public", "name": "sales_order", "type": "table" },
+    { "schema": "public", "name": "payment", "type": "table" },
+    { "schema": "public", "name": "customer", "type": "table" },
+    { "schema": "public", "name": "region", "type": "table" },
+    { "schema": "public", "name": "note_only", "type": "table" }
+  ],
+  "schemas": ["public"]
+}

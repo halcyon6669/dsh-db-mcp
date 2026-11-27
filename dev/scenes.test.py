@@ -278,7 +278,14 @@ class SceneLinks(unittest.TestCase):
 
         proposed = relations.propose(self.profile, frm, frm_column, to, to_column)
         relations.feedback(self.profile, proposed["edge"]["id"], "ok")
-        return proposed["edge"]["id"]
+
+    def test_the_link_statuses_match_what_the_walker_follows(self):
+        """A scene advertises exactly the edges a trace would follow. If the two
+        lists drift, a panel could show a join as usable that the walker refuses
+        (or hide one it does follow), so the duplication is guarded here."""
+        import tracing
+
+        self.assertEqual(tuple(scenes.LINK_STATUSES), tuple(tracing.WALK_STATUSES))
 
     def test_a_confirmed_join_between_members_is_reported(self):
         self._confirm("t_order", "id", "t_trans", "order_id")
@@ -355,6 +362,71 @@ class SceneLinks(unittest.TestCase):
         after = scenes.list_scenes(self.profile)["scenes"][0]
         self.assertEqual(before["edges"], [])
         self.assertEqual(len(after["edges"]), 1)
+
+
+class IsolatedFixture(unittest.TestCase):
+    """The committed fixture the panel's isolated-member UI is checked against.
+
+    A browser pass cannot invent its own data, so the two cases the Scenes page has
+    to tell apart live here as files: a member nothing confirmed joins at all, and a
+    member whose confirmed joins all lead out of the scene. If the fixture stops
+    expressing one of them, the screenshot pass would silently stop testing it.
+    """
+
+    def setUp(self):
+        self.folder = PACKAGE / "dev" / "fixtures" / "scenes-isolated"
+        self.scenes = json.loads((self.folder / "scenes.json").read_text(encoding="utf-8"))
+        self.relations = json.loads((self.folder / "relations.json").read_text(encoding="utf-8"))
+        self.columns = json.loads((self.folder / "columns.json").read_text(encoding="utf-8"))
+
+    def test_the_fixture_has_a_scene_with_two_stranded_members(self):
+        scene = self.scenes["scenes"][0]
+        self.assertGreaterEqual(len(scene["isolated"]), 2)
+
+    def test_one_stranded_member_has_no_confirmed_join_at_all(self):
+        scene = self.scenes["scenes"][0]
+        members = {name.casefold() for name in scene["tables"]}
+        joined = set()
+        for edge in self.relations["edges"]:
+            if edge["status"] not in scenes.LINK_STATUSES:
+                continue
+            joined.add(edge["from"]["table"].casefold())
+            joined.add(edge["to"]["table"].casefold())
+        lonely = [name for name in scene["isolated"] if name.casefold() not in joined]
+        self.assertTrue(lonely, "the fixture needs a member with no confirmed join at all")
+
+    def test_one_stranded_member_only_joins_out_of_the_scene(self):
+        scene = self.scenes["scenes"][0]
+        members = {name.casefold() for name in scene["tables"]}
+        outward = []
+        for name in scene["isolated"]:
+            folded = name.casefold()
+            for edge in self.relations["edges"]:
+                if edge["status"] not in scenes.LINK_STATUSES:
+                    continue
+                ends = {edge["from"]["table"].casefold(), edge["to"]["table"].casefold()}
+                if folded in ends and len(ends - members) == 1:
+                    outward.append(name)
+                    break
+        self.assertTrue(outward, "the fixture needs a member whose joins all leave the scene")
+
+    def test_the_stranded_members_share_a_column_name_with_a_member(self):
+        # The candidate columns are the only way to add a join from the panel, so
+        # at least one stranded member must have something to offer.
+        scene = self.scenes["scenes"][0]
+        members = [name for name in scene["tables"] if name in self.columns]
+        self.assertGreaterEqual(len(members), 2)
+        for name in scene["isolated"]:
+            if name not in self.columns:
+                continue
+            mine = {column["name"].casefold() for column in self.columns[name]}
+            for other in members:
+                if other == name:
+                    continue
+                shared = mine & {column["name"].casefold() for column in self.columns[other]}
+                if shared:
+                    return
+        self.fail("no isolated member shares a column name with another member")
 
 
 class Limits(unittest.TestCase):

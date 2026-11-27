@@ -1,0 +1,40 @@
+{
+  "ok": true,
+  "tool": "list_edges",
+  "datasource": { "id": "trace-demo", "name": "trace-demo", "kind": "gauss", "readOnly": true, "isDefault": false, "target": "127.0.0.1:15432/trace_demo" },
+  "edges": [
+    {
+      "id": "e_fixture_1",
+      "from": { "table": "payment", "column": "order_no" },
+      "to": { "table": "sales_order", "column": "order_no" },
+      "source": "fk",
+      "status": "confirmed",
+      "condition": null,
+      "note": null,
+      "stats": { "confirmCount": 2, "rejectCount": 0, "avgFanout": 1, "indexed": true, "rowEstimate": 6, "lastMs": 1, "unique": true }
+    },
+    {
+      "id": "e_fixture_2",
+      "from": { "table": "customer", "column": "code" },
+      "to": { "table": "region", "column": "code" },
+      "source": "fk",
+      "status": "confirmed",
+      "condition": null,
+      "note": "the region table is outside this scene, which is why customer counts as isolated",
+      "stats": { "confirmCount": 1, "rejectCount": 0, "avgFanout": 1, "indexed": true, "rowEstimate": 3, "lastMs": 1, "unique": true }
+    },
+    {
+      "id": "e_fixture_3",
+      "from": { "table": "sales_order", "column": "customer_code" },
+      "to": { "table": "customer", "column": "code" },
+      "source": "fk",
+      "status": "pending",
+      "condition": null,
+      "note": "pending is not followed by a walk, so it leaves both ends isolated",
+      "stats": { "confirmCount": 0, "rejectCount": 0, "avgFanout": 0, "indexed": true, "rowEstimate": 6, "lastMs": 1, "unique": true }
+    }
+  ],
+  "counts": { "pending": 1, "confirmed": 2, "trusted": 0, "stale": 0, "rejected": 0 },
+  "total": 3,
+  "truncated": false
+}

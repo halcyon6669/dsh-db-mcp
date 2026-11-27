@@ -1,0 +1,21 @@
+{
+  "ok": true,
+  "tool": "list_scenes",
+  "datasource": { "id": "trace-demo", "name": "trace-demo", "kind": "gauss", "readOnly": true, "isDefault": false, "target": "127.0.0.1:15432/trace_demo" },
+  "scenes": [
+    {
+      "id": "s_iso",
+      "name": "isolated demo",
+      "tables": ["sales_order", "payment", "note_only", "customer"],
+      "tableCount": 4,
+      "note": "fixture: one table with no join at all, one that only joins outside",
+      "createdAt": "2026-11-27T00:00:00Z",
+      "updatedAt": "2026-11-27T00:00:00Z",
+      "edges": [
+        { "id": "e_fixture_1", "from": { "table": "payment", "column": "order_no" }, "to": { "table": "sales_order", "column": "order_no" }, "status": "confirmed" }
+      ],
+      "isolated": ["note_only", "customer"]
+    }
+  ],
+  "total": 1
+}

@@ -1,0 +1,28 @@
+{
+  "sales_order": [
+    { "name": "id", "type": "integer", "nullable": false, "default": null, "primaryKey": true },
+    { "name": "order_no", "type": "character varying(16)", "nullable": false, "default": null, "primaryKey": false },
+    { "name": "customer_code", "type": "character varying(16)", "nullable": true, "default": null, "primaryKey": false },
+    { "name": "total", "type": "numeric(12,2)", "nullable": true, "default": null, "primaryKey": false }
+  ],
+  "payment": [
+    { "name": "id", "type": "integer", "nullable": false, "default": null, "primaryKey": true },
+    { "name": "order_no", "type": "character varying(18)", "nullable": false, "default": null, "primaryKey": false },
+    { "name": "amount", "type": "numeric(12,2)", "nullable": true, "default": null, "primaryKey": false }
+  ],
+  "customer": [
+    { "name": "id", "type": "integer", "nullable": false, "default": null, "primaryKey": true },
+    { "name": "code", "type": "character varying(16)", "nullable": false, "default": null, "primaryKey": false },
+    { "name": "name", "type": "character varying(64)", "nullable": true, "default": null, "primaryKey": false },
+    { "name": "region_code", "type": "character varying(16)", "nullable": true, "default": null, "primaryKey": false }
+  ],
+  "region": [
+    { "name": "id", "type": "integer", "nullable": false, "default": null, "primaryKey": true },
+    { "name": "code", "type": "character varying(16)", "nullable": false, "default": null, "primaryKey": false }
+  ],
+  "note_only": [
+    { "name": "id", "type": "integer", "nullable": false, "default": null, "primaryKey": true },
+    { "name": "order_no", "type": "character varying(16)", "nullable": true, "default": null, "primaryKey": false },
+    { "name": "body", "type": "text", "nullable": true, "default": null, "primaryKey": false }
+  ]
+}
