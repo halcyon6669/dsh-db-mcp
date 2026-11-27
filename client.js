@@ -5290,6 +5290,12 @@ function groupTables(tables) {
       return a === 'any' || b === 'any' || a === b
     }
 
+    /* A bare `id`, `code`, `created_at` and friends say nothing: nearly every
+       table has one, so matching them would suggest a join between unrelated
+       rows. A prefixed name (`order_id`, `customer_code`) does carry a hint and
+       stays eligible. */
+    const GENERIC_COLUMNS = ['id', 'code', 'name', 'status', 'type', 'created_at', 'updated_at']
+
     /* Join candidates for one member: a column of this table whose name also
        appears on another member, with a type that can be compared. Same name is
        the only evidence the panel has — it never reads rows to guess a
@@ -5300,6 +5306,7 @@ function groupTables(tables) {
         const name = String((column && column.name) || '').trim()
         if (!name) continue
         const folded = foldName(name)
+        if (GENERIC_COLUMNS.includes(folded)) continue
         for (const other of others || []) {
           const otherName = String((other && other.table) || '')
           if (!otherName) continue

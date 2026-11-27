@@ -550,6 +550,19 @@ check(
     [{ table: 'other', columns: Array.from({ length: 8 }, (_, index) => col(`K${index}`, 'text')) }],
   ).length === 5,
 )
+// `id` / `created_at` are on nearly every table: matching them would suggest a
+// join between unrelated rows. A prefixed business key stays eligible.
+const generic = ['id', 'code', 'name', 'status', 'type', 'created_at', 'updated_at']
+for (const name of generic) {
+  check(
+    `scene join: generic column ${name} is not a candidate`,
+    linkCandidates([col(name, 'varchar(32)')], [{ table: 'other', columns: [col(name.toUpperCase(), 'text')] }]).length === 0,
+  )
+}
+check(
+  'scene join: a prefixed business key is still a candidate',
+  linkCandidates([col('order_id', 'integer')], [{ table: 'other', columns: [col('ORDER_ID', 'bigint')] }]).length === 1,
+)
 check('scene join: the folded name is case-insensitive', foldName(' Order_NO ') === 'order_no')
 
 // A row carries several status words and exactly one control. The control is a
