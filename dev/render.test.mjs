@@ -1506,11 +1506,13 @@ check(
   /summary\.needsConfirm/.test(traceCard) && /trace\.needsConfirmSome/.test(source),
 )
 
-/* The walk is read as one picture: the graph is the view — there is no second
-   view to switch to — and the step you pick in it is read underneath. */
+/* Two ways to read a walk: the graph is the default (free) reading, and a scene
+   with stages replaces it with one row per stage. The old flat list is gone. */
 check(
-  'trace page: the graph is the only reading',
-  /steps\.length > 0 \? traceOverview\(\) : null/.test(traceCard) &&
+  'trace page: the graph is the default reading, a scene can replace it',
+  /trace && trace\.stages && traceMode === 'scene'\s*\n?\s*\? renderStages\(trace\.stages\)/.test(traceCard) &&
+    /!\(trace && trace\.stages && traceMode === 'scene'\) && steps\.length > 0\s*\n?\s*\? traceOverview\(\)/.test(traceCard) &&
+    /renderStages\(trace\.stages\)/.test(traceCard) &&
     !/renderTraceFlat/.test(source) &&
     !/traceView/.test(source) &&
     !/trace\.viewGraph/.test(source) &&
@@ -1563,6 +1565,39 @@ check(
 check(
   'trace page: the scene is a filter the reader can pick',
   /trace\.sceneAll/.test(source) && /scenes\.map/.test(traceCard) && /scene: traceScene \|\| undefined/.test(traceLogic),
+)
+check(
+  'trace page: a scene is read one row per stage, in business order',
+  /const renderStages = \(stages\) =>/.test(traceCard) &&
+    /const renderStageRow = \(row, index\) =>/.test(traceCard) &&
+    /rows\.map\(renderStageRow\)/.test(traceCard) &&
+    /className: `dbmcp-stage-row\$\{row\.missed \? ' is-missed' : ''\}\$\{nested \? ' is-nested' : ''\}`/.test(traceCard) &&
+    /stage\.sceneName/.test(source) &&
+    /stage\.notFound/.test(source),
+)
+check(
+  'trace page: feedback sits only where a decision is needed, else behind "..."',
+  /const stageNeedsFeedback = \(row\) =>/.test(traceCard) &&
+    /flags\.pending \|\| flags\.abnormalFanout \|\| flags\.empty/.test(traceCard) &&
+    /stageNeedsFeedback\(row\)\s*\n?\s*\?/.test(traceCard) &&
+    /h\('summary', \{ className: 'dbmcp-stage-morebtn' \}, '⋯'\)/.test(traceCard),
+)
+check(
+  'trace page: the mode toggles between a scene read and a free walk',
+  /const \[traceMode, setTraceMode\] = React\.useState\(\(\) => String\(savedPanel\.traceMode \|\| 'free'\)\)/.test(source) &&
+    /remember\('traceMode', setTraceMode\)\('free'\)/.test(traceCard) &&
+    /remember\('traceMode', setTraceMode\)\('scene'\)/.test(traceCard) &&
+    /trace\.modeFree/.test(source) &&
+    /trace\.modeScene/.test(source),
+)
+check(
+  'copy: verdicts and fanout never leak internal words',
+  /const verdictText = \(verdict\) =>/.test(source) &&
+    /verdict === 'too_many'\s*\n?\s*\? t\('verdict\.tooMany'\)/.test(source) &&
+    /fmt\(t\('notice\.verdict'\), \{ verdict: verdictText\(verdict\) \}\)/.test(source) &&
+    /'graph\.fanout': '\{value\} row\(s\) per value on average'/.test(source) &&
+    /cost\.indexed === true \|\| cost\.indexed === false\) parts\.push\(edgeIndexLabel/.test(source) &&
+    !/'graph\.fanout': '扇出/.test(source),
 )
 check(
   'trace page: a table outside the scene says so and can be folded in',

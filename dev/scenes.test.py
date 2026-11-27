@@ -164,6 +164,85 @@ class SavingScenes(unittest.TestCase):
         self.assertEqual(again["scene"]["note"], "first")
 
 
+class StageLayout(unittest.TestCase):
+    """A scene can describe the stages a walk is read in business order."""
+
+    def setUp(self):
+        self.saved = os.environ.get("DB_MCP_RUNTIME")
+        self.tmp = tempfile.TemporaryDirectory()
+        os.environ["DB_MCP_RUNTIME"] = self.tmp.name
+        self.profile = source()
+
+    def tearDown(self):
+        if self.saved is None:
+            os.environ.pop("DB_MCP_RUNTIME", None)
+        else:
+            os.environ["DB_MCP_RUNTIME"] = self.saved
+        self.tmp.cleanup()
+
+    def test_stages_are_saved_with_the_scene(self):
+        stages = [
+            {"name": "Order", "table": "t_order", "locate": "edge",
+             "displayColumns": ["order_no", "amount"], "statusColumn": "state",
+             "statusLabels": {"paid": "Paid"}, "amountColumn": "amount", "timeColumn": "created_at"},
+            {"name": "Payment", "table": "t_trans", "locate": "alias"},
+        ]
+        result = scenes.save_scene(self.profile, "cash", ["t_order", "t_trans"], stages=stages)
+        saved = result["scene"]["stages"]
+        self.assertEqual([s["name"] for s in saved], ["Order", "Payment"])
+        self.assertEqual(saved[0]["statusLabels"], {"paid": "Paid"})
+        self.assertEqual(saved[0]["locate"], "edge")
+
+    def test_a_stage_table_must_belong_to_the_scene(self):
+        with self.assertRaises(Exception) as caught:
+            scenes.save_scene(
+                self.profile, "cash", ["t_order"],
+                stages=[{"name": "Ghost", "table": "t_trans", "locate": "edge"}],
+            )
+        self.assertEqual(getattr(caught.exception, "code", None), "user_error")
+
+    def test_display_columns_are_capped_at_four(self):
+        with self.assertRaises(Exception) as caught:
+            scenes.save_scene(
+                self.profile, "cash", ["t_order"],
+                stages=[{"name": "Order", "table": "t_order", "locate": "edge",
+                         "displayColumns": ["a", "b", "c", "d", "e"]}],
+            )
+        self.assertEqual(getattr(caught.exception, "code", None), "user_error")
+
+    def test_unknown_locate_kind_is_rejected(self):
+        with self.assertRaises(Exception) as caught:
+            scenes.save_scene(
+                self.profile, "cash", ["t_order"],
+                stages=[{"name": "Order", "table": "t_order", "locate": "magic"}],
+            )
+        self.assertEqual(getattr(caught.exception, "code", None), "user_error")
+
+    def test_saving_without_stages_leaves_them_alone(self):
+        scenes.save_scene(
+            self.profile, "cash", ["t_order", "t_trans"],
+            stages=[{"name": "Order", "table": "t_order", "locate": "edge"}],
+        )
+        again = scenes.save_scene(self.profile, "cash", ["t_order", "t_trans"])
+        self.assertEqual(len(again["scene"]["stages"]), 1)
+
+    def test_an_empty_stage_list_clears_them(self):
+        scenes.save_scene(
+            self.profile, "cash", ["t_order"],
+            stages=[{"name": "Order", "table": "t_order", "locate": "edge"}],
+        )
+        cleared = scenes.save_scene(self.profile, "cash", ["t_order"], stages=[])
+        self.assertEqual(cleared["scene"].get("stages", []), [])
+
+    def test_listed_scenes_carry_stages(self):
+        scenes.save_scene(
+            self.profile, "cash", ["t_order"],
+            stages=[{"name": "Order", "table": "t_order", "locate": "edge"}],
+        )
+        listed = scenes.list_scenes(self.profile)["scenes"][0]
+        self.assertEqual(listed["stages"][0]["name"], "Order")
+
+
 class ReadingScenes(unittest.TestCase):
     def setUp(self):
         self.saved = os.environ.get("DB_MCP_RUNTIME")

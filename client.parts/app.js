@@ -2153,6 +2153,11 @@ function groupTables(tables) {
       const [traceError, setTraceError] = React.useState(null)
       const [traceOpen, setTraceOpen] = React.useState('')
       const [traceScene, setTraceScene] = React.useState(() => String(savedPanel.traceScene || ''))
+      /* Two ways to read a walk: free (the graph, BFS order) and scene (one row
+         per business stage, in the order the scene declares). Free stays the
+         default so nothing changes for a reader who never uses scenes. */
+      const [traceMode, setTraceMode] = React.useState(() => String(savedPanel.traceMode || 'free'))
+      /* keep traceMode in sync with the browser store via remember() at its call sites */
       const [scenes, setScenes] = React.useState([])
       /* The walk just taken can be saved as a scene. The table list is the one
          the walk actually read, so the scene records what the reader saw instead
@@ -2692,11 +2697,24 @@ function groupTables(tables) {
 
       const mineEdges = () => graphAction('/relations/mine', {}, t('notice.mined'))
 
+      /* A verdict is an internal token; a reader should see what it meant, not
+         the word "ok" or "too_many". */
+      const verdictText = (verdict) =>
+        verdict === 'ok'
+          ? t('verdict.ok')
+          : verdict === 'too_many'
+            ? t('verdict.tooMany')
+            : verdict === 'missing'
+              ? t('verdict.missing')
+              : verdict === 'irrelevant'
+                ? t('verdict.irrelevant')
+                : String(verdict || '')
+
       const sendFeedback = (edge, verdict, reason) =>
         graphAction(
           '/relations/feedback',
           { edge_id: edge.id, verdict, reason: reason || undefined },
-          fmt(t('notice.verdict'), { verdict }),
+          fmt(t('notice.verdict'), { verdict: verdictText(verdict) }),
         )
 
       const saveCondition = (edge, condition) =>
@@ -3135,7 +3153,7 @@ function groupTables(tables) {
             setNotice({ message: `${failure.message || 'feedback failed'}${hint}`, isError: true })
             return
           }
-          setNotice({ message: fmt(t('notice.verdict'), { verdict }), isError: false })
+          setNotice({ message: fmt(t('notice.verdict'), { verdict: verdictText(verdict) }), isError: false })
           setTraceOpen('')
           await runTrace()
         } catch (error) {
@@ -4351,7 +4369,10 @@ function groupTables(tables) {
         if (rejected) parts.push(fmt(t('graph.rejectedTimes'), { n: rejected }))
         parts.push(fmt(t('graph.fanout'), { value: edgeFanout(edge) }))
         const cost = edgeCost(edge)
-        parts.push(edgeIndexLabel(cost))
+        /* "index unknown" is only worth saying when it changes a judgement. In
+           the general meta line an unknown index is noise, so leave it out and
+           keep the label for the cost detail that actually needs it. */
+        if (cost.indexed === true || cost.indexed === false) parts.push(edgeIndexLabel(cost))
         if (typeof cost.rowEstimate === 'number') parts.push(fmt(t('graph.rows'), { n: cost.rowEstimate }))
         if (typeof cost.avgMs === 'number') parts.push(fmt(t('graph.avgMs'), { ms: cost.avgMs }))
         return parts.join(' · ')
@@ -5749,6 +5770,102 @@ function groupTables(tables) {
         )
       }
 
+      /* Stage reading: human words, never the internal enum. The server sends the
+         raw status value plus its labels; a value without a label is shown as-is
+         rather than as "ok"/"too_many". */
+      const stageStatusText = (row) => {
+        if (!row || row.missed) return t('stage.notFound')
+        if (row.status !== undefined && row.status !== null && row.status !== '') return String(row.status)
+        return ''
+      }
+      const fanoutLabel = (n) => {
+        if (n === null || n === undefined) return ''
+        return fmt(t('stage.avgRows'), { n })
+      }
+      /* Feedback belongs on the steps that need a decision: a pending edge, an
+         abnormal fanout or an empty step. A confirmed/trusted step keeps its
+         feedback behind the end-of-row "..." so the strong path reads clean. */
+      const stageNeedsFeedback = (row) => {
+        const flags = (row && row.feedback) || {}
+        return Boolean(flags.pending || flags.abnormalFanout || flags.empty)
+      }
+      const renderStageRow = (row, index) => {
+        const nested = Boolean(row.parent)
+        const label = stageStatusText(row)
+        return h(
+          'div',
+          {
+            key: `${row.stage}:${index}`,
+            className: `dbmcp-stage-row${row.missed ? ' is-missed' : ''}${nested ? ' is-nested' : ''}`,
+          },
+          h(
+            'div',
+            { className: 'dbmcp-stage-main' },
+            h('span', { className: 'dbmcp-stage-name' }, row.stage || row.table),
+            h('span', { className: 'dbmcp-stage-locate' }, row.locate === 'alias' ? t('stage.byAlias') : row.locate === 'weak' ? t('stage.weak') : t('stage.byEdge')),
+            h('span', { className: 'dbmcp-stage-count' }, row.missed ? '' : fmt(t('trace.rows'), { n: row.found || 0 })),
+            label ? h('span', { className: 'dbmcp-stage-status' }, label) : null,
+            row.amount !== undefined && row.amount !== null ? h('span', { className: 'dbmcp-stage-amount' }, String(row.amount)) : null,
+            row.time !== undefined && row.time !== null ? h('span', { className: 'dbmcp-stage-time' }, String(row.time)) : null,
+          ),
+          row.missed
+            ? h('p', { className: 'dbmcp-hint dbmcp-stage-missed' }, t('stage.missedHint'))
+            : stageNeedsFeedback(row)
+              ? h(
+                  'div',
+                  { className: 'dbmcp-stage-feedback' },
+                  h('span', { className: edgeStatusClass((((row.detail || {}).edge || {}).status) || 'confirmed') }, edgeStatusLabel((((row.detail || {}).edge || {}).status) || 'confirmed')),
+                  (row.detail || {}).fanout ? h('span', { className: 'dbmcp-hint' }, fanoutLabel(row.detail.fanout)) : null,
+                  (row.detail || {}).edge
+                    ? h(
+                        'button',
+                        {
+                          type: 'button',
+                          className: 'dbmcp-btn is-small',
+                          onClick: () => void judgeStep((row.detail.edge || {}).id, 'ok'),
+                        },
+                        t('trace.judgeOk'),
+                      )
+                    : null,
+                )
+              : h(
+                  'details',
+                  { className: 'dbmcp-stage-more' },
+                  h('summary', { className: 'dbmcp-stage-morebtn' }, '⋯'),
+                  (row.detail || {}).edge
+                    ? h(
+                        'button',
+                        {
+                          type: 'button',
+                          className: 'dbmcp-btn is-small',
+                          onClick: () => void judgeStep((row.detail.edge || {}).id, 'ok'),
+                        },
+                        t('trace.judgeOk'),
+                      )
+                    : null,
+                  (row.detail || {}).fanout ? h('p', { className: 'dbmcp-hint' }, fanoutLabel(row.detail.fanout)) : null,
+                ),
+        )
+      }
+      const renderStages = (stages) => {
+        const rows = (stages && stages.rows) || []
+        const other = (stages && stages.other) || []
+        return h(
+          'div',
+          { className: 'dbmcp-stage-view' },
+          h('p', { className: 'dbmcp-hint' }, fmt(t('stage.sceneName'), { name: stages.scene || '' })),
+          rows.map(renderStageRow),
+          other.length > 0
+            ? h(
+                'div',
+                { className: 'dbmcp-stage-other' },
+                h('p', { className: 'dbmcp-label' }, t('stage.other')),
+                other.map((row, index) => renderStageRow(row, rows.length + index)),
+              )
+            : null,
+        )
+      }
+
       const renderTrace = () => {
         const summary = (trace && trace.summary) || null
         const steps = (trace && trace.steps) || []
@@ -5838,6 +5955,31 @@ function groupTables(tables) {
                 'div',
                 { className: 'dbmcp-trace-form' },
                 h(
+                  'div',
+                  { className: 'dbmcp-inline dbmcp-trace-modes' },
+                  h(
+                    'button',
+                    {
+                      type: 'button',
+                      className: `dbmcp-btn is-small${traceMode === 'free' ? ' is-primary' : ''}`,
+                      onClick: () => remember('traceMode', setTraceMode)('free'),
+                    },
+                    t('trace.modeFree'),
+                  ),
+                  h(
+                    'button',
+                    {
+                      type: 'button',
+                      className: `dbmcp-btn is-small${traceMode === 'scene' ? ' is-primary' : ''}`,
+                      onClick: () => remember('traceMode', setTraceMode)('scene'),
+                    },
+                    t('trace.modeScene'),
+                  ),
+                ),
+                traceMode === 'scene' && scenes.length === 0
+                  ? h('p', { className: 'dbmcp-hint dbmcp-edge-why' }, t('stage.noScenes'))
+                  : null,
+                h(
                   'label',
                   { className: 'dbmcp-cell' },
                   h('span', { className: 'dbmcp-label' }, t('trace.value')),
@@ -5918,7 +6060,9 @@ function groupTables(tables) {
               ),
           traceError ? h('p', { className: 'dbmcp-hint dbmcp-edge-error' }, traceError) : null,
           traceBusy && !trace ? h('p', { className: 'dbmcp-hint' }, t('loading')) : null,
-          trace && steps.length === 0 ? h('p', { className: 'dbmcp-hint' }, t('trace.nothing')) : null,
+          trace && steps.length === 0 && !(traceMode === 'scene' && trace.stages)
+            ? h('p', { className: 'dbmcp-hint' }, t('trace.nothing'))
+            : null,
           trace && candidates.length > 1
             ? h(
                 'div',
@@ -6045,8 +6189,13 @@ function groupTables(tables) {
                   : null,
               )
             : null,
-          steps.length > 0 ? traceOverview() : null,
-          steps.length > 0
+          trace && trace.stages && traceMode === 'scene'
+            ? renderStages(trace.stages)
+            : null,
+          !(trace && trace.stages && traceMode === 'scene') && steps.length > 0
+            ? traceOverview()
+            : null,
+          !(trace && trace.stages && traceMode === 'scene') && steps.length > 0
             ? h(
                 'div',
                 { className: 'dbmcp-trace-detail', id: 'dbmcp-trace-detail' },

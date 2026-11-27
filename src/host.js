@@ -3540,6 +3540,8 @@ export function createHost(options = {}) {
           // note that was actually sent, so this is how a note is cleared.
           note: typeof payload.note === "string" ? payload.note.trim() : undefined,
           scene_id: trimmed(payload.scene_id) || undefined,
+          // Stages are optional: undefined leaves them alone, [] clears them.
+          stages: Array.isArray(payload.stages) ? payload.stages : undefined,
         });
         return sendJson(response, result.status, result.body);
       }

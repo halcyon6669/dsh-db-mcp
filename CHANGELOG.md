@@ -95,9 +95,25 @@ report of each version in more detail.
   tables, confirmed joins and stranded members — and the published `trace_by_key`
   description tells the agent to check `list_scenes` first when a question describes a
   business process, passing a matching scene's name as `scene`.
+- **A scene can be read as its business stages.** `save_scene` now takes `stages`:
+  an ordered list of `{ name, table, locate, displayColumns, statusColumn,
+  statusLabels, amountColumn, timeColumn }` (up to four display columns, stage
+  tables must be members). `trace_by_key` returns a `stages` view — one row per
+  declared stage in business order instead of the BFS walk order — with a grey
+  **not found** placeholder naming the stage the walk missed, folded SQL/binds/
+  timing/edge detail, and status/amount/time read from the sample through the
+  scene's own labels. A free walk still has no `stages`. The Trace tab gains a
+  **按场景运行 / free trace** switch: the scene mode reads one row per stage,
+  keeps feedback only on pending edges, abnormal fanout and empty steps, and
+  folds the rest behind a `⋯` menu.
 
 ### Changed
 
+- **Numbers and verdicts read as words, not internal tokens.** A judgement notice
+  now says *Confirmed this step* / *Flagged: too many rows* instead of printing
+  `ok` / `too_many`, and a step status is shown through the scene's own labels.
+  The graph's "fanout N" reads "N row(s) per value on average", and "index
+  unknown" is only shown where it changes a judgement, not on every join.
 - **The panel reopens where you left it.** A position used to last only as long as the
   page stayed mounted: open the panel again and it was back on the first tab with every
   box empty. The tab, the search text, the filter chip, the folded groups, the

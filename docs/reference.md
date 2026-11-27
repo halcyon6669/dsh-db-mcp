@@ -118,9 +118,9 @@ memory before `max_rows` trims it; writes keep the ordinary cursor.
 | `feedback_relation` | `edge_id`, `verdict`, `reason?`, `note?`, `datasource?`, `fanout?`, `ms?` | `{ edge, cost, previousStatus, indexed, unique }` — `verdict` is `ok`, `too_many`, `missing` or `irrelevant`; `ms` records how long this step took; see below |
 | `set_relation_condition` | `edge_id`, `condition?`, `datasource?` | `{ edge, changed }` — an empty `condition` clears it |
 | `delete_edge` | `edge_id`, `datasource?` | `{ deleted, counts }` |
-| `trace_by_key` | `value`, `datasource?`, `entry_table?`, `entry_column?`, `scene?`, `max_depth=3`, `max_rows_per_table=20`, `direction=both`, `confirm_slow=false` | `{ value, direction, elapsedMs, scene, entry, summary, nodes, steps, outside, pending, warnings, stoppedAt }` — walks only `confirmed` and `trusted` edges; `scene` narrows the walk to that scene's tables and reports the rest under `outside`; `nodes` is the same walk as a parent/child tree; `confirm_slow` allows a step that would scan a whole table; see below |
-| `list_scenes` | `datasource?` | `{ scenes: [{ id, name, tables, tableCount, note, createdAt, updatedAt, edges, isolated }], total }` — a scene is a named set of tables, nothing more; `edges` are the confirmed/trusted joins between its members (`{ id, from: { table, column }, to: { table, column }, status }`, read from the relation graph, never stored) and `isolated` lists the members no such join reaches |
-| `save_scene` | `name`, `tables`, `datasource?`, `note?`, `scene_id?` | `{ scene, created }` — updates the scene with that `scene_id`, else the one with that name, else creates one; a scene holds no joins, so deleting one never loses an edge |
+| `trace_by_key` | `value`, `datasource?`, `entry_table?`, `entry_column?`, `scene?`, `max_depth=3`, `max_rows_per_table=20`, `direction=both`, `confirm_slow=false` | `{ value, direction, elapsedMs, scene, entry, summary, nodes, steps, stages, outside, pending, warnings, stoppedAt }` — walks only `confirmed` and `trusted` edges; `scene` narrows the walk to that scene's tables and reports the rest under `outside`; `nodes` is the same walk as a parent/child tree; `stages` is the scene's business-order reading (null for a free walk); `confirm_slow` allows a step that would scan a whole table; see below |
+| `list_scenes` | `datasource?` | `{ scenes: [{ id, name, tables, tableCount, note, createdAt, updatedAt, edges, isolated, stages }], total }` — a scene is a named set of tables, nothing more; `edges` are the confirmed/trusted joins between its members (`{ id, from: { table, column }, to: { table, column }, status }`, read from the relation graph, never stored) and `isolated` lists the members no such join reaches; `stages` is its business-order reading |
+| `save_scene` | `name`, `tables`, `datasource?`, `note?`, `scene_id?`, `stages?` | `{ scene, created }` — updates the scene with that `scene_id`, else the one with that name, else creates one; `stages` optionally declares the business reading order (omit to keep, `[]` to clear); a scene holds no joins, so deleting one never loses an edge |
 | `delete_scene` | `scene_id`, `datasource?` | `{ deleted }` — removes the table set only; the relation graph keeps every edge |
 | `sample_rows` | `table`, `datasource?`, `limit=20`, `schema?` | `{ columns, rows, rowCount, truncated }` |
 | `execute_sql` | `sql`, `datasource?`, `max_rows?`, `full_text?` | `{ columns, rows, rowCount, truncated, elapsedMs }`, or `{ affectedRows }` for a write |
@@ -372,6 +372,28 @@ scene, each `{ id, from: { table, column }, to: { table, column }, status }`), w
 are never written to the scene file, and removing a scene leaves every edge in the
 graph untouched. That is why the panel's scene page sends "add a join" to the
 Relations page instead of offering a second place to type one.
+
+A scene may also declare `stages`: an ordered reading of the walk in business
+terms. `save_scene(..., stages=[...])` takes up to 50 entries of
+`{ name, table, locate, displayColumns, statusColumn, statusLabels, amountColumn,
+timeColumn }`; `name` and `table` are required, `locate` is `edge` / `alias` /
+`weak`, at most four `displayColumns` are kept, `statusLabels` maps a raw value to
+the word a reader sees, and every stage table must be a scene member. Passing
+`stages=None` leaves them alone and `stages=[]` clears them; `list_scenes` returns
+them under each scene's `stages`.
+
+When a scene has stages, `trace_by_key` returns a `stages` view beside `steps`:
+`{ mode: "scene", scene, rows, other }`. `rows` has one entry per declared stage
+in business order — `{ stage, table, locate, found, missed, parent, step, status,
+statusValue, amount, time, display, detail, feedback }`. A stage the walk did not
+reach is a grey placeholder (`missed: true`, `found: 0`, `step: null`) so the broken
+link is visible; a hit carries its sample values through `display`, `status`,
+`amount` and `time`, and keeps the SQL, binds, timing and edge in `detail` for the
+panel to unfold. Tables outside the declared stages are listed under `other`
+instead of being dropped. A free walk, or a scene with no stages, has no `stages`
+field. The panel's Trace tab switches between this **按场景运行** reading and the
+ordinary free graph, and never shows an internal verdict token where a person
+expects a word.
 
 ### How an edge earns trust
 

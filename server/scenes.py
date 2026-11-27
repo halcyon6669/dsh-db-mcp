@@ -31,6 +31,12 @@ TABLE_LIMIT = 500
 # mean exactly what the walker will follow.
 LINK_STATUSES = ("confirmed", "trusted")
 
+# How a scene stage locates its rows. `edge` is the only kind phase B can fill;
+# `alias` and `weak` are reserved for business-key / weak associations (phase C).
+LOCATE_KINDS = ("edge", "alias", "weak")
+STAGE_LIMIT = 50
+DISPLAY_COLUMN_LIMIT = 4
+
 
 def _fold(text) -> str:
     return str(text or "").strip().casefold()
@@ -156,6 +162,97 @@ def _table_list(tables) -> list[str]:
     return chosen
 
 
+def _stage_list(stages) -> list[dict]:
+    """Validate and normalise a scene's stage declarations.
+
+    A stage is the reading order a business question implies (order, payment,
+    shipment), independent of the order a breadth-first walk happens to reach
+    those tables. Only the fields a trace can actually use are kept, so a typo
+    cannot silently become a stage that never matches.
+    """
+    if stages is None:
+        return []
+    if isinstance(stages, str):
+        try:
+            stages = json.loads(stages)
+        except (TypeError, ValueError) as error:
+            raise store.StoreError(
+                "user_error",
+                "stages must be a JSON array",
+                "pass stages as an array of {name, table, ...} objects",
+            ) from error
+    if not isinstance(stages, (list, tuple)):
+        raise store.StoreError(
+            "user_error",
+            "stages must be a list",
+            "pass stages as an array, for example [{\"name\": \"下单\", \"table\": \"sales_order\"}]",
+        )
+    if len(stages) > STAGE_LIMIT:
+        raise store.StoreError(
+            "user_error",
+            f"a scene holds at most {STAGE_LIMIT} stages, got {len(stages)}",
+            "keep only the stages one question actually walks through",
+        )
+    chosen: list[dict] = []
+    for item in stages:
+        if not isinstance(item, dict):
+            raise store.StoreError(
+                "user_error", "each stage must be an object", "pass stages as objects with a name and table"
+            )
+        name = str(item.get("name") or "").strip()
+        table = str(item.get("table") or "").strip()
+        if not name or not table:
+            raise store.StoreError(
+                "user_error",
+                "a stage needs a name and a table",
+                "give each stage a name (what the reader sees) and the table it reads",
+            )
+        locate = str(item.get("locate") or "edge").strip().lower()
+        if locate not in LOCATE_KINDS:
+            raise store.StoreError(
+                "user_error",
+                f"unknown stage locate kind: {locate}",
+                "locate must be one of " + ", ".join(LOCATE_KINDS),
+            )
+        raw_columns = item.get("displayColumns") or []
+        if isinstance(raw_columns, str):
+            raw_columns = [piece.strip() for piece in raw_columns.replace(",", "\n").splitlines()]
+        if not isinstance(raw_columns, (list, tuple)):
+            raise store.StoreError(
+                "user_error",
+                "displayColumns must be a list of column names",
+                "pass displayColumns as an array, at most 4 names",
+            )
+        display_columns = [str(column).strip() for column in raw_columns if str(column).strip()]
+        if len(display_columns) > DISPLAY_COLUMN_LIMIT:
+            raise store.StoreError(
+                "user_error",
+                f"a stage shows at most {DISPLAY_COLUMN_LIMIT} columns, got {len(display_columns)}",
+                "pick the few columns a reader needs to recognise the row",
+            )
+        raw_labels = item.get("statusLabels") or {}
+        if not isinstance(raw_labels, dict):
+            raise store.StoreError(
+                "user_error",
+                "statusLabels must be an object",
+                "map a stored value to the words a reader should see, for example {\"PAID\": \"已支付\"}",
+            )
+        status_labels = {str(key): str(value) for key, value in raw_labels.items()}
+        stage = {
+            "name": name,
+            "table": table,
+            "locate": locate,
+            "displayColumns": display_columns,
+            "statusLabels": status_labels,
+        }
+        for optional in ("statusColumn", "amountColumn", "timeColumn"):
+            value = item.get(optional)
+            if value is not None and str(value).strip():
+                stage[optional] = str(value).strip()
+        chosen.append(stage)
+    return chosen
+
+
 def list_scenes(profile: dict, with_links: bool = True) -> dict:
     """Every scene of one datasource, with the joins its members already share.
 
@@ -229,6 +326,7 @@ def _described(scene: dict, edges: list[dict]) -> dict:
         "updatedAt": scene.get("updatedAt"),
         "edges": links,
         "isolated": isolated,
+        "stages": _stage_list(scene.get("stages")),
     }
 
 
@@ -271,6 +369,7 @@ def save_scene(
     tables,
     note: str | None = None,
     scene_id: str | None = None,
+    stages=None,
 ) -> dict:
     """Create a scene, or replace the tables of the one this name already owns.
 
@@ -292,6 +391,20 @@ def save_scene(
             "a scene needs at least one table",
             "list the tables this question touches",
         )
+    # Stages are optional; passing None leaves an existing scene's stages alone,
+    # while an explicit [] clears them (an empty list is a decision, not an omission).
+    if stages is None:
+        stage_update = None
+    else:
+        stage_update = _stage_list(stages)
+        stage_names = {_fold(stage["table"]) for stage in stage_update}
+        stray = [name for name in stage_names if name not in {_fold(table) for table in chosen}]
+        if stray:
+            raise store.StoreError(
+                "user_error",
+                "stages reference tables outside the scene: " + ", ".join(stray),
+                "add those tables to the scene first, or remove the stages",
+            )
     doc = load(profile)
     scenes = doc.get("scenes") or []
     now = _now()
@@ -304,6 +417,11 @@ def save_scene(
             scene["tables"] = chosen
             if note is not None:
                 scene["note"] = str(note).strip() or None
+            if stage_update is not None:
+                if stage_update:
+                    scene["stages"] = stage_update
+                else:
+                    scene.pop("stages", None)
             scene["updatedAt"] = now
             doc["scenes"] = scenes
             save(profile, doc)
@@ -322,6 +440,8 @@ def save_scene(
         "createdAt": now,
         "updatedAt": now,
     }
+    if stage_update:
+        scene["stages"] = stage_update
     scenes.append(scene)
     doc["scenes"] = scenes
     save(profile, doc)

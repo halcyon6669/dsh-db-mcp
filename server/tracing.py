@@ -322,6 +322,145 @@ def _nodes(steps) -> list[dict]:
     return [node_of(index) for index in roots]
 
 
+def _stage_view(chosen_scene, steps) -> dict | None:
+    """The walk read in the scene's business order, one row per declared stage.
+
+    The BFS walk answers "what value reaches what", which is the right shape for a
+    free trace but not for a reader following an order through payment and
+    shipment. Where the scene declares stages, this groups the steps by table in
+    declaration order: the same hit is never printed twice, a stage the walk did
+    not reach becomes a grey placeholder, and the expensive detail (SQL, binds,
+    timing, edge) stays on the step for the panel to unfold on demand.
+    """
+    if not chosen_scene:
+        return None
+    declared = scenes._stage_list(chosen_scene.get("stages"))
+    if not declared:
+        return None
+    by_table: dict[str, list[dict]] = {}
+    for step in steps:
+        by_table.setdefault(_fold(step.get("table")), []).append(step)
+    used: set[int] = set()
+    rows: list[dict] = []
+    previous: str | None = None
+    for stage in declared:
+        matches = by_table.get(_fold(stage["table"]), [])
+        step = next((item for item in matches if item["index"] not in used), None)
+        if step is None:
+            rows.append(
+                {
+                    "stage": stage["name"],
+                    "table": stage["table"],
+                    "locate": stage.get("locate", "edge"),
+                    "found": 0,
+                    "missed": True,
+                    "parent": previous,
+                    "step": None,
+                    "detail": None,
+                    "display": stage.get("displayColumns", []),
+                    "statusLabels": stage.get("statusLabels", {}),
+                    "amountColumn": stage.get("amountColumn"),
+                    "timeColumn": stage.get("timeColumn"),
+                }
+            )
+            continue
+        used.add(step["index"])
+        sample = step.get("sample") or {}
+        columns = [str(name) for name in (sample.get("columns") or [])]
+        first_row = (sample.get("rows") or [None])[0]
+        display = {}
+        if first_row is not None:
+            for name in stage.get("displayColumns", []):
+                for index, column in enumerate(columns):
+                    if _fold(column) == _fold(name):
+                        display[name] = first_row[index] if index < len(first_row) else None
+                        break
+        status_value = None
+        status_text = None
+        status_column = stage.get("statusColumn")
+        if status_column:
+            for index, column in enumerate(columns):
+                if _fold(column) == _fold(status_column):
+                    status_value = first_row[index] if first_row and index < len(first_row) else None
+                    status_text = stage.get("statusLabels", {}).get(str(status_value), status_value)
+                    break
+        amount = None
+        amount_column = stage.get("amountColumn")
+        if amount_column:
+            for index, column in enumerate(columns):
+                if _fold(column) == _fold(amount_column):
+                    amount = first_row[index] if first_row and index < len(first_row) else None
+                    break
+        when = None
+        time_column = stage.get("timeColumn")
+        if time_column:
+            for index, column in enumerate(columns):
+                if _fold(column) == _fold(time_column):
+                    when = first_row[index] if first_row and index < len(first_row) else None
+                    break
+        rows.append(
+            {
+                "stage": stage["name"],
+                "table": stage["table"],
+                "locate": stage.get("locate", "edge"),
+                "found": step.get("rows") or 0,
+                "missed": False,
+                "parent": previous,
+                "step": step["index"],
+                "status": status_text,
+                "statusValue": status_value,
+                "amount": amount,
+                "time": when,
+                "display": display,
+                "detail": {
+                    "sql": step.get("sql"),
+                    "condition": step.get("condition"),
+                    "ms": step.get("ms"),
+                    "edge": step.get("edge"),
+                    "fanout": step.get("fanout"),
+                    "values": (step.get("condition") or {}).get("binds") or [],
+                },
+                "feedback": {
+                    "pending": bool((step.get("edge") or {}).get("status") == "pending"),
+                    "abnormalFanout": bool((step.get("fanout") or 0) > 10),
+                    "empty": not (step.get("rows") or 0),
+                },
+            }
+        )
+        previous = stage["name"]
+    # A table outside the declared stages is still a hit; list it under an
+    # explicit tail group rather than dropping it from the report.
+    extra = []
+    for step in steps:
+        if step["index"] in used:
+            continue
+        extra.append(
+            {
+                "stage": step.get("table"),
+                "table": step.get("table"),
+                "locate": "edge",
+                "found": step.get("rows") or 0,
+                "missed": False,
+                "parent": None,
+                "step": step["index"],
+                "detail": {
+                    "sql": step.get("sql"),
+                    "condition": step.get("condition"),
+                    "ms": step.get("ms"),
+                    "edge": step.get("edge"),
+                    "fanout": step.get("fanout"),
+                },
+            }
+        )
+        used.add(step["index"])
+    return {
+        "mode": "scene",
+        "scene": chosen_scene.get("name"),
+        "rows": rows,
+        "other": extra,
+    }
+
+
 def trace(
     profile: dict,
     connection,
@@ -418,6 +557,7 @@ def trace(
             "pending": [],
             "warnings": warnings,
             "stoppedAt": [],
+            "stages": _stage_view(chosen_scene, []),
         }
 
     # One metadata read per table, reused for the sample and the pending hints.
@@ -796,4 +936,5 @@ def trace(
         "pending": hints,
         "warnings": warnings,
         "stoppedAt": stopped,
+        "stages": _stage_view(chosen_scene, steps),
     }

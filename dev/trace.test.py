@@ -547,6 +547,58 @@ class ScenesNarrowTheWalk(_Walk):
         for step in result["steps"]:
             self.assertTrue(step["inside"], step["table"])
 
+    def test_a_scene_with_stages_is_read_in_business_order(self):
+        self._chain()
+        scene = self._scene("cash", ["t_order", "t_trans", "t_line"])
+        scenes.save_scene(
+            self.profile, "cash", ["t_order", "t_trans", "t_line"],
+            stages=[
+                {"name": "Order", "table": "t_order", "locate": "edge"},
+                {"name": "Transaction", "table": "t_trans", "locate": "edge"},
+                {"name": "Line", "table": "t_line", "locate": "edge"},
+            ],
+        )
+        result = self._trace(
+            "1", entry_table="t_order", entry_column="id", direction="down", scene=scene["id"]
+        )
+        stages = result["stages"]
+        self.assertEqual(stages["mode"], "scene")
+        self.assertEqual([r["stage"] for r in stages["rows"]], ["Order", "Transaction", "Line"])
+        self.assertTrue(all(not r["missed"] for r in stages["rows"]))
+        self.assertEqual(stages["rows"][0]["found"], 1)
+        self.assertEqual(stages["rows"][1]["found"], 2)
+
+    def test_a_stage_the_walk_missed_is_a_grey_placeholder(self):
+        scenes.save_scene(
+            self.profile, "cash", ["t_order", "t_orphan"],
+            stages=[
+                {"name": "Order", "table": "t_order", "locate": "edge"},
+                {"name": "Orphan", "table": "t_orphan", "locate": "alias"},
+            ],
+        )
+        result = self._trace(
+            "1", entry_table="t_order", entry_column="id", direction="down", scene="cash"
+        )
+        stages = result["stages"]
+        self.assertEqual(len(stages["rows"]), 2)
+        self.assertTrue(stages["rows"][0]["missed"] is False)
+        self.assertTrue(stages["rows"][1]["missed"])
+        self.assertEqual(stages["rows"][1]["found"], 0)
+        self.assertIsNone(stages["rows"][1]["step"])
+
+    def test_a_scene_without_stages_has_no_stage_view(self):
+        self._chain()
+        scene = self._scene("orders only", ["t_order", "t_trans"])
+        result = self._trace(
+            "1", entry_table="t_order", entry_column="id", direction="down", scene=scene["id"]
+        )
+        self.assertIsNone(result["stages"])
+
+    def test_a_free_walk_has_no_stage_view(self):
+        self._chain()
+        result = self._trace("1", entry_table="t_order", entry_column="id", direction="down")
+        self.assertIsNone(result["stages"])
+
 
 class TheTreeShape(_Walk):
     """`nodes` mirrors `steps`, indented; a table already read is not repeated."""
@@ -706,6 +758,7 @@ class TraceShape(unittest.TestCase):
                 "summary",
                 "nodes",
                 "steps",
+                "stages",
                 "outside",
                 "pending",
                 "warnings",

@@ -894,6 +894,7 @@ def save_scene(
     datasource: Optional[str] = None,
     note: Optional[str] = None,
     scene_id: Optional[str] = None,
+    stages: Optional[list[dict]] = None,
 ) -> dict:
     """Create or update a named table set.
 
@@ -901,11 +902,15 @@ def save_scene(
     the same name is updated, and a new one is created when the name is free.
     `tables` may be bare names or `schema.table`; duplicates differing only in case
     collapse. It stores no joins — only which tables a trace should stay inside.
+
+    `stages` optionally declares the reading order: `[{name, table, locate,
+    displayColumns, statusColumn, statusLabels, amountColumn, timeColumn}]`. Omit
+    it to leave the existing stages alone; pass `[]` to clear them.
     """
     try:
         profile, _secrets = store.resolve(datasource)
         result = scenes.save_scene(
-            profile, name, tables, note=note, scene_id=scene_id
+            profile, name, tables, note=note, scene_id=scene_id, stages=stages
         )
         return {"ok": True, "datasource": _source(profile), **result}
     except Exception as error:  # noqa: BLE001

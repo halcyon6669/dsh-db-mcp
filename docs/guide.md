@@ -339,3 +339,15 @@ The same set is what `trace_by_key` accepts as `scene`; a walk then stays inside
 tables and reports every table it could not enter under `outside`. An agent can read a
 scene before it queries: `list_scenes` returns each scene's `edges` and `isolated`
 members, so the shape of the set is visible without guessing.
+
+A scene can also describe **stages** — the order a person follows the business in,
+such as order → lines → payment → shipment. Save `stages` through `save_scene`, each
+with a name, a member table, a locate kind (`edge` / `alias` / `weak`), up to four
+display columns, an optional status column with a value→word `statusLabels` map, and
+optional amount and time columns. On the Trace tab, **按场景运行** reads a walk as one
+row per stage in that order: the row shows the hit count and the stage's own status,
+amount and time; a stage the walk never reached is a grey *not found* placeholder, so
+the broken link is visible; SQL, bound values, timing and the edge stay folded in the
+row's `⋯` menu. Feedback buttons appear only where a decision is needed — a pending
+edge, an unusually wide fanout or a step with no rows; confirmed steps just read
+clean. Switch back to **自由追踪** any time for the usual left-to-right graph.

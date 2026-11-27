@@ -2462,6 +2462,62 @@
         gap: 8px;
         align-items: end;
       }
+      .dbmcp-trace-modes {
+        gap: 4px;
+      }
+      /* One row per business stage. Strong stages are a flat grid, a stage the
+         walk missed is greyed out, and a nested stage is indented. */}
+      .dbmcp-stage-view {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        margin: 8px 0;
+      }
+      .dbmcp-stage-row {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        padding: 6px 8px;
+        border: 1px solid var(--dsw-alias-border-color-secondary);
+        border-radius: 4px;
+      }
+      .dbmcp-stage-row.is-nested {
+        margin-left: 16px;
+      }
+      .dbmcp-stage-row.is-missed {
+        opacity: 0.6;
+      }
+      .dbmcp-stage-main {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: 8px;
+      }
+      .dbmcp-stage-name {
+        font-weight: 600;
+      }
+      .dbmcp-stage-locate,
+      .dbmcp-stage-count,
+      .dbmcp-stage-status,
+      .dbmcp-stage-amount,
+      .dbmcp-stage-time {
+        font-size: 11px;
+        color: var(--dsw-alias-text-secondary);
+      }
+      .dbmcp-stage-feedback,
+      .dbmcp-stage-more {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px;
+      }
+      .dbmcp-stage-morebtn {
+        cursor: pointer;
+        padding: 0 4px;
+      }
+      .dbmcp-stage-other {
+        margin-top: 8px;
+      }
       .dbmcp-trace-summary {
         display: flex;
         flex-direction: column;
