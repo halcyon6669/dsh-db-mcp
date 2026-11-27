@@ -75,6 +75,28 @@ function inspect(file) {
 
 for (const file of files) inspect(file)
 
+/**
+ * The README tool tables must list exactly the tools an agent can call: the twenty
+ * Python MCP tools plus the Host-native session_scope. Deriving both sides keeps the
+ * tables from drifting when a tool is added or removed.
+ */
+{
+  const server = readFileSync(join(root, 'server/main.py'), 'utf8')
+  const mcpTools = [...server.matchAll(/@mcp\.tool\(\)\s*\n\s*@_audited\s*\n\s*def\s+([a-z_]+)\s*\(/g)].map((match) => match[1])
+  const native = [...readFileSync(join(root, 'src/tools.js'), 'utf8').matchAll(/name:\s*`\$\{TOOL_PREFIX\}([a-z_]+)`/g)].map((match) => match[1])
+  const registered = new Set([...mcpTools, ...native].map((name) => `mcp__db__${name}`))
+  if (mcpTools.length === 0) problems.push('server/main.py: no @mcp.tool() tools found — the README check cannot work')
+  for (const file of ['README.md', 'README.zh.md']) {
+    const body = readFileSync(join(root, file), 'utf8')
+    const listed = new Set([...body.matchAll(/^\|\s*`mcp__db__([a-z_]+)`\s*\|/gm)].map((match) => `mcp__db__${match[1]}`))
+    const missing = [...registered].filter((name) => !listed.has(name))
+    const extra = [...listed].filter((name) => !registered.has(name))
+    if (missing.length) problems.push(`${file}: tool table is missing ${missing.join(', ')}`)
+    if (extra.length) problems.push(`${file}: tool table lists unregistered ${extra.join(', ')}`)
+    if (listed.size !== registered.size) problems.push(`${file}: tool table has ${listed.size} row(s), expected ${registered.size}`)
+  }
+}
+
 for (const { file, where, target } of links) {
   const [path, anchor] = target.split('#')
   if (path === '') continue
