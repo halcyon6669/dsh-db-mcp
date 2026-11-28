@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 
 import secretbox
@@ -252,6 +253,93 @@ def table_stamp(catalog: dict | None, table: str) -> str | None:
             break
     stamp = catalog.get("savedAt")
     return str(stamp) if stamp else None
+
+
+CATALOG_HEALTH_FILE = "catalog-health.json"
+
+# Anything that looks like a credential in a message. A cache failure is the kind
+# of error whose text can quote a path or a URL, and a connection string carries
+# the password; the trail is written to disk, so it is scrubbed on the way in.
+_SECRET_PATTERNS = (
+    (re.compile(r"[A-Za-z][A-Za-z0-9+.\-]*://[^\s/@]*:[^\s/@]*@", re.ASCII), "[redacted]://"),
+    (re.compile(r"(?i)\b(password|passwd|pwd|token|secret)\s*[=:]\s*[^\s,;]+", re.ASCII), r"\1=[redacted]"),
+)
+
+
+def catalog_health_path() -> Path:
+    return runtime_dir() / CATALOG_HEALTH_FILE
+
+
+def _scrub(text: str) -> str:
+    cleaned = str(text)
+    for pattern, replacement in _SECRET_PATTERNS:
+        cleaned = pattern.sub(replacement, cleaned)
+    return cleaned[:400]
+
+
+def note_catalog_failure(reason: str) -> dict:
+    """Record that the cache could not be written, and keep it across restarts.
+
+    The cache is an aid: a failed write never fails the metadata read that
+    triggered it. That is exactly why it must still be visible somewhere — a
+    silently empty cache makes every later preview say "not checked" with no way
+    to learn why. The count survives success; only the latest failure is cleared.
+    """
+    current = _read_health()
+    current["failures"] = int(current.get("failures") or 0) + 1
+    current["lastFailure"] = _scrub(reason)
+    current["lastFailureAt"] = _stamp()
+    _write_health(current)
+    return current
+
+
+def note_catalog_success() -> dict:
+    """A write went through: the history stays, the latest failure no longer applies."""
+    current = _read_health()
+    current["lastFailure"] = None
+    current["lastFailureAt"] = None
+    _write_health(current)
+    return current
+
+
+def _read_health() -> dict:
+    data = _read_json(catalog_health_path(), {})
+    if not isinstance(data, dict):
+        data = {}
+    return {
+        "failures": int(data.get("failures") or 0),
+        "lastFailure": data.get("lastFailure"),
+        "lastFailureAt": data.get("lastFailureAt"),
+    }
+
+
+def _write_health(doc: dict) -> None:
+    path = catalog_health_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("w", encoding="utf-8") as handle:
+            json.dump(doc, handle, indent=2, ensure_ascii=False)
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
+    except OSError:
+        # The trail is a message about a message; if even this cannot be written
+        # there is nowhere left to say so.
+        return
+
+
+def catalog_health() -> dict:
+    """What the diagnostics page shows about the catalog cache."""
+    doc = _read_health()
+    return {
+        "ok": doc["lastFailure"] is None,
+        "failures": doc["failures"],
+        "lastFailure": doc["lastFailure"],
+        "lastFailureAt": doc["lastFailureAt"],
+    }
+
+
 
 
 def password_of(profile: dict, secrets: dict | None = None) -> str | None:

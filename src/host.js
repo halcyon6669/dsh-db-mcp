@@ -1534,6 +1534,25 @@ export function createHost(options = {}) {
     };
   }
 
+  async function readCatalogHealth() {
+    // Written by the Python side when a catalog write fails. Read-only here: the
+    // diagnostics card must be able to explain "not checked" previews, and the
+    // reason is already scrubbed of credentials before it reaches this file.
+    const read = await readJson(join(dir, "catalog-health.json"));
+    const value = cleanRecord(read.value);
+    const failures = Number(value.failures);
+    return {
+      file: join(dir, "catalog-health.json"),
+      error: read.error || null,
+      ok: read.missing ? true : value.lastFailure ? false : true,
+      failures: Number.isFinite(failures) && failures > 0 ? Math.trunc(failures) : 0,
+      lastFailure:
+        typeof value.lastFailure === "string" ? value.lastFailure : null,
+      lastFailureAt:
+        typeof value.lastFailureAt === "string" ? value.lastFailureAt : null,
+    };
+  }
+
   async function writeSettings(patch) {
     const current = await readSettings();
     const port = Number(
@@ -2513,6 +2532,7 @@ export function createHost(options = {}) {
       datasources: listing.datasources,
       groups: registry.groups || [],
       settings: await readSettings(),
+      catalog: await readCatalogHealth(),
       http: bridge.httpStatus(),
       mcp: {
         serverName: trimmed(config.mcpServerName) || "db",

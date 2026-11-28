@@ -2378,6 +2378,9 @@ function groupTables(tables) {
       const data = state.data
       const apiOk = state.status === 'ready' && data && data.ok === true
       const sources = (data && data.datasources) || []
+      // What the Python side recorded about catalog cache writes: a failed write
+      // never fails the metadata read, so this is the only place it shows up.
+      const catalogHealth = (data && data.catalog) || null
 
       const finish = (message, isError) => {
         setNotice({ message, isError: Boolean(isError) })
@@ -7774,6 +7777,23 @@ function groupTables(tables) {
               ),
               data.mcp && data.mcp.phase === 'failed' && /tools`? service/.test(String(data.mcp.error || ''))
                 ? h(Row, { label: t('diag.tip') }, h('span', { className: 'dbmcp-hint' }, t('diag.restartNeeded')))
+                : null,
+              h(
+                Row,
+                { label: t('diag.catalog') },
+                catalogHealth && catalogHealth.failures
+                  ? h(
+                      'span',
+                      { className: 'dbmcp-hint' },
+                      `${fmt(t('diag.catalogFailures'), { n: catalogHealth.failures })}`,
+                      catalogHealth.lastFailure
+                        ? ` · ${t('diag.catalogLastFailure')} ${catalogHealth.lastFailure}`
+                        : ` · ${t('diag.catalogOk')}`,
+                    )
+                  : h('span', { className: 'dbmcp-hint' }, t('diag.catalogOk')),
+              ),
+              catalogHealth && catalogHealth.lastFailure
+                ? h(Row, { label: t('diag.tip') }, h('span', { className: 'dbmcp-hint' }, t('diag.catalogWhy')))
                 : null,
               h(Row, { label: t('diag.uptime') }, formatUptime(data.host && data.host.uptimeMs)),
             ),

@@ -60,6 +60,13 @@ report of each version in more detail.
   in the configured schema first, then in any other schema cached for that source; if
   two cached schemas disagree about a column's type the join is lowered as
   `ambiguous_schema` rather than guessed.
+- **A failed catalog write is recorded, not swallowed.** Catalog cache writes happen
+  on the side of ordinary metadata reads, so a failure there never fails the read that
+  triggered it — it now lands in `catalog-health.json` in the runtime directory with a
+  cumulative count, the time, and a scrubbed reason (connection strings and
+  `password=` values redacted). `health()` returns it as `catalog` and the Runtime
+  diagnostics page shows it; the next successful write clears the latest failure and
+  keeps the count.
 - **An edge now knows what it costs.** `propose_relation` and `feedback_relation`
   read the target column's index and the table's row estimate from the catalogue
   (`pg_class.reltuples`, `information_schema.TABLES.TABLE_ROWS`, `ALL_TABLES.NUM_ROWS`

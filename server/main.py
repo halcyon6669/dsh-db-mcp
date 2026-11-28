@@ -248,7 +248,8 @@ def _remember_catalog(profile: dict, tables=(), columns=()) -> None:
                 cols[key] = type_name
             typed.setdefault(str(table), {})[key] = cols[key]
         payload = typed
-    except Exception:  # noqa: BLE001 - the cache is an aid, never the answer
+    except Exception as error:  # noqa: BLE001 - the cache is an aid, never the answer
+        store.note_catalog_failure(f"{type(error).__name__}: {error}")
         return
     # `read` names exactly what this call saw, so save_catalog restamps those
     # tables and leaves every other table's read time alone.
@@ -258,8 +259,10 @@ def _remember_catalog(profile: dict, tables=(), columns=()) -> None:
             read.append((table, columns_seen))
     try:
         store.save_catalog(profile, catalog, schema=store.catalog_schema(profile), read=read)
-    except Exception:  # noqa: BLE001 - a broken cache is not a failed read
+    except Exception as error:  # noqa: BLE001 - report, do not fail the read
+        store.note_catalog_failure(f"{type(error).__name__}: {error}")
         return
+    store.note_catalog_success()
 
 
 def _inline_profile(kind: str, config: Any, read_only: Optional[bool]) -> dict:

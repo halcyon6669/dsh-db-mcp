@@ -1132,5 +1132,153 @@ class CatalogCacheWiring(unittest.TestCase):
         self.assertTrue(any(item.get("reason") == "missing_table" for item in result.get("downgraded", [])))
 
 
+class CatalogFailureTrail(unittest.TestCase):
+    """A cache write that fails must leave a trace instead of vanishing.
 
+    The old body of ``_remember_catalog`` ended in ``except Exception: pass``, so
+    a read-only runtime directory made the cache silently stay empty and every
+    later preview said "not checked" with no way to learn why. The trail records
+    the moment, the reason and a running count, clears the *latest* failure on the
+    next success, and never carries a connection string or a password.
+    """
+
+    def setUp(self):
+        import json
+        import os
+        import tempfile
+
+        self.tmp = tempfile.TemporaryDirectory()
+        self.saved = os.environ.get("DB_MCP_RUNTIME")
+        os.environ["DB_MCP_RUNTIME"] = self.tmp.name
+        self.dir = Path(self.tmp.name)
+        registry = {
+            "schemaVersion": 1,
+            "datasources": [
+                {
+                    "id": "shop",
+                    "name": "shop",
+                    "kind": "sqlite",
+                    "config": {"file": str(self.dir / "shop.db")},
+                    "readOnly": True,
+                    "isDefault": True,
+                }
+            ],
+        }
+        (self.dir / "datasources.json").write_text(json.dumps(registry), encoding="utf-8")
+
+    def tearDown(self):
+        import os
+
+        if self.saved is None:
+            os.environ.pop("DB_MCP_RUNTIME", None)
+        else:
+            os.environ["DB_MCP_RUNTIME"] = self.saved
+        self.tmp.cleanup()
+
+    def test_a_failed_cache_write_is_counted_and_timed(self):
+        import store
+
+        profile, _ = store.resolve("shop")
+        saved = store.save_catalog
+
+        def broken(_profile, _catalog, **_kwargs):
+            raise OSError("the runtime directory is read-only")
+
+        store.save_catalog = broken
+        try:
+            main._remember_catalog(profile, tables=["t_order"])
+        finally:
+            store.save_catalog = saved
+        trail = store.catalog_health()
+        self.assertGreaterEqual(trail["failures"], 1, "the failure is counted")
+        self.assertTrue(trail.get("lastFailureAt"), "the failure is timed")
+        self.assertIn("read-only", trail.get("lastFailure") or "")
+
+    def test_the_reason_carries_no_connection_string_or_password(self):
+        import store
+
+        profile, _ = store.resolve("shop")
+        saved = store.save_catalog
+
+        def broken(_profile, _catalog, **_kwargs):
+            raise OSError(
+                "cannot write /home/someone/.dsh/db-mcp/catalog/shop.json "
+                "while connecting as postgres://admin:hunter2@db.internal:5432/prod"
+            )
+
+        store.save_catalog = broken
+        try:
+            main._remember_catalog(profile, tables=["t_order"])
+        finally:
+            store.save_catalog = saved
+        trail = store.catalog_health()
+        blob = str(trail.get("lastFailure") or "")
+        self.assertNotIn("hunter2", blob, "a password must never be recorded")
+        self.assertNotIn("postgres://", blob, "a connection string must never be recorded")
+        self.assertIn("cannot write", blob, "the reason itself is still useful")
+
+    def test_a_later_success_keeps_the_count_and_clears_the_latest_failure(self):
+        import store
+
+        profile, _ = store.resolve("shop")
+        saved = store.save_catalog
+
+        def broken(_profile, _catalog, **_kwargs):
+            raise OSError("nope")
+
+        store.save_catalog = broken
+        try:
+            main._remember_catalog(profile, tables=["t_order"])
+            main._remember_catalog(profile, tables=["t_order"])
+        finally:
+            store.save_catalog = saved
+        self.assertGreaterEqual(store.catalog_health()["failures"], 2)
+        main._remember_catalog(profile, tables=["t_order"])
+        trail = store.catalog_health()
+        self.assertGreaterEqual(trail["failures"], 2, "history survives")
+        self.assertIsNone(trail.get("lastFailure"), "the latest failure is cleared by a success")
+        self.assertIsNone(trail.get("lastFailureAt"))
+
+    def test_the_trail_is_written_into_the_runtime_directory(self):
+        import json
+        import store
+
+        profile, _ = store.resolve("shop")
+        saved = store.save_catalog
+
+        def broken(_profile, _catalog, **_kwargs):
+            raise OSError("disk full")
+
+        store.save_catalog = broken
+        try:
+            main._remember_catalog(profile, tables=["t_order"])
+        finally:
+            store.save_catalog = saved
+        path = store.catalog_health_path()
+        self.assertTrue(path.exists(), "the trail outlives this process")
+        doc = json.loads(path.read_text(encoding="utf-8"))
+        self.assertGreaterEqual(doc.get("failures", 0), 1)
+
+    def test_the_diagnostics_payload_reports_the_trail(self):
+        import store
+
+        profile, _ = store.resolve("shop")
+        saved = store.save_catalog
+
+        def broken(_profile, _catalog, **_kwargs):
+            raise OSError("disk full")
+
+        store.save_catalog = broken
+        try:
+            main._remember_catalog(profile, tables=["t_order"])
+        finally:
+            store.save_catalog = saved
+        payload = store.catalog_health()
+        self.assertEqual(payload["failures"], 1)
+        self.assertFalse(payload["ok"], "a pending failure is not ok")
+        main._remember_catalog(profile, tables=["t_order"])
+        self.assertTrue(store.catalog_health()["ok"])
+
+
+if __name__ == "__main__":
     sys.exit(unittest.main(verbosity=2))

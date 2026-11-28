@@ -796,6 +796,7 @@ check('share: an unread table is called unread, never missing', /t\('share\.refr
 check('share: the schema being read can be named and is shown', /shareSchema/.test(source) && /apiPost\('\/bundle\/refresh-catalog', \{\s*datasource: shareTarget,\s*schema: schemaValue\(\)/.test(source) && /t\('share\.schemaUsed'\)/.test(source))
 check('share: two schemas that disagree are ambiguous, not a guess', /ambiguous_schema:/.test(source) && /t\('share\.reason\.ambiguous_schema'\)/.test(source))
 check('share: the preview names the schema it was checked against', /sharePreview\.catalogSchema/.test(source) && /t\('share\.schemaUsed'\)/.test(source))
+check('runtime: a catalog write failure is shown, not swallowed', /t\('diag\.catalogFailures'\)/.test(source) && /catalogHealth/.test(source) && /t\('diag\.catalogLastFailure'\)/.test(source))
 
 // Every outside client can be wired up either way: one button writes a stdio
 // command entry, the other writes the shared HTTP endpoint. The chosen form is

@@ -750,6 +750,13 @@ its current size. All of the bundle logic lives in `server/bundle.py`:
   every status-lifted edge with reason `stale_cache`. The cache is local metadata
   only: it is never exported in a bundle and never contains row values.
 
+  A cache write that fails never fails the metadata read that triggered it, so
+  the failure is recorded rather than swallowed: `catalog-health.json` in the
+  runtime directory holds a cumulative failure count plus the time and a scrubbed
+  reason of the latest one (connection strings and `password=` values are
+  redacted, and the text is cut short). `health()` returns it as `catalog` and
+  the Runtime diagnostics page shows it; a later successful write clears the
+  latest failure but keeps the count.
 - `apply_import(...)` takes the import lock, re-reads the current documents, and
   writes both through a temp file plus an atomic replace; every temp and final
   file is created with mode `0600` (on POSIX). If the second write fails, the

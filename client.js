@@ -231,6 +231,11 @@ window.__ModuleLoader__.load({
         'diag.mcpPending': 'not wired yet',
         'diag.mcpLive': '{count} tool(s) live',
         'diag.mcpFailed': 'failed:',
+        'diag.catalog': 'Catalog cache',
+        'diag.catalogOk': 'writes are landing',
+        'diag.catalogFailures': '{n} failed write(s)',
+        'diag.catalogLastFailure': 'last failure:',
+        'diag.catalogWhy': 'A failed catalog write never fails the metadata read that triggered it, so it is recorded here instead.',
         'diag.uptime': 'Host uptime',
         'diag.tip': 'Tip',
         'diag.restartNeeded': 'Restart the DSH desktop app once — the plugin entry is imported at process start, so the tool bridge only activates after a restart.',
@@ -840,6 +845,11 @@ window.__ModuleLoader__.load({
         'diag.mcpPending': '尚未接入',
         'diag.mcpLive': '{count} 个工具已就绪',
         'diag.mcpFailed': '启动失败：',
+        'diag.catalog': '目录缓存',
+        'diag.catalogOk': '写入正常',
+        'diag.catalogFailures': '失败 {n} 次',
+        'diag.catalogLastFailure': '最近一次失败：',
+        'diag.catalogWhy': '目录写入失败不会让触发它的元数据读取失败，所以记在这里，而不是丢掉。',
         'diag.uptime': 'Host 已运行',
         'diag.tip': '提示',
         'diag.restartNeeded': '需要重启一次 DSH 桌面应用：插件入口只在进程启动时导入，重启后工具桥接才会生效。',
@@ -6710,6 +6720,9 @@ function groupTables(tables) {
       const data = state.data
       const apiOk = state.status === 'ready' && data && data.ok === true
       const sources = (data && data.datasources) || []
+      // What the Python side recorded about catalog cache writes: a failed write
+      // never fails the metadata read, so this is the only place it shows up.
+      const catalogHealth = (data && data.catalog) || null
 
       const finish = (message, isError) => {
         setNotice({ message, isError: Boolean(isError) })
@@ -12106,6 +12119,23 @@ function groupTables(tables) {
               ),
               data.mcp && data.mcp.phase === 'failed' && /tools`? service/.test(String(data.mcp.error || ''))
                 ? h(Row, { label: t('diag.tip') }, h('span', { className: 'dbmcp-hint' }, t('diag.restartNeeded')))
+                : null,
+              h(
+                Row,
+                { label: t('diag.catalog') },
+                catalogHealth && catalogHealth.failures
+                  ? h(
+                      'span',
+                      { className: 'dbmcp-hint' },
+                      `${fmt(t('diag.catalogFailures'), { n: catalogHealth.failures })}`,
+                      catalogHealth.lastFailure
+                        ? ` · ${t('diag.catalogLastFailure')} ${catalogHealth.lastFailure}`
+                        : ` · ${t('diag.catalogOk')}`,
+                    )
+                  : h('span', { className: 'dbmcp-hint' }, t('diag.catalogOk')),
+              ),
+              catalogHealth && catalogHealth.lastFailure
+                ? h(Row, { label: t('diag.tip') }, h('span', { className: 'dbmcp-hint' }, t('diag.catalogWhy')))
                 : null,
               h(Row, { label: t('diag.uptime') }, formatUptime(data.host && data.host.uptimeMs)),
             ),
