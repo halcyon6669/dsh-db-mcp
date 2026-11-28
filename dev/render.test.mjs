@@ -783,6 +783,11 @@ check('share: an import can be undone by its importId', /apiPost\('\/bundle\/und
 check('share: status mode toggles between original status and all pending', /share\.statusOriginal/.test(source) && /share\.statusPendingAll/.test(source) && /setShareRespectStatus\(event\.target\.value !== 'pending'\)/.test(source))
 check('share: a preview with no catalog or downgrades says why', /sharePreview\.catalogHint/.test(source) && /t\('share\.noCatalog'\)/.test(source) && /sharePreview\.downgraded/.test(source) && /share\.reason\./.test(source))
 check('share: a stale preview is reported and cleared', /stale_preview/.test(source) && /setShareNotice\(t\('share\.stalePreview'\)\)/.test(source))
+// The directory is a cache, not a fact: a person refreshes it explicitly (the
+// only action that opens a connection), and a preview says how old it is.
+check('share: refreshing the directory is a person-triggered CLI call', /apiPost\('\/bundle\/refresh-catalog', \{ datasource: shareTarget \}\)/.test(source) && /share\.refreshCatalog/.test(source))
+check('share: the preview says how old the cached directory is', /sharePreview\.catalogSavedAt/.test(source) && /t\('share\.catalogAge'\)/.test(source) && /share\.staleCatalog/.test(source))
+check('share: a stale cache is a listed downgrade reason', /stale_cache:/.test(source) && /t\('share\.reason\.stale_cache'\)/.test(source))
 
 // Every outside client can be wired up either way: one button writes a stdio
 // command entry, the other writes the shared HTTP endpoint. The chosen form is

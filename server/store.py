@@ -115,16 +115,27 @@ def load_catalog(profile: dict) -> dict | None:
     return data
 
 
-def save_catalog(profile: dict, catalog: dict) -> None:
-    """Write a catalog snapshot. Callers populate it from list_tables/describe."""
+def save_catalog(profile: dict, catalog: dict) -> dict:
+    """Write a catalog snapshot, stamping when it was read.
+
+    Callers populate ``tables`` from list_tables/describe_table/discover_relations;
+    this function owns the timestamp so a cache can never claim to be fresher
+    than the moment it was written. Returns the document actually written.
+    """
+    from datetime import datetime, timezone
+
+    doc = dict(catalog)
+    stamp = datetime.now(timezone.utc)
+    doc["savedAt"] = stamp.strftime("%Y-%m-%dT%H:%M:%S.") + f"{stamp.microsecond // 1000:03d}Z"
     path = catalog_path(profile)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as handle:
-        json.dump(catalog, handle, indent=2, ensure_ascii=False)
+        json.dump(doc, handle, indent=2, ensure_ascii=False)
     try:
         os.chmod(path, 0o600)
     except OSError:
         pass
+    return doc
 
 
 def password_of(profile: dict, secrets: dict | None = None) -> str | None:

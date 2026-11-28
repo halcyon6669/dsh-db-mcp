@@ -354,7 +354,14 @@ connection details or result rows, so it is safe to paste into a ticket.
   `confirmed`/`trusted` arrive as `confirmed` (never `trusted`) with its
   confirmation count reset to zero — it still needs three local confirmations
   before a walk follows it. The preview lists every lowered join and the reason
-  (missing table / missing column / incompatible types / catalog not checked).
+  (missing table / missing column / incompatible types / catalog not checked /
+  cached directory is old), and says how old the cached directory is.
+- **Refresh directory** refreshes the cached table/column catalog. It is the only
+  action here that opens a connection, and it reads metadata only — never row
+  data. The cache is also filled as you browse tables and relations elsewhere. A
+  cache older than seven days is treated as stale: the preview still works, but
+  it warns you to refresh first and lowers any status it would have lifted. You
+  can always continue with an old cache; the warning is a hint, not a block.
 - **Import for real** applies the previewed plan atomically under a lock: it
   re-reads the current graph first, so a change between preview and import is
   detected and you are asked to preview again. Every join imported this way gets

@@ -31,6 +31,7 @@ import hashlib
 import json
 import os
 import uuid
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import engines
@@ -46,6 +47,7 @@ MAX_EDGES = relations.EDGE_LIMIT          # 500 joins is already a big graph
 MAX_SCENES = scenes.SCENE_LIMIT           # 50 scenes per datasource
 MAX_STRING = 2000                         # a note, condition or name
 MAX_PACKAGE_BYTES = 5 * 1024 * 1024       # five megabytes of text is plenty
+CATALOG_MAX_AGE = timedelta(days=7)       # past this, a cached directory is only a hint
 
 # Only these scene fields travel. Anything else in a bundle is future data (or
 # somebody's private note) and is dropped rather than persisted.
@@ -99,13 +101,36 @@ def _wire_edge(edge: dict) -> dict:
     }
 
 
-def _resolve_status(wire: dict, catalog: dict | None, respect_status: bool):
+def _catalog_stale(catalog: dict | None) -> bool:
+    """A cached directory older than a week cannot vouch for today's types.
+
+    A cache written before timestamps existed (no ``savedAt``) is treated the
+    same way: honest about being impossible to date, so it is old by definition.
+    Either way it stays usable — it just cannot promote a sender's confirmation.
+    """
+    if not isinstance(catalog, dict):
+        return True
+    stamp = catalog.get("savedAt")
+    if not stamp:
+        return True
+    try:
+        saved = datetime.fromisoformat(str(stamp).replace("Z", "+00:00"))
+        if saved.tzinfo is None:
+            saved = saved.replace(tzinfo=timezone.utc)
+    except (ValueError, TypeError):
+        return True
+    return datetime.now(timezone.utc) - saved > CATALOG_MAX_AGE
+
+
+def _resolve_status(wire: dict, catalog: dict | None, respect_status: bool, catalog_is_stale: bool = False):
     """Recompute a join's status from the reader's cached catalog.
 
     Returns ``(status, reason, stale)``. The sender's ``status`` is only consulted
     *after* the catalog says both endpoints exist with compatible types; it is a
     reference for a confirmation, never inherited trust. A reason is returned
     whenever the join lands in ``pending`` so the panel can explain the downgrade.
+    An old or undated catalog cannot vouch for a confirmation, so it downgrades
+    with the ``stale_cache`` reason.
     """
     sender = wire.get("status")
     if not respect_status:
@@ -145,6 +170,8 @@ def _resolve_status(wire: dict, catalog: dict | None, respect_status: bool):
     right_family = engines.column_family(right_type)
     if left_family != right_family and "any" not in (left_family, right_family):
         return "pending", "type_incompatible", False
+    if catalog_is_stale:
+        return "pending", "stale_cache", False
     if sender in ("confirmed", "trusted"):
         # A confirmation is a reference; trust is earned here, so the ceiling is
         # `confirmed` and the count starts again at zero.
@@ -243,6 +270,10 @@ def import_bundle(
     current_rel["schemaVersion"] = relations.SCHEMA_VERSION
     current_scn["schemaVersion"] = scenes.SCHEMA_VERSION
 
+    # How fresh the cached directory is decides whether it may vouch for a
+    # sender's confirmation. Computed once so every join sees the same verdict.
+    catalog_stale = _catalog_stale(catalog)
+
     # A revision is a fingerprint of what the preview actually looked at. If the
     # caller re-imports with a stale one, it must recompute against the latest
     # files instead of committing a plan made over documents that changed.
@@ -275,7 +306,7 @@ def import_bundle(
         target_id = relations.edge_id(frm, to)
         condition = wire.get("condition")
         local = by_id.get(target_id)
-        status, reason, stale = _resolve_status(wire, catalog, respect_status)
+        status, reason, stale = _resolve_status(wire, catalog, respect_status, catalog_stale)
         if local is None:
             edge = relations._blank_edge(frm, to, "imported", wire.get("note"))
             edge["condition"] = condition
@@ -355,6 +386,8 @@ def import_bundle(
         "downgraded": downgraded,
         "catalogChecked": catalog_checked,
         "catalogHint": not catalog_checked,
+        "catalogStale": catalog_stale,
+        "catalogSavedAt": (catalog or {}).get("savedAt") if isinstance(catalog, dict) else None,
         "respectStatus": bool(respect_status),
         "revision": revision,
         "stalePreview": stale_preview,

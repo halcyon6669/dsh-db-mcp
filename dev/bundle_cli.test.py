@@ -140,5 +140,67 @@ class BundleCli(unittest.TestCase):
         self.assertTrue(stale["plan"]["stalePreview"])
 
 
+class RefreshCatalogCli(unittest.TestCase):
+    """The refresh op reads metadata from a real database and stamps the cache."""
+
+    def setUp(self):
+        import sqlite3
+
+        self.saved = dict(os.environ)
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dir = Path(self.tmp.name)
+        self.db = self.dir / "shop.db"
+        seed = sqlite3.connect(str(self.db))
+        try:
+            seed.executescript(
+                "create table t_order (id integer primary key, code text);"
+                "create table t_trans (id integer primary key, order_id integer);"
+            )
+            seed.commit()
+        finally:
+            seed.close()
+        registry = {
+            "schemaVersion": 1,
+            "datasources": [{
+                "id": "shop", "name": "shop", "kind": "sqlite", "isDefault": True,
+                "config": {"file": str(self.db)},
+            }],
+            "groups": [],
+        }
+        (self.dir / "datasources.json").write_text(json.dumps(registry), encoding="utf-8")
+
+    def tearDown(self):
+        os.environ.clear()
+        os.environ.update(self.saved)
+        self.tmp.cleanup()
+
+    def test_refresh_reports_a_saved_at_and_the_tables_it_read(self):
+        result = _invoke({"op": "refresh_catalog", "datasource": "shop"}, self.dir)
+        self.assertTrue(result.get("ok"), result)
+        self.assertTrue(result.get("savedAt"))
+        self.assertEqual(result.get("tableCount"), 2)
+        cache = self.dir / "catalog" / "shop.json"
+        self.assertTrue(cache.exists(), "refresh writes a timestamped cache")
+        doc = json.loads(cache.read_text(encoding="utf-8"))
+        self.assertEqual(doc["savedAt"], result["savedAt"])
+        self.assertIn("t_order", doc["tables"])
+        self.assertIn("t_trans", doc["tables"])
+
+    def test_a_preview_after_refresh_uses_the_fresh_catalog(self):
+        refreshed = _invoke({"op": "refresh_catalog", "datasource": "shop"}, self.dir)
+        self.assertTrue(refreshed.get("ok"), refreshed)
+        edge = {
+            "from": {"table": "t_trans", "column": "order_id"},
+            "to": {"table": "t_order", "column": "id"},
+            "status": "trusted",
+        }
+        bundle = {"schemaVersion": 1, "kind": "db-mcp-bundle", "edges": [edge], "scenes": []}
+        result = _invoke({"op": "preview", "datasource": "shop", "payload": bundle}, self.dir)
+        self.assertTrue(result.get("ok"), result)
+        self.assertFalse(result["plan"]["catalogHint"])
+        self.assertFalse(result["plan"]["catalogStale"])
+        self.assertNotIn("not_checked", [item["reason"] for item in result["plan"]["downgraded"]])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

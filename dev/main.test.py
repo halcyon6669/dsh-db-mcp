@@ -1006,5 +1006,131 @@ class FeedbackReadsTheCatalog(unittest.TestCase):
         self.assertEqual(payload["edge"]["status"], "confirmed")
 
 
+@unittest.skipUnless(HAVE_MAIN, "the MCP SDK is not installed for this interpreter")
+class CatalogCacheWiring(unittest.TestCase):
+    """The cached directory is a by-product of the metadata tools, never a hand-written fixture.
+
+    A real sqlite database is read through the same ``describe_table`` /
+    ``discover_relations`` calls the panel makes. Those calls must leave a cache
+    behind; a bundle preview then compares against that cache WITHOUT opening the
+    database, so a sender's confirmation is accepted only for tables actually seen.
+    """
+
+    def setUp(self):
+        import json
+        import os
+        import sqlite3
+        import tempfile
+
+        self.tmp = tempfile.TemporaryDirectory()
+        self.saved = os.environ.get("DB_MCP_RUNTIME")
+        os.environ["DB_MCP_RUNTIME"] = self.tmp.name
+        path = Path(self.tmp.name) / "shop.db"
+        seed = sqlite3.connect(str(path))
+        try:
+            seed.executescript(
+                "create table t_order (id integer primary key, code text);"
+                "create table t_trans (id integer primary key, order_id integer, "
+                "foreign key(order_id) references t_order(id));"
+            )
+            seed.commit()
+        finally:
+            seed.close()
+        registry = {
+            "schemaVersion": 1,
+            "datasources": [
+                {
+                    "id": "shop",
+                    "name": "shop",
+                    "kind": "sqlite",
+                    "config": {"file": str(path)},
+                    "readOnly": True,
+                    "isDefault": True,
+                }
+            ],
+        }
+        (Path(self.tmp.name) / "datasources.json").write_text(json.dumps(registry), encoding="utf-8")
+
+    def tearDown(self):
+        import os
+
+        if self.saved is None:
+            os.environ.pop("DB_MCP_RUNTIME", None)
+        else:
+            os.environ["DB_MCP_RUNTIME"] = self.saved
+        self.tmp.cleanup()
+
+    def test_describe_table_and_discover_relations_leave_a_timestamped_cache(self):
+        import json
+        import store
+
+        described = main.describe_table("t_order")
+        self.assertTrue(described["ok"], described)
+        discovered = main.discover_relations()
+        self.assertTrue(discovered["ok"], discovered)
+        profile, _ = store.resolve("shop")
+        cached = store.load_catalog(profile)
+        self.assertIsNotNone(cached, "reading metadata must populate the cache")
+        self.assertTrue(cached.get("savedAt"), "a freshly written cache carries its read time")
+        # Both tools contribute tables and their types; no row data is stored.
+        names = {str(name).casefold() for name in (cached.get("tables") or {})}
+        self.assertIn("t_order", names)
+        self.assertIn("t_trans", names)
+        blob = json.dumps(cached, ensure_ascii=False)
+        self.assertNotIn("SO-1", blob, "the cache holds no business row values")
+
+    def test_a_preview_after_real_metadata_reads_lands_status_by_the_cache(self):
+        import bundle
+        import store
+
+        main.describe_table("t_order")
+        main.describe_table("t_trans")
+        main.discover_relations()
+        profile, _ = store.resolve("shop")
+        cached = store.load_catalog(profile)
+
+        # A sender marks a join trusted. The cache has both endpoints with
+        # integer types, so the confirmation is accepted but downgraded to
+        # `confirmed` — never inheriting `trusted`. Use a column pair that is
+        # NOT the declared foreign key, so the import actually adds the edge
+        # rather than skipping an already-known local one.
+        wire = {
+            "from": {"table": "t_trans", "column": "id"},
+            "to": {"table": "t_order", "column": "id"},
+            "condition": None,
+            "note": None,
+            "places": [],
+            "status": "trusted",
+        }
+        payload = {"schemaVersion": bundle.SCHEMA_VERSION, "edges": [wire], "scenes": []}
+        result = bundle.import_bundle(profile, payload, catalog=cached)
+        # The discovered FK is already at index 0; find the edge this import added.
+        target_id = main.relations.edge_id(wire["from"], wire["to"])
+        added = [e for e in result["relationsDoc"]["edges"] if e.get("id") == target_id]
+        self.assertEqual(len(added), 1, "the import adds exactly this edge")
+        self.assertEqual(added[0]["status"], "confirmed")
+        self.assertFalse(result.get("catalogStale"))
+
+    def test_a_join_to_an_unseen_table_stays_pending_after_real_metadata_reads(self):
+        import bundle
+        import store
+
+        main.describe_table("t_order")
+        profile, _ = store.resolve("shop")
+        cached = store.load_catalog(profile)
+        wire = {
+            "from": {"table": "t_order", "column": "code"},
+            "to": {"table": "t_ghost", "column": "id"},
+            "condition": None,
+            "note": None,
+            "places": [],
+            "status": "trusted",
+        }
+        payload = {"schemaVersion": bundle.SCHEMA_VERSION, "edges": [wire], "scenes": []}
+        result = bundle.import_bundle(profile, payload, catalog=cached)
+        self.assertEqual(result["relationsDoc"]["edges"][0]["status"], "pending")
+        self.assertTrue(any(item.get("reason") == "missing_table" for item in result.get("downgraded", [])))
+
+
 if __name__ == "__main__":
     sys.exit(unittest.main(verbosity=2))

@@ -702,11 +702,22 @@ its current size. All of the bundle logic lives in `server/bundle.py`:
   `trusted` — with `confirmCount` reset to zero; a sender `pending` stays
   `pending`. Each edge lowered to pending carries a `downgradeReason`
   (`missing_table`, `missing_column`, `type_incompatible`, `not_checked`, or
-  `pending_all` when the reader chose the "make everything pending" toggle), and
-  is listed in `downgraded`. The preview reads **only** the locally cached catalog
-  (`store.load_catalog`); it opens no connection and queries no data. With no
-  cache it reports `catalogHint` and imports everything pending. The toggle
-  `respectStatus=False` forces every edge pending.
+  `pending_all` when the reader chose the "make everything pending" toggle, or
+  `stale_cache` when the cached directory is old), and is listed in `downgraded`.
+  The preview reads **only** the locally cached catalog (`store.load_catalog`);
+  it opens no connection and queries no data. With no cache it reports
+  `catalogHint` and imports everything pending. The toggle `respectStatus=False`
+  forces every edge pending.
+
+  The cache is filled as a side effect of the catalog tools (`list_tables`,
+  `describe_table`, `discover_relations`) and by the Share page's **Refresh
+  directory** button, which is the one action that opens a connection — and even
+  that reads table/column metadata only, never row data. Each entry is stamped
+  with the time it was read; a cache older than seven days (or one with no
+  timestamp) is treated as stale: the preview still works and can still be
+  applied, but it reports `catalogStale`, says how old the cache is, and lowers
+  every status-lifted edge with reason `stale_cache`. The cache is local metadata
+  only: it is never exported in a bundle and never contains row values.
 - `apply_import(...)` takes the import lock, re-reads the current documents, and
   writes both through a temp file plus an atomic replace; every temp and final
   file is created with mode `0600` (on POSIX). If the second write fails, the

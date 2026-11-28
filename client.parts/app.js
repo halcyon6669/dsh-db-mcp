@@ -2838,6 +2838,25 @@ function groupTables(tables) {
           setShareBusy(false)
         }
       }
+      const refreshCatalog = async () => {
+        // The only action in this tab that opens a database connection, and it
+        // reads catalog metadata only — a person asked for it by clicking.
+        setShareBusy(true)
+        setShareError(null)
+        try {
+          const data = await apiPost('/bundle/refresh-catalog', { datasource: shareTarget })
+          if (!data || data.ok === false) {
+            setShareError(bundleFailure(data))
+            return
+          }
+          setShareNotice(fmt(t('share.catalogRefreshed'), { n: data.tableCount || 0 }))
+          setSharePreview(null)
+        } catch (error) {
+          setShareError(String((error && error.message) || error))
+        } finally {
+          setShareBusy(false)
+        }
+      }
       const parseBundle = () => {
         const text = String(shareBundle || '').trim()
         if (!text) return null
@@ -4419,7 +4438,25 @@ function groupTables(tables) {
           type_incompatible: t('share.reason.type_incompatible'),
           not_checked: t('share.reason.not_checked'),
           pending_all: t('share.reason.pending_all'),
+          stale_cache: t('share.reason.stale_cache'),
         }
+        // How old is the cached directory? The server stamps it on every write;
+        // a stamp older than seven days is only a hint, never enough to vouch
+        // for a sender's confirmation.
+        const catalogSavedAt = sharePreview && sharePreview.catalogSavedAt
+        const catalogAge = (() => {
+          if (!catalogSavedAt) return null
+          const saved = Date.parse(catalogSavedAt)
+          if (!Number.isFinite(saved)) return null
+          return Math.max(0, Date.now() - saved)
+        })()
+        const catalogStale = Boolean(sharePreview && sharePreview.catalogStale)
+        const catalogAgeText = (() => {
+          if (catalogAge === null) return t('share.noCatalog')
+          const minutes = Math.floor(catalogAge / 60000)
+          const amount = minutes >= 1440 ? `${Math.floor(minutes / 1440)}d` : `${Math.max(1, minutes)}m`
+          return fmt(t('share.catalogAge'), { age: amount })
+        })()
         return h(
           Card,
           { title: t('share.title') },
@@ -4447,6 +4484,17 @@ function groupTables(tables) {
               'button',
               { type: 'button', className: 'dbmcp-btn is-primary', disabled: shareBusy, onClick: () => void exportBundle() },
               t('share.export'),
+            ),
+            h(
+              'button',
+              {
+                type: 'button',
+                className: 'dbmcp-btn',
+                disabled: shareBusy || !shareTarget,
+                title: t('share.refreshCatalogHint'),
+                onClick: () => void refreshCatalog(),
+              },
+              t('share.refreshCatalog'),
             ),
           ),
           h(
@@ -4520,6 +4568,9 @@ function groupTables(tables) {
                 ),
                 sharePreview.catalogHint
                   ? h('p', { className: 'dbmcp-hint is-warn' }, t('share.noCatalog'))
+                  : h('p', { className: 'dbmcp-hint' }, catalogAgeText),
+                catalogStale
+                  ? h('p', { className: 'dbmcp-hint is-warn' }, t('share.staleCatalog'))
                   : null,
                 downgraded.length
                   ? h(

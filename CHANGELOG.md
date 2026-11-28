@@ -35,9 +35,12 @@ report of each version in more detail.
   a downgrade reason), while a catalog-checked `confirmed`/`trusted` arrives as
   `confirmed` with `confirmCount` reset to zero. A preview toggle chooses
   "use the sender status" (default) or "make every join pending"; the preview
-  reads no connection and writes nothing. Imports run under a lock, re-read the
-  current graph, detect a stale preview, write 0600 temp and final files, and can
-  be undone by `importId`.
+  reads no connection and writes nothing. **Refresh directory** fills the local
+  table/column catalog (metadata only, no row data); the cache is also filled as
+  you browse catalogs, is timestamped, and a cache older than seven days is
+  treated as stale — a hint that still lets you continue. Imports run under a
+  lock, re-read the current graph, detect a stale preview, write 0600 temp and
+  final files (POSIX), and can be undone by `importId`.
 - **An edge now knows what it costs.** `propose_relation` and `feedback_relation`
   read the target column's index and the table's row estimate from the catalogue
   (`pg_class.reltuples`, `information_schema.TABLES.TABLE_ROWS`, `ALL_TABLES.NUM_ROWS`

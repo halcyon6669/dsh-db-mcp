@@ -9,8 +9,9 @@ Protocol: one JSON object on stdin, exactly one JSON object on stdout, always.
 A ``StoreError`` becomes ``{"ok": false, "error": {...}}`` rather than a
 traceback, because the Host parses the last stdout line. Operations:
 
+* ``refresh_catalog`` -> ``{"savedAt": ..., "tableCount": N}`` (metadata only)
 * ``export``   -> ``{"bundle": ...}``
-* ``preview``  -> ``{"plan": ...}`` (pure; no disk write)
+* ``preview``  -> ``{"plan": ...}`` (pure; no disk write, no connection)
 * ``import``   -> ``{"applied": ...}`` (atomically writes both documents)
 * ``undo``     -> ``{"applied": ...}`` (removes one importId)
 """
@@ -21,9 +22,47 @@ import json
 import sys
 
 import bundle
+import engines
 import relations
 import scenes
 import store
+
+
+def _refresh_catalog(profile: dict) -> dict:
+    """Re-read the table/column directory from the datasource — metadata only.
+
+    This is the one operation that opens a connection, and it is triggered by a
+    person pressing "refresh directory". It lists tables and describes each one;
+    it never runs a SELECT against table data. The result is saved through
+    ``store.save_catalog``, which timestamps it.
+    """
+    password = store.password_of(profile, store.load_secrets())
+    connection, close = engines.connect(profile, password)
+    tables: dict[str, dict] = {}
+    try:
+        listed = engines.list_tables(profile, connection, None)
+        for item in listed.get("tables") or []:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name") or "")
+            if name:
+                tables.setdefault(name, {})
+        # Describe every table so types are available for status comparison.
+        # Cap the work so a huge schema cannot turn one click into a huge read.
+        for name in list(tables)[:500]:
+            try:
+                described = engines.describe_table(profile, connection, name, None)
+            except Exception:  # a single unreadable table must not lose the rest
+                continue
+            cols = {}
+            for col in described.get("columns") or []:
+                if isinstance(col, dict) and col.get("name"):
+                    cols[str(col["name"])] = col.get("type")
+            tables[name] = {"columns": cols}
+    finally:
+        close()
+    saved = store.save_catalog(profile, {"tables": tables})
+    return {"ok": True, "savedAt": saved.get("savedAt"), "tableCount": len(tables)}
 
 
 def _fail(code: str, message: str, hint: str | None = None) -> dict:
@@ -38,9 +77,15 @@ def run(command: dict) -> dict:
         return _fail("user_error", "a command must be an object")
     op = str(command.get("op") or "")
     try:
-        profile, _secrets = store.resolve(command.get("datasource"))
+        profile, secrets = store.resolve(command.get("datasource"))
     except store.StoreError as error:
         return _fail(error.code, error.message, getattr(error, "hint", None))
+
+    if op == "refresh_catalog":
+        try:
+            return _refresh_catalog(profile)
+        except Exception as error:  # noqa: BLE001 - keep the one-line protocol
+            return _fail("db_error", f"{type(error).__name__}: {error}")
 
     if op == "export":
         return {
@@ -99,7 +144,7 @@ def run(command: dict) -> dict:
         applied = bundle.apply_import(profile, plan)
         return {"ok": True, "applied": applied}
 
-    return _fail("user_error", f"unknown op {op!r}", "export, preview, import or undo")
+    return _fail("user_error", f"unknown op {op!r}", "refresh_catalog, export, preview, import or undo")
 
 
 def main() -> None:

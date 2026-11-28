@@ -202,6 +202,46 @@ def _source(profile: dict) -> dict:
     }
 
 
+def _remember_catalog(profile: dict, tables=(), columns=()) -> None:
+    """Fold metadata just read into the local catalog cache, without querying data.
+
+    `list_tables` contributes table names, `describe_table` contributes typed
+    columns and `discover_relations` contributes column names on both ends. Each
+    call merges into what is already cached, so a walk through the panel builds a
+    usable directory over time. The write is best-effort: a broken cache must not
+    turn a successful metadata read into an error.
+    """
+    try:
+        catalog = store.load_catalog(profile) or {"tables": {}}
+        known = catalog.get("tables")
+        if not isinstance(known, dict):
+            known = {}
+            catalog["tables"] = known
+        for name in tables or ():
+            entry = known.setdefault(str(name), {})
+            if not isinstance(entry, dict):
+                entry = {}
+                known[str(name)] = entry
+            entry.setdefault("columns", {})
+        for table, column, type_name in columns or ():
+            entry = known.setdefault(str(table), {})
+            if not isinstance(entry, dict):
+                entry = {}
+                known[str(table)] = entry
+            cols = entry.get("columns")
+            if not isinstance(cols, dict):
+                cols = {}
+                entry["columns"] = cols
+            key = str(column)
+            # A union from foreign keys has no type; never let it erase a type
+            # a describe_table call already recorded for the same column.
+            if key not in cols or cols[key] is None or type_name is not None:
+                cols[key] = type_name
+        store.save_catalog(profile, catalog)
+    except Exception:  # noqa: BLE001 - the cache is an aid, never the answer
+        pass
+
+
 def _inline_profile(kind: str, config: Any, read_only: Optional[bool]) -> dict:
     if not isinstance(config, dict):
         raise store.StoreError("user_error", "inline test needs a config object", "pass kind plus config")
@@ -395,6 +435,7 @@ def list_tables(datasource: Optional[str] = None, schema: Optional[str] = None) 
             result = engines.list_tables(profile, connection, schema)
         finally:
             close()
+        _remember_catalog(profile, tables=[t.get("name") for t in (result.get("tables") or []) if isinstance(t, dict)])
         return {"ok": True, "datasource": _source(profile), **result}
     except Exception as error:  # noqa: BLE001
         return _error(error)
@@ -420,6 +461,9 @@ def describe_table(table: str, datasource: Optional[str] = None, schema: Optiona
             result = engines.describe_table(profile, connection, table, schema)
         finally:
             close()
+        _remember_catalog(profile, columns=[
+            (table, c.get("name"), c.get("type")) for c in (result.get("columns") or []) if isinstance(c, dict)
+        ])
         return {"ok": True, "datasource": _source(profile), **result}
     except Exception as error:  # noqa: BLE001
         return _error(error)
@@ -527,6 +571,11 @@ def discover_relations(datasource: Optional[str] = None, schema: Optional[str] =
         finally:
             close()
         result = relations.import_edges(profile, found.get("relations") or [])
+        _remember_catalog(profile, columns=[
+            (r.get("table"), r.get("column"), None) for r in (found.get("relations") or []) if isinstance(r, dict)
+        ] + [
+            (r.get("refTable"), r.get("refColumn"), None) for r in (found.get("relations") or []) if isinstance(r, dict)
+        ])
         return {"ok": True, "datasource": _source(profile), **result}
     except Exception as error:  # noqa: BLE001
         return _error(error)

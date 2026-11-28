@@ -344,12 +344,18 @@ window.__ModuleLoader__.load({
         'share.statusOriginal': 'Use the sender status (when the catalog allows)',
         'share.statusPendingAll': 'Make every join pending',
         'share.noCatalog': 'No cached catalog for this source — nothing was checked, so every join arrives pending.',
+        'share.refreshCatalog': 'Refresh directory',
+        'share.refreshCatalogHint': 'Read table and column metadata only — no row data. Click to refresh the cached directory.',
+        'share.catalogRefreshed': 'Directory refreshed: {n} table(s).',
+        'share.catalogAge': 'Directory cached {age} ago',
+        'share.staleCatalog': 'This directory cache is over 7 days old — refresh it before trusting the status match. You can still continue.',
         'share.downgraded': 'Lowered to pending (trust is never inherited):',
         'share.reason.missing_table': 'missing table',
         'share.reason.missing_column': 'missing column',
         'share.reason.type_incompatible': 'incompatible types',
         'share.reason.not_checked': 'catalog not checked',
         'share.reason.pending_all': 'imported as pending by choice',
+        'share.reason.stale_cache': 'cached directory is old',
         'share.stalePreview': 'The graph changed since the preview — look at the new preview and confirm again.',
         'graph.title': 'Relation graph',
         'graph.hint': 'Every join this datasource knows about. An edge is a claim, so it only gets followed once you have confirmed it — pending edges are listed but never walked.',
@@ -938,12 +944,18 @@ window.__ModuleLoader__.load({
         'share.statusOriginal': '按原状态导入（目录允许时）',
         'share.statusPendingAll': '全部作为待确认',
         'share.noCatalog': '这个数据源没有已缓存的目录——未作对照，所有连接都按待确认导入。',
+        'share.refreshCatalog': '刷新目录',
+        'share.refreshCatalogHint': '只读表和列的元数据，不读业务数据。点击可刷新缓存的目录。',
+        'share.catalogRefreshed': '目录已刷新：{n} 张表。',
+        'share.catalogAge': '目录缓存于 {age} 前',
+        'share.staleCatalog': '这份目录缓存已超过 7 天——建议先刷新再相信状态对照。你仍可继续。',
         'share.downgraded': '降为待确认（信任不可继承）：',
         'share.reason.missing_table': '缺少表',
         'share.reason.missing_column': '缺少列',
         'share.reason.type_incompatible': '类型不兼容',
         'share.reason.not_checked': '未对照目录',
         'share.reason.pending_all': '选择按待确认导入',
+        'share.reason.stale_cache': '目录缓存较旧',
         'share.stalePreview': '预览之后关系图有变化——请查看新的预览再确认。',
         'graph.title': '关系图',
         'graph.hint': '这个数据源知道的所有表间连接。一条边是一个「说法」，只有你确认过才会被跟随——待确认的边会列出来，但从不参与追踪。',
@@ -7140,6 +7152,25 @@ function groupTables(tables) {
           setShareBusy(false)
         }
       }
+      const refreshCatalog = async () => {
+        // The only action in this tab that opens a database connection, and it
+        // reads catalog metadata only — a person asked for it by clicking.
+        setShareBusy(true)
+        setShareError(null)
+        try {
+          const data = await apiPost('/bundle/refresh-catalog', { datasource: shareTarget })
+          if (!data || data.ok === false) {
+            setShareError(bundleFailure(data))
+            return
+          }
+          setShareNotice(fmt(t('share.catalogRefreshed'), { n: data.tableCount || 0 }))
+          setSharePreview(null)
+        } catch (error) {
+          setShareError(String((error && error.message) || error))
+        } finally {
+          setShareBusy(false)
+        }
+      }
       const parseBundle = () => {
         const text = String(shareBundle || '').trim()
         if (!text) return null
@@ -8721,7 +8752,25 @@ function groupTables(tables) {
           type_incompatible: t('share.reason.type_incompatible'),
           not_checked: t('share.reason.not_checked'),
           pending_all: t('share.reason.pending_all'),
+          stale_cache: t('share.reason.stale_cache'),
         }
+        // How old is the cached directory? The server stamps it on every write;
+        // a stamp older than seven days is only a hint, never enough to vouch
+        // for a sender's confirmation.
+        const catalogSavedAt = sharePreview && sharePreview.catalogSavedAt
+        const catalogAge = (() => {
+          if (!catalogSavedAt) return null
+          const saved = Date.parse(catalogSavedAt)
+          if (!Number.isFinite(saved)) return null
+          return Math.max(0, Date.now() - saved)
+        })()
+        const catalogStale = Boolean(sharePreview && sharePreview.catalogStale)
+        const catalogAgeText = (() => {
+          if (catalogAge === null) return t('share.noCatalog')
+          const minutes = Math.floor(catalogAge / 60000)
+          const amount = minutes >= 1440 ? `${Math.floor(minutes / 1440)}d` : `${Math.max(1, minutes)}m`
+          return fmt(t('share.catalogAge'), { age: amount })
+        })()
         return h(
           Card,
           { title: t('share.title') },
@@ -8749,6 +8798,17 @@ function groupTables(tables) {
               'button',
               { type: 'button', className: 'dbmcp-btn is-primary', disabled: shareBusy, onClick: () => void exportBundle() },
               t('share.export'),
+            ),
+            h(
+              'button',
+              {
+                type: 'button',
+                className: 'dbmcp-btn',
+                disabled: shareBusy || !shareTarget,
+                title: t('share.refreshCatalogHint'),
+                onClick: () => void refreshCatalog(),
+              },
+              t('share.refreshCatalog'),
             ),
           ),
           h(
@@ -8822,6 +8882,9 @@ function groupTables(tables) {
                 ),
                 sharePreview.catalogHint
                   ? h('p', { className: 'dbmcp-hint is-warn' }, t('share.noCatalog'))
+                  : h('p', { className: 'dbmcp-hint' }, catalogAgeText),
+                catalogStale
+                  ? h('p', { className: 'dbmcp-hint is-warn' }, t('share.staleCatalog'))
                   : null,
                 downgraded.length
                   ? h(

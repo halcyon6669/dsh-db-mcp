@@ -3674,6 +3674,14 @@ export function createHost(options = {}) {
         });
         return sendJson(response, result.ok === false ? 400 : 200, result);
       }
+      if (route === "/bundle/refresh-catalog") {
+        // A person pressed "refresh directory": read metadata only, no row data.
+        const result = await callBundleCli({
+          op: "refresh_catalog",
+          datasource: trimmed(payload.datasource) || undefined,
+        });
+        return sendJson(response, result.ok === false ? 400 : 200, result);
+      }
       if (route === "/mcp/start" || route === "/mcp/restart") {
         const state =
           route === "/mcp/start"

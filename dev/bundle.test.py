@@ -420,6 +420,7 @@ class StatusFromCatalog(unittest.TestCase):
 
     def _catalog(self):
         return {
+            "savedAt": bundle._now(),
             "tables": {
                 "t_order": {"columns": {"id": "integer", "code": "character varying(16)"}},
                 "t_line": {"columns": {"order_id": "integer", "sku": "character varying(32)"}},
@@ -519,7 +520,44 @@ class StatusFromCatalog(unittest.TestCase):
         catalog = self._catalog()
         self.assertIsNone(store.load_catalog(self.profile))
         store.save_catalog(self.profile, catalog)
-        self.assertEqual(store.load_catalog(self.profile), catalog)
+        loaded = store.load_catalog(self.profile)
+        self.assertEqual(loaded["tables"], catalog["tables"])
+        self.assertTrue(loaded.get("savedAt"), "a written cache carries its read time")
+
+    def test_a_fresh_timestamped_catalog_keeps_a_confirmation(self):
+        catalog = self._catalog()
+        catalog["savedAt"] = bundle._now()
+        result = bundle.import_bundle(self.profile, self._payload(self._wire("trusted")), catalog=catalog)
+        self.assertEqual(result["relationsDoc"]["edges"][0]["status"], "confirmed")
+        self.assertFalse(result.get("catalogStale"))
+
+    def test_a_catalog_without_a_timestamp_is_old_and_downgrades_with_a_reason(self):
+        # A cache written before timestamps existed is honest about being old:
+        # it cannot vouch for today's types, so nothing is promoted from it.
+        catalog = self._catalog()
+        catalog.pop("savedAt")
+        result = bundle.import_bundle(self.profile, self._payload(self._wire("trusted")), catalog=catalog)
+        self.assertEqual(result["relationsDoc"]["edges"][0]["status"], "pending")
+        self.assertTrue(result.get("catalogStale"))
+        self.assertTrue(any(item.get("reason") == "stale_cache" for item in result.get("downgraded", [])))
+
+    def test_a_seven_day_old_catalog_is_stale(self):
+        import datetime
+
+        old = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=8)).isoformat()
+        catalog = self._catalog()
+        catalog["savedAt"] = old
+        result = bundle.import_bundle(self.profile, self._payload(self._wire("trusted")), catalog=catalog)
+        self.assertEqual(result["relationsDoc"]["edges"][0]["status"], "pending")
+        self.assertTrue(result.get("catalogStale"))
+        self.assertTrue(any(item.get("reason") == "stale_cache" for item in result.get("downgraded", [])))
+
+    def test_a_recent_catalog_is_fresh_and_reports_its_age(self):
+        catalog = self._catalog()
+        catalog["savedAt"] = bundle._now()
+        result = bundle.import_bundle(self.profile, self._payload(self._wire("trusted")), catalog=catalog)
+        self.assertFalse(result.get("catalogStale"))
+        self.assertEqual(result.get("catalogSavedAt"), catalog["savedAt"])
 
 
 if __name__ == "__main__":
