@@ -151,8 +151,10 @@ Failures come back as `{ ok: false, error: { code, message, hint? } }` with
 ## Files
 
 All under `$DSH_HOME/db-mcp` (override with the `runtimeDir` option), mode `0600`,
-written atomically via a temporary file plus rename. `secret.key` is created once
-and never rewritten by the Host.
+written atomically via a temporary file plus rename. On POSIX the files and the
+temporary files are set to `0600`; on Windows they rely on the user directory's
+default access control, which is why the runtime directory should stay under the
+user's own profile. `secret.key` is created once and never rewritten by the Host.
 
 `datasources.json`
 
@@ -767,6 +769,12 @@ writes its own lines rather than leaving none. The Host's own stdio child is sta
 without the variable and has its calls recorded by the Host, so a call never produces two
 lines. `auditLog: false` in `settings.json` stops the Python writer too — it re-reads the
 file on every call, so no restart is needed.
+
+Only the shape of a statement is logged: string literals inside it are replaced by
+`?` before the line is written, but the code does not parse SQL — an unusual
+literal spelling may still appear. **Treat the audit file as a sensitive file:**
+literals from a statement may end up in it. Result rows, bound values and passwords
+are never written.
 
 `client` says who made the call. The Host stamps `dsh-agent` for the stdio child it
 drives on the agent's behalf, and `panel` for the calls the panel's own probe route
