@@ -34,6 +34,7 @@ window.__ModuleLoader__.load({
       { id: 'runtime' },
       { id: 'tools' },
       { id: 'audit' },
+      { id: 'share' },
     ]
 
     /** Tab labels stay literal so the i18n check can see every key. */
@@ -47,6 +48,7 @@ window.__ModuleLoader__.load({
       if (id === 'clients') return t('tab.clients')
       if (id === 'tools') return t('tab.tools')
       if (id === 'audit') return t('tab.audit')
+      if (id === 'share') return t('tab.share')
       return t('tab.list')
     }
 
@@ -61,6 +63,7 @@ window.__ModuleLoader__.load({
       if (mode === 'clients') return 'clients'
       if (mode === 'tools') return 'tools'
       if (mode === 'audit') return 'audit'
+      if (mode === 'share') return 'share'
       return 'list'
     }
     const API = '/plugins/db-mcp/api'
@@ -316,6 +319,27 @@ window.__ModuleLoader__.load({
         'tab.clients': 'Connect',
       'tab.tools': 'Tools',
         'tab.audit': 'Audit log',
+        'tab.share': 'Share',
+        'share.title': 'Share a graph',
+        'share.hint': 'Export the relation graph and every scene as one JSON file. A bundle carries no passwords or connection details — only the joins and the business reading of them. Import previews the changes before writing anything.',
+        'share.source': 'Data source',
+        'share.export': 'Export a bundle',
+        'share.exportDone': 'Bundle downloaded — {edges} join(s), {scenes} scene(s).',
+        'share.importLabel': 'Paste a bundle to import',
+        'share.importPlaceholder': '{ "kind": "db-mcp-bundle", ... }',
+        'share.preview': 'Preview changes',
+        'share.previewDone': 'Would add {imported} join(s) and {scenes} scene(s).',
+        'share.fingerprint': 'Bundle fingerprint',
+        'share.fingerprintMatch': 'same set of endpoints as this graph',
+        'share.fingerprintMismatch': 'a different set of endpoints — the joins may not belong to this database',
+        'share.conflicts': 'Kept the local condition for these joins',
+        'share.stale': 'Missing tables (marked stale)',
+        'share.confirm': 'Import for real',
+        'share.importDone': 'Imported — {imported} join(s), {scenes} scene(s).',
+        'share.undo': 'Undo this import',
+        'share.undoDone': 'Removed the joins and scenes from that import.',
+        'share.needBundle': 'Paste a bundle first.',
+        'share.error': 'The bundle was not accepted.',
         'graph.title': 'Relation graph',
         'graph.hint': 'Every join this datasource knows about. An edge is a claim, so it only gets followed once you have confirmed it — pending edges are listed but never walked.',
         'graph.busy': 'working…',
@@ -878,6 +902,27 @@ window.__ModuleLoader__.load({
         'tab.clients': '接入其它客户端',
       'tab.tools': '工具',
         'tab.audit': '审计日志',
+        'tab.share': '分享',
+        'share.title': '分享关系图',
+        'share.hint': '把关系图和所有场景导出成一个 JSON 文件。包里没有口令和连接信息，只有连接关系和它们的业务读法。导入会先预览改动，确认后才落盘。',
+        'share.source': '数据源',
+        'share.export': '导出包',
+        'share.exportDone': '包已下载——{edges} 条连接、{scenes} 个场景。',
+        'share.importLabel': '粘贴要导入的包',
+        'share.importPlaceholder': '{ "kind": "db-mcp-bundle", ... }',
+        'share.preview': '预览改动',
+        'share.previewDone': '将新增 {imported} 条连接、{scenes} 个场景。',
+        'share.fingerprint': '包指纹',
+        'share.fingerprintMatch': '与当前图的端点集合一致',
+        'share.fingerprintMismatch': '端点集合不同——这些连接可能不属于这个库',
+        'share.conflicts': '这些连接保留了本地条件',
+        'share.stale': '缺失的表（标记为过期）',
+        'share.confirm': '正式导入',
+        'share.importDone': '已导入——{imported} 条连接、{scenes} 个场景。',
+        'share.undo': '撤销本次导入',
+        'share.undoDone': '已移除那次导入的连接和场景。',
+        'share.needBundle': '请先粘贴一个包。',
+        'share.error': '这个包未被接受。',
         'graph.title': '关系图',
         'graph.hint': '这个数据源知道的所有表间连接。一条边是一个「说法」，只有你确认过才会被跟随——待确认的边会列出来，但从不参与追踪。',
         'graph.busy': '处理中…',
@@ -3478,6 +3523,26 @@ window.__ModuleLoader__.load({
       .dbmcp-input.is-invalid:focus {
         border-color: var(--dsw-alias-state-error-primary);
         box-shadow: 0 0 0 3px color-mix(in srgb, var(--dsw-alias-state-error-primary) 18%, transparent);
+      }
+      /* A pasted bundle is one paragraph of JSON, so it wraps instead of
+         scrolling sideways inside a card. */
+      .dbmcp-bundle-text {
+        min-height: 96px;
+        resize: vertical;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 12px;
+        line-height: 1.5;
+        overflow-wrap: anywhere;
+      }
+      .dbmcp-share-preview {
+        margin-top: 12px;
+        padding: 10px 12px;
+        border: 1px solid var(--dsw-alias-border-l1);
+        border-radius: 8px;
+        background: var(--dsw-alias-bg-layer-1);
+      }
+      .dbmcp-share-preview .dbmcp-label {
+        margin-top: 6px;
       }
       .dbmcp-hint {
         font-size: 12px;
@@ -6359,6 +6424,15 @@ function groupTables(tables) {
       const [graphReason, setGraphReason] = React.useState('')
       const [graphCondition, setGraphCondition] = React.useState(null)
       const [graphConditionDraft, setGraphConditionDraft] = React.useState('')
+      /* Sharing moves a whole graph + scenes through one JSON bundle. The pasted
+         text and the last preview are transient: a bundle can carry somebody's
+         table names, so neither is written to the browser store. */
+      const [shareBundle, setShareBundle] = React.useState('')
+      const [sharePreview, setSharePreview] = React.useState(null)
+      const [shareLastImport, setShareLastImport] = React.useState('')
+      const [shareBusy, setShareBusy] = React.useState(false)
+      const [shareError, setShareError] = React.useState(null)
+      const [shareNotice, setShareNotice] = React.useState(null)
       /* The trace form is remembered field by field, not as a whole: the value
          and the datasource are what a reader re-types most often. */
       const [traceValue, setTraceValue] = React.useState(() => String(savedPanel.traceValue || ''))
@@ -7001,6 +7075,120 @@ function groupTables(tables) {
           if (picked) remember('graphRoot', setGraphRoot)(String(picked))
         } catch (error) {
           setNotice({ message: String((error && error.message) || error), isError: true })
+        }
+      }
+
+      /* Sharing: export is a GET the browser saves as a file; import is two
+         POSTs — preview first (pure, writes nothing) then confirm. Nothing here
+         is remembered between mounts: a bundle can carry another team's table
+         names, so neither the pasted text nor the preview goes to localStorage. */
+      const shareSource = () => graphSource || (sources[0] && sources[0].id) || ''
+      /* Resolved once per render so every action below sends the same datasource. */
+      const shareTarget = shareSource()
+      const bundleFailure = (data) => {
+        const error = (data && data.error) || {}
+        return error.message || error.code || t('share.error')
+      }
+      const exportBundle = async () => {
+        setShareBusy(true)
+        setShareError(null)
+        try {
+          const data = await apiGet(`/bundle/export?datasource=${encodeURIComponent(shareTarget)}`)
+          if (!data || data.ok === false) {
+            setShareError(bundleFailure(data))
+            return
+          }
+          const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+          const url = URL.createObjectURL(blob)
+          const link = document.createElement('a')
+          link.href = url
+          link.download = `db-mcp-bundle-${Date.now()}.json`
+          document.body.appendChild(link)
+          link.click()
+          link.remove()
+          URL.revokeObjectURL(url)
+          setShareNotice(fmt(t('share.exportDone'), { edges: (data.edges || []).length, scenes: (data.scenes || []).length }))
+        } catch (error) {
+          setShareError(String((error && error.message) || error))
+        } finally {
+          setShareBusy(false)
+        }
+      }
+      const parseBundle = () => {
+        const text = String(shareBundle || '').trim()
+        if (!text) return null
+        try {
+          return JSON.parse(text)
+        } catch (error) {
+          setShareError(String((error && error.message) || error))
+          return null
+        }
+      }
+      const previewBundle = async () => {
+        const payload = parseBundle()
+        if (!payload) {
+          setShareError(t('share.needBundle'))
+          return
+        }
+        setShareBusy(true)
+        setShareError(null)
+        setSharePreview(null)
+        try {
+          const data = await apiPost('/bundle/preview', { datasource: shareTarget, payload })
+          if (!data || data.ok === false) {
+            setShareError(bundleFailure(data))
+            return
+          }
+          setSharePreview(data)
+          setShareNotice(fmt(t('share.previewDone'), { imported: data.imported || 0, scenes: (data.scenes || []).length || 0 }))
+        } catch (error) {
+          setShareError(String((error && error.message) || error))
+        } finally {
+          setShareBusy(false)
+        }
+      }
+      const importBundleForReal = async () => {
+        const payload = parseBundle()
+        if (!payload) {
+          setShareError(t('share.needBundle'))
+          return
+        }
+        setShareBusy(true)
+        setShareError(null)
+        try {
+          const data = await apiPost('/bundle/import', { datasource: shareTarget, payload })
+          if (!data || data.ok === false) {
+            setShareError(bundleFailure(data))
+            return
+          }
+          setShareLastImport(data.importId || '')
+          setShareNotice(fmt(t('share.importDone'), { imported: data.imported || 0, scenes: (data.scenes || []).length || 0 }))
+          setSharePreview(null)
+          setShareBundle('')
+          await loadGraph()
+        } catch (error) {
+          setShareError(String((error && error.message) || error))
+        } finally {
+          setShareBusy(false)
+        }
+      }
+      const undoBundleImport = async () => {
+        if (!shareLastImport) return
+        setShareBusy(true)
+        setShareError(null)
+        try {
+          const data = await apiPost('/bundle/undo', { datasource: shareTarget, importId: shareLastImport })
+          if (!data || data.ok === false) {
+            setShareError(bundleFailure(data))
+            return
+          }
+          setShareLastImport('')
+          setShareNotice(t('share.undoDone'))
+          await loadGraph()
+        } catch (error) {
+          setShareError(String((error && error.message) || error))
+        } finally {
+          setShareBusy(false)
         }
       }
 
@@ -8480,6 +8668,119 @@ function groupTables(tables) {
           ),
           h('p', { className: 'dbmcp-hint' }, t('clients.stdioNote')),
         )
+
+      /** Share a graph with another machine: one JSON bundle, a preview, then a confirm. */
+      const renderShare = () => {
+        const conflicts = (sharePreview && sharePreview.conflicts) || []
+        const stale = (sharePreview && sharePreview.stale) || []
+        const scenes = (sharePreview && sharePreview.scenes) || []
+        return h(
+          Card,
+          { title: t('share.title') },
+          h('p', { className: 'dbmcp-hint' }, t('share.hint')),
+          h(
+            'div',
+            { className: 'dbmcp-inline' },
+            h('span', { className: 'dbmcp-label' }, t('share.source')),
+            h(
+              'select',
+              {
+                className: 'dbmcp-select',
+                value: shareSource(),
+                'aria-label': t('share.source'),
+                onChange: (event) => remember('graphSource', setGraphSource)(event.target.value),
+              },
+              h('option', { value: '' }, t('sources.default')),
+              sources.map((source) => h('option', { key: source.id, value: source.id }, source.name || source.id)),
+            ),
+          ),
+          h(
+            'div',
+            { className: 'dbmcp-inline' },
+            h(
+              'button',
+              { type: 'button', className: 'dbmcp-btn is-primary', disabled: shareBusy, onClick: () => void exportBundle() },
+              t('share.export'),
+            ),
+          ),
+          h(
+            'label',
+            { className: 'dbmcp-cell' },
+            h('span', { className: 'dbmcp-label' }, t('share.importLabel')),
+            h('textarea', {
+              className: 'dbmcp-textarea dbmcp-bundle-text',
+              value: shareBundle,
+              placeholder: t('share.importPlaceholder'),
+              'aria-label': t('share.importLabel'),
+              rows: 6,
+              onChange: (event) => setShareBundle(event.target.value),
+            }),
+          ),
+          h(
+            'div',
+            { className: 'dbmcp-inline' },
+            h(
+              'button',
+              { type: 'button', className: 'dbmcp-btn', disabled: shareBusy || !shareBundle, onClick: () => void previewBundle() },
+              t('share.preview'),
+            ),
+            sharePreview
+              ? h(
+                  'button',
+                  { type: 'button', className: 'dbmcp-btn is-primary', disabled: shareBusy, onClick: () => void importBundleForReal() },
+                  t('share.confirm'),
+                )
+              : null,
+            shareLastImport
+              ? h(
+                  'button',
+                  { type: 'button', className: 'dbmcp-btn', disabled: shareBusy, onClick: () => void undoBundleImport() },
+                  t('share.undo'),
+                )
+              : null,
+          ),
+          shareError ? h('p', { className: 'dbmcp-hint is-error' }, shareError) : null,
+          shareNotice ? h('p', { className: 'dbmcp-hint' }, shareNotice) : null,
+          sharePreview
+            ? h(
+                'div',
+                { className: 'dbmcp-share-preview' },
+                h(
+                  'p',
+                  { className: 'dbmcp-hint' },
+                  h('span', { className: 'dbmcp-label' }, `${t('share.fingerprint')}: `),
+                  h('code', null, sharePreview.fingerprint || '—'),
+                  ' — ',
+                  sharePreview.fingerprintMatches ? t('share.fingerprintMatch') : t('share.fingerprintMismatch'),
+                ),
+                sharePreview.importId
+                  ? h('p', { className: 'dbmcp-hint' }, h('span', { className: 'dbmcp-label' }, `${t('share.undo')}: `), h('code', null, sharePreview.importId))
+                  : null,
+                conflicts.length
+                  ? h(
+                      'div',
+                      null,
+                      h('p', { className: 'dbmcp-label' }, t('share.conflicts')),
+                      conflicts.map((item, index) =>
+                        h('p', { key: index, className: 'dbmcp-hint' }, `${item.table}.${item.column}`),
+                      ),
+                    )
+                  : null,
+                stale.length
+                  ? h(
+                      'div',
+                      null,
+                      h('p', { className: 'dbmcp-label' }, t('share.stale')),
+                      stale.map((item, index) => h('p', { key: index, className: 'dbmcp-hint' }, String(item))),
+                    )
+                  : null,
+                scenes.length
+                  ? h('p', { className: 'dbmcp-hint' }, fmt(t('share.previewDone'), { imported: sharePreview.imported || 0, scenes: scenes.length }))
+                  : null,
+              )
+            : null,
+        )
+      }
 
       /** Which tools the agent can see at all; the Python server still serves all of them. */
       const renderTools = () =>
@@ -11556,6 +11857,7 @@ function groupTables(tables) {
           tab !== 'clients' ? null : renderClients(),
           tab !== 'tools' ? null : renderTools(),
           tab !== 'tools' ? null : renderResults(),
+          tab !== 'share' ? null : renderShare(),
           tab !== 'audit'
             ? null
             : h(            Card,

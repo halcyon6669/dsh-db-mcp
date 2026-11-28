@@ -329,6 +329,28 @@ merged when a later scan finds the same join written somewhere else.
 A project that only uses `BaseMapper` and single-table wrappers has no join in it.
 Zero is the correct answer there, not an error.
 
+## Sharing a graph
+
+The **Share** page moves a whole graph — the joins and all the scenes of one data
+source — to another machine as a single JSON file. It carries no passwords,
+connection details or result rows, so it is safe to paste into a ticket.
+
+- **Export a bundle** downloads that JSON. The count line tells you how many
+  joins and scenes went in.
+- To import, paste someone else's bundle and press **Preview changes** first.
+  Nothing is written at this step. The preview shows the bundle fingerprint (a
+  short hash of its endpoints, so you can tell whether it describes the same set
+  of tables), any joins whose condition differs from the local one or is missing
+  locally, and keys that point at tables your catalogue no longer has. Those
+  conditions are *not* adopted, and those keys are marked stale.
+- **Import for real** applies the previewed plan atomically. Every join imported
+  this way arrives **pending** with source `imported` and needs three local
+  confirmations before it can guide a walk — a bundle never inherits the
+  sender's trust. Scene ids are regenerated, so an import cannot overwrite one
+  of your scenes by id.
+- If the bundle was not what you wanted, **Undo this import** removes exactly the
+  joins and scenes that import added and leaves everything else alone.
+
 ## Scenes
 
 A scene is a name for a set of tables — "order to cash" — so a walk can be scoped to

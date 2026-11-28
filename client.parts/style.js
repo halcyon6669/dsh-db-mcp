@@ -2271,6 +2271,26 @@
         border-color: var(--dsw-alias-state-error-primary);
         box-shadow: 0 0 0 3px color-mix(in srgb, var(--dsw-alias-state-error-primary) 18%, transparent);
       }
+      /* A pasted bundle is one paragraph of JSON, so it wraps instead of
+         scrolling sideways inside a card. */
+      .dbmcp-bundle-text {
+        min-height: 96px;
+        resize: vertical;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 12px;
+        line-height: 1.5;
+        overflow-wrap: anywhere;
+      }
+      .dbmcp-share-preview {
+        margin-top: 12px;
+        padding: 10px 12px;
+        border: 1px solid var(--dsw-alias-border-l1);
+        border-radius: 8px;
+        background: var(--dsw-alias-bg-layer-1);
+      }
+      .dbmcp-share-preview .dbmcp-label {
+        margin-top: 6px;
+      }
       .dbmcp-hint {
         font-size: 12px;
         color: var(--dsw-alias-label-secondary);

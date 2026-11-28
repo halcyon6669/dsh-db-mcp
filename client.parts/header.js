@@ -30,6 +30,7 @@ window.__ModuleLoader__.load({
       { id: 'runtime' },
       { id: 'tools' },
       { id: 'audit' },
+      { id: 'share' },
     ]
 
     /** Tab labels stay literal so the i18n check can see every key. */
@@ -43,6 +44,7 @@ window.__ModuleLoader__.load({
       if (id === 'clients') return t('tab.clients')
       if (id === 'tools') return t('tab.tools')
       if (id === 'audit') return t('tab.audit')
+      if (id === 'share') return t('tab.share')
       return t('tab.list')
     }
 
@@ -57,6 +59,7 @@ window.__ModuleLoader__.load({
       if (mode === 'clients') return 'clients'
       if (mode === 'tools') return 'tools'
       if (mode === 'audit') return 'audit'
+      if (mode === 'share') return 'share'
       return 'list'
     }
     const API = '/plugins/db-mcp/api'

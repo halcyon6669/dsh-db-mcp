@@ -654,6 +654,45 @@ The panel has two pages that talk to the graph, and neither of them accepts SQL:
   feeds the edge that carried it — so the page is also the place where a walk
   teaches the graph. Edges that were not followed because they are still pending
   are listed separately, with a pointer back to the Relations page.
+- **Share** exports the relation graph and every scene of one data source into a
+  single JSON bundle, and imports a bundle from another machine. A bundle carries
+  no passwords, connection details or result rows — only the joins (endpoints,
+  condition, note and the `file:line` places) and the scenes (tables, stages,
+  business keys, weak links). Import is two-step: **Preview changes** computes the
+  plan without writing anything and shows the whole-bundle fingerprint, any joins
+  whose condition conflicts with the local one, and keys that point at tables the
+  catalogue no longer has; only **Import for real** writes, and it does so
+  atomically across both files. Every imported edge arrives `pending` with
+  `source: "imported"` and its own `importId`, so it still needs three local
+  confirmations before it can be trusted, and **Undo this import** removes exactly
+  the edges and scenes that import added.
+
+### Sharing a graph between machines
+
+The panel's Share page is backed by four host routes — `GET /bundle/export`,
+`POST /bundle/preview`, `POST /bundle/import` and `POST /bundle/undo` — served
+with the same origin check as every other panel write and no new MCP tool. The
+Host calls a thin stdin/stdout Python CLI (`server/bundle_cli.py`) that reuses the
+same pure functions in `server/bundle.py`, so the agent's tool catalog stays at
+its current size. All of the bundle logic lives in `server/bundle.py`:
+
+- `export_bundle(relations, scenes, datasource)` is pure: it copies only the
+  allow-listed fields, drops every status, counter, history and source, and adds
+  a whole-bundle fingerprint — the SHA-1, first 12 hex characters, of every
+  `table.column` endpoint sorted and case-folded. That fingerprint is a hint
+  about whether two bundles describe the same schema; it is never an identity.
+- `import_bundle(...)` is also pure and returns the *plan* — `imported`,
+  `updated`, `skipped`, `conflicts`, `unknown`, stale keys, the fingerprint and
+  whether it matches the local graph — plus the two documents it *would* write.
+  It ignores any per-edge fingerprint in the file and recomputes each edge id
+  from the normalized endpoints, reusing the local `edge_id` rule, so a forged id
+  cannot smuggle an edge in. Imported scenes get a fresh id. Strings, edge counts,
+  scene counts and package bytes are bounded by constants; an unknown
+  `schemaVersion` is rejected and unknown fields are dropped rather than stored.
+- `apply_import(...)` writes both documents through a temp file plus an atomic
+  replace; if the second write fails, the first file is restored, so a failed
+  import leaves both originals untouched. `undo_import(...)` filters by
+  `importId`, removing only that import's edges and scenes.
 
 ### The panel remembers where it was
 

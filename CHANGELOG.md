@@ -22,6 +22,14 @@ report of each version in more detail.
 ## [Unreleased]
 
 ### Added
+- **Share a graph between machines.** A new **Share** tab exports one data source's
+  relation graph and every scene as a single JSON bundle (no passwords, connection
+  details or result rows), previews an import before writing anything, applies it
+  atomically, and can undo exactly that import by its `importId`. The panel reaches
+  it through `GET /bundle/export` and `POST /bundle/preview|import|undo`, backed by
+  a thin Python CLI — no new MCP tool. Imported edges arrive `pending` with
+  `source: "imported"` and still need three local confirmations; per-edge
+  fingerprints in the file are ignored in favour of locally recomputed ids.
 - **An edge now knows what it costs.** `propose_relation` and `feedback_relation`
   read the target column's index and the table's row estimate from the catalogue
   (`pg_class.reltuples`, `information_schema.TABLES.TABLE_ROWS`, `ALL_TABLES.NUM_ROWS`
@@ -463,6 +471,10 @@ by this section.
   all of the above, so the behaviour is checked on every test run.
 
 ### Fixed
+- **An audit-log review tightened the guarantees.** `load_settings()` no longer
+  carries an unreachable second `return`. Regression tests now assert that a
+  recorded line still omits binding values, a password argument and result rows
+  even when the audit switch is on, so none of them can leak into the log file.
 - **The Scenes / business-key / weak-link pass.** A batch of fixes to how a scene
   is previewed, saved and read: **Try it** now previews the keys in the unsaved draft
   (not only the last saved scene) and a 0-hit key is flagged independently of any

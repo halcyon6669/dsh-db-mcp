@@ -180,10 +180,14 @@ if (panel) {
   const header = collect(panel, (node) => node.type === 'h1')
   check('main panel: title rendered', header.length === 1)
   const tabs = collect(panel, (node) => node.type === 'button' && node.props.role === 'tab')
-  check('main panel: ten tabs', tabs.length === 10, String(tabs.length))
+  check('main panel: eleven tabs', tabs.length === 11, String(tabs.length))
   check(
     'main panel: first tab is active',
-    tabs.length === 10 && tabs[0].props['aria-selected'] === true && tabs[1].props['aria-selected'] === false,
+    tabs.length === 11 && tabs[0].props['aria-selected'] === true && tabs[1].props['aria-selected'] === false,
+  )
+  check(
+    'main panel: the share tab is its own step',
+    mod.__test.TABS.some((tab) => tab.id === 'share') && mod.__test.tabLabel((key) => key, 'share') === 'tab.share',
   )
   check(
     'main panel: the tools tab is its own step',
@@ -202,7 +206,7 @@ if (panel) {
   )
   check(
     'main panel: the tabs line up left to right',
-    tabs.length === 10 && tabs.map((node) => texts(node).join('')).join(',') === order.map((id) => `tab.${id}`).join(','),
+    tabs.length === 11 && tabs.map((node) => texts(node).join('')).join(',') === order.map((id) => `tab.${id}`).join(','),
     tabs.map((node) => texts(node).join('')).join(','),
   )
   const back = collect(panel, (node) => node.type === 'button' && node.props.className === 'dbmcp-back')
@@ -768,6 +772,14 @@ check('audit paging: the button reports a busy state', /auditBusy \? t\('audit\.
 check('audit refresh: the card has a refresh action wired to a handler', /title: t\('audit\.title'\)/.test(source) && /onClick: refreshAudit/.test(source))
 check('audit refresh: it re-reads the current page, not a fresh small one', /const refreshAudit = React\.useCallback/.test(source) && /Math\.max\(AUDIT_PAGE, audit\.entries\.length\)/.test(source))
 check('audit refresh: the button reports the busy state', /disabled: auditBusy,\s*onClick: refreshAudit/.test(source))
+
+// The share tab exports the whole graph + scenes as one JSON bundle and imports
+// it back through a preview/confirm two-step; an import can be undone by id.
+check('share: the tab renders a single card driven by share state', /const renderShare = \(\) =>/.test(source) && /tab !== 'share' \? null : renderShare\(\)/.test(source))
+check('share: export downloads the bundle through the host CLI route', /apiGet\(`\/bundle\/export\?datasource=\$\{encodeURIComponent\(shareTarget\)\}`\)/.test(source) && /createObjectURL/.test(source))
+check('share: import is a two-step preview then confirm', /apiPost\('\/bundle\/preview', \{ datasource: shareTarget, payload \}\)/.test(source) && /apiPost\('\/bundle\/import', \{ datasource: shareTarget, payload \}\)/.test(source))
+check('share: the preview names conflicts and stale keys before applying', /sharePreview\.conflicts/.test(source) && /sharePreview\.stale/.test(source) && /sharePreview\.importId/.test(source))
+check('share: an import can be undone by its importId', /apiPost\('\/bundle\/undo', \{ datasource: shareTarget, importId: shareLastImport \}\)/.test(source))
 
 // Every outside client can be wired up either way: one button writes a stdio
 // command entry, the other writes the shared HTTP endpoint. The chosen form is
