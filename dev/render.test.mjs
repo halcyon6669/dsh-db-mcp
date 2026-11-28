@@ -762,6 +762,13 @@ check('audit paging: the button hides once every entry is shown', /audit\.entrie
 check('audit paging: a page is fetched with a bounded limit', /const AUDIT_PAGE = 12/.test(source) && /Math\.min\(200, audit\.entries\.length \+ AUDIT_PAGE\)/.test(source))
 check('audit paging: the button reports a busy state', /auditBusy \? t\('audit\.loadingMore'\) : t\('audit\.loadMore'\)/.test(source))
 
+// The log keeps growing while the panel is open, so the card carries a refresh
+// that re-reads it in place — without a full reload, and without throwing away
+// how many older entries the reader has already revealed with "load more".
+check('audit refresh: the card has a refresh action wired to a handler', /title: t\('audit\.title'\)/.test(source) && /onClick: refreshAudit/.test(source))
+check('audit refresh: it re-reads the current page, not a fresh small one', /const refreshAudit = React\.useCallback/.test(source) && /Math\.max\(AUDIT_PAGE, audit\.entries\.length\)/.test(source))
+check('audit refresh: the button reports the busy state', /disabled: auditBusy,\s*onClick: refreshAudit/.test(source))
+
 // Every outside client can be wired up either way: one button writes a stdio
 // command entry, the other writes the shared HTTP endpoint. The chosen form is
 // sent explicitly so the Host does not have to guess from the client's shape.

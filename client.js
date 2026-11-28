@@ -6549,6 +6549,27 @@ function groupTables(tables) {
         }
       }, [audit.entries.length, auditBusy])
 
+      /* Re-read the log in place. Keep every entry the reader has already
+         revealed with "load more" — a refresh that snapped back to the first
+         page would look like the older lines had vanished. */
+      const refreshAudit = React.useCallback(async () => {
+        if (auditBusy) return
+        setAuditBusy(true)
+        try {
+          const limit = Math.min(200, Math.max(AUDIT_PAGE, audit.entries.length))
+          const payload = await apiGet(`/audit?limit=${limit}`)
+          setAudit({
+            entries: payload.entries || [],
+            total: payload.total || 0,
+            file: payload.file || null,
+          })
+        } catch {
+          /* keep the entries already on screen */
+        } finally {
+          setAuditBusy(false)
+        }
+      }, [audit.entries.length, auditBusy])
+
       const data = state.data
       const apiOk = state.status === 'ready' && data && data.ok === true
       const sources = (data && data.datasources) || []
@@ -11538,7 +11559,21 @@ function groupTables(tables) {
           tab !== 'audit'
             ? null
             : h(            Card,
-            { title: t('audit.title'), aside: audit.entries.length ? String(audit.entries.length) : null },
+            {
+              title: t('audit.title'),
+              aside: audit.entries.length ? String(audit.entries.length) : null,
+              actions: h(
+                'button',
+                {
+                  type: 'button',
+                  className: 'dbmcp-btn is-small',
+                  title: t('action.refresh'),
+                  disabled: auditBusy,
+                  onClick: refreshAudit,
+                },
+                t('action.refresh'),
+              ),
+            },
             h(
               'div',
               { className: 'dbmcp-audit-list' },
