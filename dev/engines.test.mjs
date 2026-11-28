@@ -33,6 +33,7 @@ const testFiles = [
   join(packageDir, 'dev', 'secretbox.test.py'),
   join(packageDir, 'dev', 'audit.test.py'),
   join(packageDir, 'dev', 'main.test.py'),
+  join(packageDir, 'dev', 'bundle.test.py'),
   join(packageDir, 'dev', 'upgrade.test.py'),
 ]
 
