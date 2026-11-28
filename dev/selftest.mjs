@@ -80,6 +80,24 @@ async function call(method, path, body, headers) {
   return { status: response.status, body: json }
 }
 
+// A bare fetch against a server that was listening a millisecond ago fails
+// occasionally on Windows with `TypeError: fetch failed` — the connection is
+// refused while the listening socket settles, and the whole run dies on an
+// error that says nothing about the code. A few attempts make that race
+// invisible; a real refusal still fails after the last one.
+async function fetchJson(url, attempts = 3) {
+  let last = null
+  for (let index = 0; index < attempts; index += 1) {
+    try {
+      return await fetch(url, { headers: { accept: 'application/json', connection: 'close' } }).then((response) => response.json())
+    } catch (error) {
+      last = error
+      await new Promise((resolve) => setTimeout(resolve, 150))
+    }
+  }
+  throw last
+}
+
 try {
   const health = await call('GET', '/health')
   check('health 200', health.status === 200, `phase=${health.body.plugin?.phase}`)
@@ -778,7 +796,7 @@ try {
     // The migration is fired without being awaited, so give it a moment to land
     // before the first read; the registry write is a single atomic rename.
     await new Promise((resolve) => setTimeout(resolve, 300))
-    const listed = await fetch(`${legacyBase}/datasources`).then((response) => response.json())
+    const listed = await fetchJson(`${legacyBase}/datasources`)
     const allowRow = (listed.datasources || []).find((item) => item.id === 'legacy-allow')
     const denyRow = (listed.datasources || []).find((item) => item.id === 'legacy-deny')
     const writableRow = (listed.datasources || []).find((item) => item.id === 'legacy-writable')

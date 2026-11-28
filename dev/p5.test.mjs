@@ -62,6 +62,22 @@ const post = async (path, body) => {
   return { status: response.status, body: await response.json().catch(() => null) }
 }
 
+/** A free port, taken and released before it is handed to the endpoint.
+ *
+ *  The endpoint used to be started on whatever `settings.httpPort` said (8765 by
+ *  default). A Python child left behind by an earlier run kept that port, so
+ *  `POST /http/start` answered 500 and the failure looked like a code bug
+ *  instead of a leftover process. Asking the OS for an ephemeral port keeps two
+ *  runs from colliding, and the `finally` below stops the child either way.
+ */
+async function freePort() {
+  const probe = createServer()
+  await new Promise((resolve) => probe.listen(0, '127.0.0.1', resolve))
+  const { port } = probe.address()
+  await new Promise((resolve) => probe.close(resolve))
+  return port
+}
+
 try {
   const health = await get('/health')
   check('health exposes settings', Boolean(health.body && health.body.settings), JSON.stringify(health.body.settings))
@@ -262,7 +278,8 @@ try {
   // The endpoint only auto-starts inside a live plugin, so a bare host reports
   // its configured port and a null URL until something starts it.
   const http = await get('/http/status')
-  const started = await post('/http/start', {})
+  const endpointPort = await freePort()
+  const started = await post('/http/start', { port: endpointPort })
   const httpAfter = started.body?.ok === true ? started.body : await get('/http/status')
   check(
     'the HTTP endpoint reports its state',
@@ -274,6 +291,11 @@ try {
     'the endpoint URL points at the streamable path',
     String(startedUrl || '').endsWith('/dsh-db-mcp'),
     String(startedUrl),
+  )
+  check(
+    'the endpoint runs on the port the caller asked for',
+    (started.body?.http || httpAfter.body?.http || httpAfter.body || {}).port === endpointPort,
+    `${endpointPort} -> ${(started.body?.http || httpAfter.body?.http || httpAfter.body || {}).port}`,
   )
 
   /* A settings switch no longer replaces the Python child. The child re-reads
@@ -412,7 +434,7 @@ try {
     JSON.stringify(httpDown.body),
   )
   await post('/settings', { httpEnabled: true })
-  await post('/http/start', {})
+  await post('/http/start', { port: endpointPort })
   const cursorHttp = await post('/clients/configure', { client: 'cursor', transport: 'http' })
   check(
     'a JSON client can be switched to the HTTP endpoint',
@@ -628,6 +650,11 @@ try {
     JSON.stringify(sceneEmptyNote.body).slice(0, 160),
   )
 } finally {
+  // End the endpoint before the handler goes away. `host.dispose()` kills the
+  // child too, but stopping first keeps the intent visible and covers the failing
+  // path as well: a check that throws still reaches this block, so no `python
+  // main.py --http` survives the run and holds a port for the next one.
+  await post('/http/stop', {}).catch(() => {})
   await new Promise((resolve) => server.close(resolve))
   await host.dispose?.().catch(() => {})
   await rm(dir, { recursive: true, force: true })

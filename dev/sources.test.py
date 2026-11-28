@@ -191,6 +191,43 @@ class Skipped(Scanner):
         self.assertEqual(len(sources.statements(self.root, limit=2)), 2)
 
 
+class CarriageReturns(Scanner):
+    """CRLF files must scan exactly like LF ones.
+
+    A Windows checkout with `core.autocrlf=true` hands every file to the reader
+    with `\\r\\n`. Line-anchored regular expressions then match nothing, and the
+    failure is silent: the project looks like it has no joins at all. The fix is
+    `\\r?` before every anchor; this class is the alarm that rings if one loses it.
+    """
+
+    def _write_crlf(self, relative: str, body: str) -> Path:
+        path = self.root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(body.replace("\n", "\r\n").encode("utf-8"))
+        return path
+
+    def test_a_crlf_mapper_yields_the_same_joins(self):
+        self._write_crlf("src/main/resources/mapper/UserMapper.xml", MAPPER)
+        pairs = self._pairs()
+        self.assertIn({("t_order", "user_id"), ("t_user", "id")}, pairs)
+        self.assertIn({("t_line", "order_id"), ("t_order", "id")}, pairs)
+
+    def test_a_crlf_file_reports_the_line_the_statement_opens_on(self):
+        self._write_crlf("src/main/resources/mapper/UserMapper.xml", MAPPER)
+        entries = [item for item in self._scan() if "t_user" in item["sql"]]
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0]["line"], 4, "the select still opens on line 4")
+
+    def test_a_crlf_java_annotation_yields_its_join(self):
+        self._write_crlf("src/main/java/demo/UserMapper.java", JAVA)
+        self.assertIn({("t_product", "category_id"), ("t_category", "id")}, self._pairs())
+
+    def test_a_crlf_statement_carries_no_line_endings_into_sql(self):
+        self._write_crlf("src/main/resources/mapper/UserMapper.xml", MAPPER)
+        for sql in self._sql():
+            self.assertNotIn("\r", sql)
+
+
 class MissingRoot(unittest.TestCase):
     def test_a_root_that_does_not_exist_yields_nothing(self):
         self.assertEqual(sources.statements(Path(tempfile.gettempdir()) / "dbmcp-no-such-dir-xyz"), [])

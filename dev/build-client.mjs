@@ -35,6 +35,16 @@ function main() {
   const target = path.join(root, 'client.js')
   if (process.argv.includes('--check')) {
     const current = fs.readFileSync(target, 'utf8')
+    /* A CRLF here means the file was rewritten by a tool that does not honour
+       `.gitattributes` (`* text=auto eol=lf`) — the whole 500 KB then shows up
+       as changed in every later diff. The build always emits LF, so a carriage
+       return can only come from outside it. Checked before the staleness
+       comparison, because a CRLF file is also "out of date" and the generic
+       message would hide the actual cause. */
+    if (current.includes('\r')) {
+      console.error('client.js contains CRLF line endings: run `node dev/build-client.mjs`')
+      process.exit(1)
+    }
     if (current !== output) {
       console.error('client.js is out of date: run `node dev/build-client.mjs`')
       process.exit(1)

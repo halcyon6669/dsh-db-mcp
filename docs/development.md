@@ -85,6 +85,7 @@ npm run test:changelog # the changelog's structure and its per-version sections
 | `dev/writes.test.py` | the write guard: statement splitting, the DDL opt-in switch, reads and row writes always passing |
 | `dev/secretbox.test.py` | the envelope reader: key file, round trips, aad mismatch, plaintext fallback |
 | `dev/selftest.mjs` | mounts `src/host.js` on a throwaway port: registry, validation, groups, bulk, schema route, DBeaver scan against a DBeaver home the suite writes itself, probes |
+| `dev/infra.test.mjs` | the test infrastructure itself: a `--dir=` run of `selftest.mjs` writes to that path rather than to a folder named after the flag, and leaves no such folder behind |
 | `dev/shims.test.mjs` | mounts `index.js`, checks both routes, `/reload`, tool publication, and that `package.json` has no BOM |
 | `dev/parse.test.mjs` | the connection-string parser (DSN, JDBC, TNS, SID, paths) |
 | `dev/render.test.mjs` | components rendered with a stub React: tab bar, form fields, list, bulk bar, breadcrumbs |
@@ -99,6 +100,47 @@ Oracle port and reports a skip when the container is down, and it skips its quer
 when no SQLite source is registered on this machine, so a green `npm test` never depends
 on what happens to be configured here. The DBeaver check in `selftest.mjs` works the same
 way: the suite writes its own DBeaver home instead of reading the editor's.
+
+Both of those traps now have a regression test, because a fix nobody tests is a fix that
+comes undone. `dev/infra.test.mjs` runs `selftest.mjs` with `--dir=<path>` into a scratch
+directory and asserts the directory exists afterwards (and that no folder named `--dir=…`
+was created beside the checkout) — that is the path-handling half. `dev/sources.test.py`
+class `CarriageReturns` writes the same mapper and Java fixtures with CRLF line endings
+and asserts the scanner finds identical joins and the same line numbers — that is the
+`\r` half. Note what the CRLF test does and does not claim: the scanner normalises
+whitespace rather than anchoring on line ends, so it is CRLF-insensitive by construction
+today, and the test locks that property in rather than repairing a live bug.
+
+### A manual smoke run for the catalog refresh
+
+`dev/manual/catalog-smoke.py` is not part of `npm test` — it needs a database with
+hundreds of tables. It drives the real `bundle_cli.refresh` against a Docker engine,
+creates (or discovers, with `--no-create`) 520 tables, and prints total time, the
+per-table p50 / p95 / max and how many tables timed out. Use it before touching a
+timeout default:
+
+```
+python dev/manual/catalog-smoke.py --kind postgres --port 15433 --user postgres \
+    --password testpass --database postgres --tables 520
+```
+
+It suggests a per-table timeout and a total budget in its output, and deliberately
+changes nothing: the numbers are an argument for a default, not the default itself.
+
+`p5.test.mjs` starts the real HTTP endpoint and therefore starts a real
+`python main.py --http` child. It asks the OS for a free port instead of taking the
+configured one, and it stops the endpoint in a `finally` block before disposing the host,
+so a failing check still ends the child. Both halves matter: a child left behind by an
+earlier run keeps the port, the next `POST /http/start` answers 500, and the failure looks
+like a code bug rather than a leftover process.
+
+## Where the tests run
+
+`publish.yml` runs on `ubuntu-latest` with Node 24 and Python 3.12. The machine this was
+developed on is Windows, and the local numbers in the log come from Node v22.19.0 and the
+plugin's own venv (Python 3.13.7) — a green local run is evidence, not proof, for CI: the
+one place the difference has bitten before is path handling in `dev/selftest.mjs` and the
+`\r` tolerance in line-anchored regexes.
 
 ## Releasing
 
