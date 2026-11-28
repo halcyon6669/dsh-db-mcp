@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -43,6 +44,16 @@ MAX_SQL = 2000
 # An approved scan is worth recording, but a line should stay a line.
 MAX_CONFIRM = 20
 TOOL_PREFIX = "mcp__db__"
+
+# A statement in the log is there to say *what shape* of query ran, never what
+# it looked up. Quoted literals are replaced with a bind marker so a phone
+# number, an ID card or a name in a hand-typed WHERE never lands in the file.
+_SQL_LITERAL = re.compile(r"'(?:[^']|'')*'")
+
+
+def redact_sql(sql: str, cap: int = MAX_SQL) -> str:
+    """Keep the SQL shape, replace every quoted literal, then cut to the cap."""
+    return _SQL_LITERAL.sub("?", str(sql))[:cap]
 
 
 def path() -> Path:
@@ -168,7 +179,7 @@ def entry(name: str, args, started: float, outcome, error, now: float | None = N
         record["client"] = client.strip()
     sql = call.get("sql")
     if isinstance(sql, str):
-        record["sql"] = sql[:MAX_SQL]
+        record["sql"] = redact_sql(sql)
     table = call.get("table")
     if isinstance(table, str):
         record["table"] = table

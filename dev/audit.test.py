@@ -173,6 +173,26 @@ class AuditTest(unittest.TestCase):
         line = audit.entry("execute_sql", {"sql": "x" * 5000}, 0.0, {"ok": True}, None, now=0)
         self.assertEqual(len(line["sql"]), audit.MAX_SQL)
 
+    def test_sql_literals_including_phone_and_id_are_redacted(self):
+        sql = (
+            "select * from t_customer where phone = '13800138000' "
+            "and id_card = '110101199001011234' and name = '张三'"
+        )
+        line = audit.entry("execute_sql", {"sql": sql}, 0.0, {"ok": True}, None, now=0)
+        self.assertIn("sql", line)
+        # The statement shape survives; the person's values do not.
+        self.assertIn("t_customer", line["sql"])
+        self.assertNotIn("13800138000", json.dumps(line, ensure_ascii=False))
+        self.assertNotIn("110101199001011234", json.dumps(line, ensure_ascii=False))
+        self.assertNotIn("张三", json.dumps(line, ensure_ascii=False))
+        self.assertIn("?", line["sql"])
+
+    def test_a_bind_parameter_placeholder_is_kept(self):
+        line = audit.entry(
+            "execute_sql", {"sql": "select * from t where phone = ?"}, 0.0, {"ok": True}, None, now=0
+        )
+        self.assertEqual(line["sql"], "select * from t where phone = ?")
+
     def test_no_datasource_is_still_a_key(self):
         line = audit.entry("list_datasources", {}, 0.0, {"ok": True}, None, now=0)
         self.assertIsNone(line["datasource"])

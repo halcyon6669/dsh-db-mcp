@@ -483,6 +483,10 @@ by this section.
   carries an unreachable second `return`. Regression tests now assert that a
   recorded line still omits binding values, a password argument and result rows
   even when the audit switch is on, so none of them can leak into the log file.
+  Recorded SQL is now written with single-quoted literals replaced by `?` before
+  the 2000-character cut, so a phone number, an ID card number or a name pasted
+  into a predicate no longer survives in `logs/audit.jsonl` — only the statement
+  shape and its table names do.
 - **The Scenes / business-key / weak-link pass.** A batch of fixes to how a scene
   is previewed, saved and read: **Try it** now previews the keys in the unsaved draft
   (not only the last saved scene) and a 0-hit key is flagged independently of any
