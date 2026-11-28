@@ -322,6 +322,17 @@ window.__ModuleLoader__.load({
         'graph.noSources': 'Add a data source first; a graph belongs to one datasource.',
         'graph.discover': 'Import foreign keys',
         'graph.mine': 'Mine the log',
+        'graph.scan': 'Scan a project',
+        'graph.scanRoot': 'Project folder',
+        'graph.scanPlaceholder': 'E:\\work\\order-service',
+        'graph.pickRoot': 'Pick a folder…',
+        'graph.pickUnavailable': 'This host offers no folder dialog — paste the path instead.',
+        'graph.needRoot': 'Give the project folder first.',
+        'graph.scanRun': 'Scan it',
+        'graph.scanHint': 'Reads the SQL a Spring Boot project committed: MyBatis mapper XML, @Select and friends, and MyBatis-Plus fragments. Nothing is executed — the files are read, and every join it finds arrives pending.',
+        'graph.scanDone': 'Read {scanned} statement(s), found {mined} join(s), recorded {imported} new edge(s).',
+        'graph.scanAmbiguous': '{n} pair(s) the catalog could not orient — add them by hand:',
+        'graph.scanUnread': '{n} file(s) could not be read:',
         'graph.add': 'Add a join',
         'graph.cancel': 'Cancel',
         'graph.save': 'Save the join',
@@ -351,6 +362,7 @@ window.__ModuleLoader__.load({
         'graph.sourceManual': 'added by hand',
         'graph.sourceInferred': 'inferred',
         'graph.sourceMined': 'mined from the audit log',
+        'graph.readFrom': 'read from',
         'graph.confirmedTimes': '{n} confirmed',
         'graph.rejectedTimes': '{n} rejected',
         'graph.fanout': '{value} row(s) per value on average',
@@ -872,6 +884,17 @@ window.__ModuleLoader__.load({
         'graph.noSources': '先添加数据源；关系图属于某一个数据源。',
         'graph.discover': '导入外键',
         'graph.mine': '从日志挖掘',
+        'graph.scan': '扫描项目',
+        'graph.scanRoot': '项目目录',
+        'graph.scanPlaceholder': 'E:\\work\\order-service',
+        'graph.pickRoot': '选择目录…',
+        'graph.pickUnavailable': '这个宿主没有目录选择框——请直接粘贴路径。',
+        'graph.needRoot': '先填项目目录。',
+        'graph.scanRun': '开始扫描',
+        'graph.scanHint': '读取 Spring Boot 项目里写下的 SQL：MyBatis mapper XML、@Select 之类注解，以及 MyBatis-Plus 片段。不执行任何语句——只读文件，找到的连接一律以「待确认」进入关系图。',
+        'graph.scanDone': '读取 {scanned} 条语句，找到 {mined} 条连接，新增 {imported} 条边。',
+        'graph.scanAmbiguous': '有 {n} 对连接无法从目录判断方向——请手动补上：',
+        'graph.scanUnread': '有 {n} 个文件读不出来：',
         'graph.add': '添加连接',
         'graph.cancel': '取消',
         'graph.save': '保存连接',
@@ -901,6 +924,7 @@ window.__ModuleLoader__.load({
         'graph.sourceManual': '手动添加',
         'graph.sourceInferred': '推断',
         'graph.sourceMined': '从审计日志挖掘',
+        'graph.readFrom': '读自',
         'graph.confirmedTimes': '确认 {n} 次',
         'graph.rejectedTimes': '拒绝 {n} 次',
         'graph.fanout': '平均对应 {value} 行',
@@ -3645,6 +3669,15 @@ window.__ModuleLoader__.load({
         margin: 4px 0 0;
         font-variant-numeric: tabular-nums;
       }
+      /* Where a scanned join was read. Long mapper paths wrap instead of pushing
+         the row wider than the page. */
+      .dbmcp-edge-places {
+        margin: 2px 0 0;
+        overflow-wrap: anywhere;
+      }
+      .dbmcp-edge-place code {
+        font-size: 11px;
+      }
       .dbmcp-edge-when {
         margin: 2px 0 0;
         color: var(--dsw-alias-label-primary);
@@ -6314,6 +6347,13 @@ function groupTables(tables) {
       const [graphError, setGraphError] = React.useState(null)
       const [graphSource, setGraphSource] = React.useState(() => String(savedPanel.graphSource || ''))
       const [graphFilter, setGraphFilter] = React.useState(() => String(savedPanel.graphFilter || 'all'))
+      const [graphRoot, setGraphRoot] = React.useState(() => String(savedPanel.graphRoot || ''))
+      /* The scan panel is a form, not a page: it opens, takes a path and closes. */
+      const [graphScan, setGraphScan] = React.useState(null)
+      /* What the last scan found: the counts, plus the pairs it could not decide
+         and the files it could not read. A scan that quietly dropped half a
+         project would look identical to one that found nothing. */
+      const [graphScanResult, setGraphScanResult] = React.useState(null)
       const [graphOpen, setGraphOpen] = React.useState('')
       const [graphForm, setGraphForm] = React.useState(null)
       const [graphReason, setGraphReason] = React.useState('')
@@ -6903,6 +6943,45 @@ function groupTables(tables) {
       const discoverEdges = () => graphAction('/relations/discover', {}, t('notice.discovered'))
 
       const mineEdges = () => graphAction('/relations/mine', {}, t('notice.mined'))
+
+      /* The third source of joins: the SQL a project committed. The tool has
+         existed since the start but nothing in the panel could reach it, so a
+         reader had to call it by hand. The path is remembered like every other
+         field on this page — a project does not move between sessions. */
+      const scanEdges = async () => {
+        const root = String(graphRoot || '').trim()
+        if (!root) {
+          setNotice({ message: t('graph.needRoot'), isError: true })
+          return
+        }
+        const payload = await graphAction('/relations/scan', { root }, null)
+        if (!payload) return
+        setGraphScanResult(payload)
+        setNotice({
+          message: fmt(t('graph.scanDone'), {
+            scanned: payload.scanned || 0,
+            mined: payload.mined || 0,
+            imported: payload.imported || 0,
+          }),
+          isError: false,
+        })
+      }
+
+      /* The host offers a native folder dialog; a plain browser tab does not.
+         Say so instead of leaving a button that silently does nothing. */
+      const pickRoot = async () => {
+        const picker = typeof globalThis === 'undefined' ? null : globalThis.__DSH_DIRECTORY_PICKER__
+        if (!picker || typeof picker.pick !== 'function') {
+          setNotice({ message: t('graph.pickUnavailable'), isError: true })
+          return
+        }
+        try {
+          const picked = await picker.pick()
+          if (picked) remember('graphRoot', setGraphRoot)(String(picked))
+        } catch (error) {
+          setNotice({ message: String((error && error.message) || error), isError: true })
+        }
+      }
 
       /* A verdict is an internal token; a reader should see what it meant, not
          the word "ok" or "too_many". */
@@ -8775,6 +8854,26 @@ function groupTables(tables) {
         return parts.join(' · ')
       }
 
+      /** Where a scan read this join, as `file:line`; empty for a catalog key. */
+      const edgePlaces = (edge) => {
+        const places = edge && Array.isArray(edge.places) ? edge.places.filter(Boolean) : []
+        if (places.length === 0) return null
+        return h(
+          'p',
+          { className: 'dbmcp-hint dbmcp-edge-places' },
+          h('span', { className: 'dbmcp-label' }, t('graph.readFrom')),
+          ' ',
+          places.map((place, index) =>
+            h(
+              'span',
+              { key: place, className: 'dbmcp-edge-place' },
+              index > 0 ? ', ' : '',
+              h('code', null, place),
+            ),
+          ),
+        )
+      }
+
       /** The line under the join path: why it stopped being trusted, if it did. */
       const edgeReason = (edge) => {
         const failure = edge.stats && edge.stats.lastFailure
@@ -8956,6 +9055,7 @@ function groupTables(tables) {
             h('span', { className: edgeStatusClass(status) }, edgeStatusLabel(status)),
           ),
           h('p', { className: 'dbmcp-hint dbmcp-edge-meta' }, edgeMeta(edge)),
+          edgePlaces(edge),
           edge.condition ? h('p', { className: 'dbmcp-hint dbmcp-edge-when' }, `${t('graph.whenClause')} ${edge.condition}`) : null,
           status === 'stale' || status === 'rejected' ? edgeReason(edge) : null,
           edgeActions(edge),
@@ -9012,6 +9112,87 @@ function groupTables(tables) {
         )
       }
 
+      /** The scan form: a project path, a picker when the host has one, and the
+       * last answer. Every join it finds arrives pending, like any other guess. */
+      const renderScanForm = () => {
+        const result = graphScanResult
+        const ambiguous = (result && result.ambiguous) || []
+        const unread = (result && result.unread) || []
+        return h(
+          'div',
+          { className: 'dbmcp-edge-form is-new dbmcp-scan-form' },
+          h('p', { className: 'dbmcp-hint' }, t('graph.scanHint')),
+          h(
+            'div',
+            { className: 'dbmcp-inline' },
+            h(TextInput, {
+              value: graphRoot,
+              placeholder: t('graph.scanPlaceholder'),
+              label: t('graph.scanRoot'),
+              onChange: remember('graphRoot', setGraphRoot),
+            }),
+            h(
+              'button',
+              { type: 'button', className: 'dbmcp-btn is-small', disabled: graphBusy, onClick: () => void pickRoot() },
+              t('graph.pickRoot'),
+            ),
+            h(
+              'button',
+              { type: 'button', className: 'dbmcp-btn is-small is-primary', disabled: graphBusy || !String(graphRoot).trim(), onClick: () => void scanEdges() },
+              t('graph.scanRun'),
+            ),
+          ),
+          result
+            ? h(
+                'div',
+                { className: 'dbmcp-scan-result' },
+                h(
+                  'p',
+                  { className: 'dbmcp-hint' },
+                  fmt(t('graph.scanDone'), {
+                    scanned: result.scanned || 0,
+                    mined: result.mined || 0,
+                    imported: result.imported || 0,
+                  }),
+                ),
+                ambiguous.length > 0
+                  ? h(
+                      'div',
+                      null,
+                      h('p', { className: 'dbmcp-label' }, fmt(t('graph.scanAmbiguous'), { n: ambiguous.length })),
+                      h(
+                        'ul',
+                        { className: 'dbmcp-scan-list' },
+                        ambiguous.slice(0, 8).map((item, index) =>
+                          h(
+                            'li',
+                            { key: `ambiguous:${index}` },
+                            h('code', null, `${item.from && item.from.table}.${item.from && item.from.column} → ${item.to && item.to.table}.${item.to && item.to.column}`),
+                            item.reason ? h('span', { className: 'dbmcp-hint' }, ` — ${item.reason}`) : null,
+                          ),
+                        ),
+                      ),
+                    )
+                  : null,
+                unread.length > 0
+                  ? h(
+                      'div',
+                      null,
+                      h('p', { className: 'dbmcp-label' }, fmt(t('graph.scanUnread'), { n: unread.length })),
+                      h(
+                        'ul',
+                        { className: 'dbmcp-scan-list' },
+                        unread.slice(0, 8).map((item, index) =>
+                          h('li', { key: `unread:${index}` }, h('code', null, String(item.file || item.name || '')), item.reason ? h('span', { className: 'dbmcp-hint' }, ` — ${item.reason}`) : null),
+                        ),
+                      ),
+                    )
+                  : null,
+              )
+            : null,
+        )
+      }
+
       const renderGraph = () => {
         const list = (graph && graph.edges) || []
         const counts = (graph && graph.counts) || null
@@ -9059,6 +9240,7 @@ function groupTables(tables) {
               h('button', { type: 'button', className: 'dbmcp-btn is-small', disabled: graphBusy || !graphTarget, onClick: () => void discoverEdges() }, t('graph.discover')),
               h('button', { type: 'button', className: 'dbmcp-btn is-small', disabled: graphBusy || !graphTarget, onClick: () => void mineEdges() }, t('graph.mine')),
               h('button', { type: 'button', className: 'dbmcp-btn is-small', disabled: graphBusy || !graphTarget, onClick: () => setGraphForm(graphForm ? null : {}) }, graphForm ? t('graph.cancel') : t('graph.add')),
+              h('button', { type: 'button', className: 'dbmcp-btn is-small', disabled: graphBusy || !graphTarget, onClick: () => setGraphScan(graphScan ? null : true) }, graphScan ? t('graph.cancel') : t('graph.scan')),
             ),
           },
           h('p', { className: 'dbmcp-hint' }, t('graph.hint')),
@@ -9086,6 +9268,7 @@ function groupTables(tables) {
                 ),
               ),
           graphForm ? renderEdgeForm() : null,
+          graphScan ? renderScanForm() : null,
           graphError ? h('p', { className: 'dbmcp-hint dbmcp-edge-error' }, graphError) : null,
           graphBusy && !graph ? h('p', { className: 'dbmcp-hint' }, t('loading')) : null,
           sources.length === 0 ? null : visible.length === 0

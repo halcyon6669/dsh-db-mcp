@@ -1451,6 +1451,28 @@ check(
 )
 check('graph page: a new join is added from a form', /renderEdgeForm\(\)/.test(graphCard) && /graph\.addHint/.test(source))
 check('graph page: the foreign keys can be imported', /discoverEdges\(\)/.test(graphCard) && /graph\.discover/.test(graphCard))
+/* A Spring Boot project is the third source of joins, next to the catalog and
+   the audit log. The tool existed with no way to reach it, so the panel grows one
+   door: a path, a picker when the host has one, and the counts the tool returns. */
+check(
+  'graph page: a Spring Boot project can be scanned from the panel',
+  /const scanEdges = async \(\) =>/.test(source) &&
+    /'\/relations\/scan'/.test(source) &&
+    /String\(graphRoot \|\| ''\)\.trim\(\)/.test(source) &&
+    /renderScanForm\(\)/.test(graphCard) &&
+    /graph\.scan/.test(source),
+)
+check(
+  'graph page: the source path can be picked instead of typed',
+  /__DSH_DIRECTORY_PICKER__/.test(source) && /graph\.pickRoot/.test(source) && /pickRoot/.test(graphCard),
+)
+check(
+  'graph page: a scan reports what it read and what it could not decide',
+  /graph\.scanDone/.test(source) &&
+    /result && result\.ambiguous/.test(graphCard) &&
+    /graph\.scanAmbiguous/.test(source) &&
+    /graph\.scanUnread/.test(source),
+)
 check('graph page: the datasource is picked, not typed', /className: 'dbmcp-input dbmcp-select'/.test(graphCard))
 check(
   'graph page: a datasource is required before anything is read',
@@ -1458,6 +1480,18 @@ check(
 )
 check('graph page: an empty graph explains what to do next', /graph\.empty/.test(graphCard) && /graph\.emptyFiltered/.test(graphCard))
 check('graph page: the row border carries the status colour', /\.dbmcp-edge\.is-pending \{/.test(source) && /\.dbmcp-edge\.is-trusted \{/.test(source))
+
+/* A join read out of a source tree is only actionable if the reader can open the
+   file it was written in. The row therefore carries every place the scan found it,
+   not just the first: the same join is often written once in a mapper and once in
+   an annotation. */
+check(
+  'graph page: a scanned edge names the file it was read from',
+  /edgePlaces/.test(graphCard) &&
+    /graph\.readFrom/.test(graphCard) &&
+    /edge\.places/.test(graphCard) &&
+    /\.dbmcp-edge-places/.test(source),
+)
 
 /* The second line answers "what does this join cost me" before the reader has to
    ask: whether the target column is indexed, how big the table is and how long a

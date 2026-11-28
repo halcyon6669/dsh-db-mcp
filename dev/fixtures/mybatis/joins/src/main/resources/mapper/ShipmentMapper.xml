@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.example.shipping.ShipmentMapper">
+
+    <select id="commaJoin" resultType="map">
+        select s.id, c.name, w.code
+        from t_shipment s, t_customer c, t_warehouse w
+        where s.customer_code = c.code
+          and s.warehouse_id = w.id
+    </select>
+
+    <select id="oracleOuter" resultType="map">
+        select o.id, p.amount
+        from t_order o, t_payment p
+        where p.order_no (+) = o.order_no
+    </select>
+
+    <select id="inSubquery" resultType="map">
+        select o.id
+        from t_order o
+        where o.id in (select l.order_id from t_line l where l.sku = #{sku})
+    </select>
+
+    <select id="existsSubquery" resultType="map">
+        select o.id
+        from t_order o
+        where exists (select 1 from t_refund r where r.order_no = o.order_no)
+    </select>
+
+    <select id="aliasedJoin" resultType="map">
+        select a.id, b.code, c.name
+        from t_order as a
+        inner join t_trans b on b.order_id = a.id
+        left join t_customer c on c.code = a.customer_code
+    </select>
+
+</mapper>

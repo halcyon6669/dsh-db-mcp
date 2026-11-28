@@ -31,6 +31,10 @@ STATUSES = ("pending", "confirmed", "trusted", "stale", "rejected")
 SOURCES = ("fk", "manual", "inferred", "audit_mined")
 HISTORY_LIMIT = 50
 EDGE_LIMIT = 500
+# How many `file:line` places one edge keeps. A join written in a dozen mappers is
+# still one join; the list is there so a reader can go and look, not to hold every
+# copy of the same statement.
+PLACES_LIMIT = 10
 
 # How much a source is worth when two of them describe the same join. The catalog
 # outranks everything (it is enforced by the engine); a person outranks a log line
@@ -244,6 +248,9 @@ def _blank_edge(frm: dict, to: dict, source: str, note: str | None) -> dict:
         "status": "pending",
         "condition": None,
         "note": note,
+        # Where a scan read this join, as `file:line`. Empty for an edge that came
+        # from the catalog or from a person: those do not come from a file.
+        "places": [],
         "stats": {
             "confirmCount": 0,
             "rejectCount": 0,
@@ -464,6 +471,30 @@ def propose(
     return {"edge": edge, "created": True, "reopened": False}
 
 
+def _carry_places(edge: dict, row: dict) -> bool:
+    """Merge the `file:line` places a scan read this join from. Returns True on change.
+
+    A re-scan usually finds the same statements again, so this must be a union, not
+    an overwrite: the second file that writes the same join is evidence, and losing
+    it would make the graph say "read from one place" when it was read from three.
+    """
+    incoming = row.get("places")
+    if not isinstance(incoming, list):
+        return False
+    current = edge.get("places")
+    if not isinstance(current, list):
+        current = []
+    merged = list(current)
+    for place in incoming:
+        text = str(place or "").strip()
+        if text and text not in merged and len(merged) < PLACES_LIMIT:
+            merged.append(text)
+    if merged == current:
+        return False
+    edge["places"] = merged
+    return True
+
+
 def _carry_cost(edge: dict, row: dict) -> None:
     """Copy whatever cost facts a discovery row happens to carry onto an edge.
 
@@ -515,6 +546,7 @@ def import_edges(profile: dict, found: list[dict], source: str = "fk") -> dict:
             edge["source"] = source
             edge["note"] = row.get("name") or None
             _carry_cost(edge, row)
+            _carry_places(edge, row)
             doc["edges"].append(edge)
             by_id[wanted] = edge
             imported += 1
@@ -522,6 +554,13 @@ def import_edges(profile: dict, found: list[dict], source: str = "fk") -> dict:
         # A rediscovery can still tell us something new about cost, even when it
         # changes nothing else about the edge.
         _carry_cost(edge, row)
+        # ...and about where the join is written. This is deliberately outside the
+        # branch below: a second file writing the same join adds evidence even when
+        # the source rank does not change and nothing else about the edge moves.
+        if _carry_places(edge, row):
+            updated += 1
+            _record(edge, "read again somewhere else", note=", ".join(edge["places"][-1:]) or None)
+            continue
         current = edge.get("source") if edge.get("source") in SOURCE_RANK else "inferred"
         if edge.get("status") == "stale":
             edge["status"] = "pending"

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.example.line.LineMapper">
+
+    <select id="selectByOrderId" resultType="com.example.line.Line">
+        select l.id, l.order_id, l.sku from t_line l where l.order_id = #{id}
+    </select>
+
+</mapper>

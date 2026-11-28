@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.example.order.OrderMapper">
+
+    <sql id="lineJoin">
+        join t_line l on l.order_id = o.id
+    </sql>
+
+    <select id="listWithLines" resultType="map">
+        select o.id, o.code, l.sku
+        from t_order o
+        <include refid="lineJoin"/>
+        <where>
+            <if test="code != null">
+                and o.code = #{code}
+            </if>
+            <if test="paymentId != null">
+                and p.id = o.payment_id
+                join t_payment p on p.id = o.payment_id
+            </if>
+        </where>
+        order by ${sort}
+    </select>
+
+    <select id="listByRegion" resultType="map">
+        select o.id, r.name
+        from t_order o
+        <choose>
+            <when test="regionCode != null">
+                join t_region r on r.code = o.region_code
+            </when>
+            <otherwise>
+                join t_region r on r.code = o.region_code and r.enabled = 1
+            </otherwise>
+        </choose>
+        where o.id in
+        <foreach collection="ids" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </select>
+
+</mapper>

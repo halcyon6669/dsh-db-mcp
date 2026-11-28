@@ -304,6 +304,31 @@ neither are writes on a source that is not read-only. The only per-source choice
 whether it may change the shape of the database — see
 *[DDL](safety.md#ddl)*.
 
+## Scanning a Spring Boot project
+
+The **Relations** page has three ways to fill the graph, and the third one reads
+code instead of a database. **Scan a project** asks for a folder — type it, or press
+*Pick a folder…* to use the host's own directory dialog — and reads the MyBatis
+mapper XML, the `@Select`-style annotations and the MyBatis-Plus `.apply(...)`
+fragments under it. Nothing is executed and nothing leaves the machine; the files
+are read, and the joins they spell out become edges.
+
+Read the result as two lists, not one number. The count line says how many
+statements were read, how many joins were found and how many edges were recorded.
+Under it, **pairs the catalog could not orient** lists the joins whose direction is
+undecidable (neither side unique, or both), and **files the scanner could not read**
+names the ones it had to skip. Both are always shown: a scan that quietly dropped
+half a project would otherwise look exactly like a scan that found nothing.
+
+Every edge a scan creates arrives **pending**, with source `audit_mined` — a
+statement in a repository is evidence that the join exists, not proof, so it still
+needs confirming on the same page. An edge remembers where it was read from: the
+join path is followed by a `read from` line with the `file:line` places, up to ten,
+merged when a later scan finds the same join written somewhere else.
+
+A project that only uses `BaseMapper` and single-table wrappers has no join in it.
+Zero is the correct answer there, not an error.
+
 ## Scenes
 
 A scene is a name for a set of tables — "order to cash" — so a walk can be scoped to

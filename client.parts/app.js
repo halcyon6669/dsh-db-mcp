@@ -2132,6 +2132,13 @@ function groupTables(tables) {
       const [graphError, setGraphError] = React.useState(null)
       const [graphSource, setGraphSource] = React.useState(() => String(savedPanel.graphSource || ''))
       const [graphFilter, setGraphFilter] = React.useState(() => String(savedPanel.graphFilter || 'all'))
+      const [graphRoot, setGraphRoot] = React.useState(() => String(savedPanel.graphRoot || ''))
+      /* The scan panel is a form, not a page: it opens, takes a path and closes. */
+      const [graphScan, setGraphScan] = React.useState(null)
+      /* What the last scan found: the counts, plus the pairs it could not decide
+         and the files it could not read. A scan that quietly dropped half a
+         project would look identical to one that found nothing. */
+      const [graphScanResult, setGraphScanResult] = React.useState(null)
       const [graphOpen, setGraphOpen] = React.useState('')
       const [graphForm, setGraphForm] = React.useState(null)
       const [graphReason, setGraphReason] = React.useState('')
@@ -2721,6 +2728,45 @@ function groupTables(tables) {
       const discoverEdges = () => graphAction('/relations/discover', {}, t('notice.discovered'))
 
       const mineEdges = () => graphAction('/relations/mine', {}, t('notice.mined'))
+
+      /* The third source of joins: the SQL a project committed. The tool has
+         existed since the start but nothing in the panel could reach it, so a
+         reader had to call it by hand. The path is remembered like every other
+         field on this page — a project does not move between sessions. */
+      const scanEdges = async () => {
+        const root = String(graphRoot || '').trim()
+        if (!root) {
+          setNotice({ message: t('graph.needRoot'), isError: true })
+          return
+        }
+        const payload = await graphAction('/relations/scan', { root }, null)
+        if (!payload) return
+        setGraphScanResult(payload)
+        setNotice({
+          message: fmt(t('graph.scanDone'), {
+            scanned: payload.scanned || 0,
+            mined: payload.mined || 0,
+            imported: payload.imported || 0,
+          }),
+          isError: false,
+        })
+      }
+
+      /* The host offers a native folder dialog; a plain browser tab does not.
+         Say so instead of leaving a button that silently does nothing. */
+      const pickRoot = async () => {
+        const picker = typeof globalThis === 'undefined' ? null : globalThis.__DSH_DIRECTORY_PICKER__
+        if (!picker || typeof picker.pick !== 'function') {
+          setNotice({ message: t('graph.pickUnavailable'), isError: true })
+          return
+        }
+        try {
+          const picked = await picker.pick()
+          if (picked) remember('graphRoot', setGraphRoot)(String(picked))
+        } catch (error) {
+          setNotice({ message: String((error && error.message) || error), isError: true })
+        }
+      }
 
       /* A verdict is an internal token; a reader should see what it meant, not
          the word "ok" or "too_many". */
@@ -4593,6 +4639,26 @@ function groupTables(tables) {
         return parts.join(' · ')
       }
 
+      /** Where a scan read this join, as `file:line`; empty for a catalog key. */
+      const edgePlaces = (edge) => {
+        const places = edge && Array.isArray(edge.places) ? edge.places.filter(Boolean) : []
+        if (places.length === 0) return null
+        return h(
+          'p',
+          { className: 'dbmcp-hint dbmcp-edge-places' },
+          h('span', { className: 'dbmcp-label' }, t('graph.readFrom')),
+          ' ',
+          places.map((place, index) =>
+            h(
+              'span',
+              { key: place, className: 'dbmcp-edge-place' },
+              index > 0 ? ', ' : '',
+              h('code', null, place),
+            ),
+          ),
+        )
+      }
+
       /** The line under the join path: why it stopped being trusted, if it did. */
       const edgeReason = (edge) => {
         const failure = edge.stats && edge.stats.lastFailure
@@ -4774,6 +4840,7 @@ function groupTables(tables) {
             h('span', { className: edgeStatusClass(status) }, edgeStatusLabel(status)),
           ),
           h('p', { className: 'dbmcp-hint dbmcp-edge-meta' }, edgeMeta(edge)),
+          edgePlaces(edge),
           edge.condition ? h('p', { className: 'dbmcp-hint dbmcp-edge-when' }, `${t('graph.whenClause')} ${edge.condition}`) : null,
           status === 'stale' || status === 'rejected' ? edgeReason(edge) : null,
           edgeActions(edge),
@@ -4830,6 +4897,87 @@ function groupTables(tables) {
         )
       }
 
+      /** The scan form: a project path, a picker when the host has one, and the
+       * last answer. Every join it finds arrives pending, like any other guess. */
+      const renderScanForm = () => {
+        const result = graphScanResult
+        const ambiguous = (result && result.ambiguous) || []
+        const unread = (result && result.unread) || []
+        return h(
+          'div',
+          { className: 'dbmcp-edge-form is-new dbmcp-scan-form' },
+          h('p', { className: 'dbmcp-hint' }, t('graph.scanHint')),
+          h(
+            'div',
+            { className: 'dbmcp-inline' },
+            h(TextInput, {
+              value: graphRoot,
+              placeholder: t('graph.scanPlaceholder'),
+              label: t('graph.scanRoot'),
+              onChange: remember('graphRoot', setGraphRoot),
+            }),
+            h(
+              'button',
+              { type: 'button', className: 'dbmcp-btn is-small', disabled: graphBusy, onClick: () => void pickRoot() },
+              t('graph.pickRoot'),
+            ),
+            h(
+              'button',
+              { type: 'button', className: 'dbmcp-btn is-small is-primary', disabled: graphBusy || !String(graphRoot).trim(), onClick: () => void scanEdges() },
+              t('graph.scanRun'),
+            ),
+          ),
+          result
+            ? h(
+                'div',
+                { className: 'dbmcp-scan-result' },
+                h(
+                  'p',
+                  { className: 'dbmcp-hint' },
+                  fmt(t('graph.scanDone'), {
+                    scanned: result.scanned || 0,
+                    mined: result.mined || 0,
+                    imported: result.imported || 0,
+                  }),
+                ),
+                ambiguous.length > 0
+                  ? h(
+                      'div',
+                      null,
+                      h('p', { className: 'dbmcp-label' }, fmt(t('graph.scanAmbiguous'), { n: ambiguous.length })),
+                      h(
+                        'ul',
+                        { className: 'dbmcp-scan-list' },
+                        ambiguous.slice(0, 8).map((item, index) =>
+                          h(
+                            'li',
+                            { key: `ambiguous:${index}` },
+                            h('code', null, `${item.from && item.from.table}.${item.from && item.from.column} → ${item.to && item.to.table}.${item.to && item.to.column}`),
+                            item.reason ? h('span', { className: 'dbmcp-hint' }, ` — ${item.reason}`) : null,
+                          ),
+                        ),
+                      ),
+                    )
+                  : null,
+                unread.length > 0
+                  ? h(
+                      'div',
+                      null,
+                      h('p', { className: 'dbmcp-label' }, fmt(t('graph.scanUnread'), { n: unread.length })),
+                      h(
+                        'ul',
+                        { className: 'dbmcp-scan-list' },
+                        unread.slice(0, 8).map((item, index) =>
+                          h('li', { key: `unread:${index}` }, h('code', null, String(item.file || item.name || '')), item.reason ? h('span', { className: 'dbmcp-hint' }, ` — ${item.reason}`) : null),
+                        ),
+                      ),
+                    )
+                  : null,
+              )
+            : null,
+        )
+      }
+
       const renderGraph = () => {
         const list = (graph && graph.edges) || []
         const counts = (graph && graph.counts) || null
@@ -4877,6 +5025,7 @@ function groupTables(tables) {
               h('button', { type: 'button', className: 'dbmcp-btn is-small', disabled: graphBusy || !graphTarget, onClick: () => void discoverEdges() }, t('graph.discover')),
               h('button', { type: 'button', className: 'dbmcp-btn is-small', disabled: graphBusy || !graphTarget, onClick: () => void mineEdges() }, t('graph.mine')),
               h('button', { type: 'button', className: 'dbmcp-btn is-small', disabled: graphBusy || !graphTarget, onClick: () => setGraphForm(graphForm ? null : {}) }, graphForm ? t('graph.cancel') : t('graph.add')),
+              h('button', { type: 'button', className: 'dbmcp-btn is-small', disabled: graphBusy || !graphTarget, onClick: () => setGraphScan(graphScan ? null : true) }, graphScan ? t('graph.cancel') : t('graph.scan')),
             ),
           },
           h('p', { className: 'dbmcp-hint' }, t('graph.hint')),
@@ -4904,6 +5053,7 @@ function groupTables(tables) {
                 ),
               ),
           graphForm ? renderEdgeForm() : null,
+          graphScan ? renderScanForm() : null,
           graphError ? h('p', { className: 'dbmcp-hint dbmcp-edge-error' }, graphError) : null,
           graphBusy && !graph ? h('p', { className: 'dbmcp-hint' }, t('loading')) : null,
           sources.length === 0 ? null : visible.length === 0

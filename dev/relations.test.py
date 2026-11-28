@@ -176,6 +176,37 @@ class RelationGraph(unittest.TestCase):
         self.assertEqual(result["skipped"], 1)
         self.assertEqual(result["imported"], 0)
 
+    # -- where the edge was read ------------------------------------------
+
+    def test_a_scanned_edge_keeps_the_places_it_was_read_from(self):
+        row = fk("t_trans", "order_id", "t_order", "id")
+        row["places"] = ["src/main/resources/mapper/OrderMapper.xml:12", "src/main/java/A.java:40"]
+        edge = relations.import_edges(source(), [row], source="audit_mined")["edges"][0]
+        self.assertEqual(edge["places"], row["places"])
+
+    def test_a_second_scan_merges_new_places_instead_of_replacing_them(self):
+        first = fk("t_trans", "order_id", "t_order", "id")
+        first["places"] = ["mapper/A.xml:3"]
+        relations.import_edges(source(), [first], source="audit_mined")
+        second = fk("t_trans", "order_id", "t_order", "id")
+        second["places"] = ["mapper/B.xml:9", "mapper/A.xml:3"]
+        edge = relations.import_edges(source(), [second], source="audit_mined")["edges"][0]
+        self.assertEqual(edge["places"], ["mapper/A.xml:3", "mapper/B.xml:9"], "a place already known is not repeated")
+
+    def test_places_are_bounded_so_one_edge_cannot_grow_forever(self):
+        row = fk("t_trans", "order_id", "t_order", "id")
+        row["places"] = [f"mapper/A.xml:{index}" for index in range(40)]
+        edge = relations.import_edges(source(), [row], source="audit_mined")["edges"][0]
+        self.assertLessEqual(len(edge["places"]), relations.PLACES_LIMIT)
+
+    def test_an_edge_without_places_carries_an_empty_list(self):
+        edge = relations.import_edges(source(), [fk("t_trans", "order_id", "t_order", "id")])["edges"][0]
+        self.assertEqual(edge["places"], [])
+
+    def test_a_hand_proposal_says_nothing_about_where_it_was_read(self):
+        edge = relations.propose(source(), "t_trans", "order_id", "t_order", "id")["edge"]
+        self.assertEqual(edge["places"], [])
+
     # -- filtering and counting --------------------------------------------
 
     def test_counts_cover_every_status_whatever_the_filter(self):

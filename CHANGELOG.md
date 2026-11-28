@@ -22,7 +22,6 @@ report of each version in more detail.
 ## [Unreleased]
 
 ### Added
-
 - **An edge now knows what it costs.** `propose_relation` and `feedback_relation`
   read the target column's index and the table's row estimate from the catalogue
   (`pg_class.reltuples`, `information_schema.TABLES.TABLE_ROWS`, `ALL_TABLES.NUM_ROWS`
@@ -153,9 +152,130 @@ report of each version in more detail.
   edge, table, column, row estimate and reason. It is computed from the join facts
   already on disk, so opening or saving a scene runs no statement at all. The Scenes
   page shows it above the isolated members, and the cost hint is a label, not a query.
+- **The relation graph answers what joins what.** The catalog used to answer that
+  question in two places — `describe_table` repeated each table's foreign keys, and
+  `list_relations` flattened a whole schema — so the answer a model read was not
+  the answer a walker would follow. Both are gone. `discover_relations` imports the
+  declared foreign keys into a per-datasource graph stored in
+  `relations/<sourceId>.json`, `propose_relation` records a join the catalog does not
+  declare, and `list_edges` reports every edge with its source (`fk`, `manual`,
+  `inferred`, `audit_mined`), status (`pending`, `confirmed`, `trusted`, `stale`,
+  `rejected`), optional `condition`, and counts. A proposed edge starts `pending` and
+  is not followed until it is confirmed.
+- **`trace_by_key` follows a value across tables.** Give it a value and it finds
+  where the value lives, then walks the relation graph hop by hop — reporting each
+  table, the condition it used, the statement it ran, how many rows came back, and
+  which edge carried it there. It follows only `confirmed` and `trusted` edges; a
+  pending edge that would have continued the walk is listed separately with the
+  reason, and a step with no rows is reported as the place the chain breaks rather
+  than silently ending the trace. Values are always bound parameters, so the SQL it
+  reports is safe to log, and `max_depth` (1–6) and `max_rows_per_table` (1–200) bound
+  the work.
+- **An edge now has a state machine, and trust is measured rather than assumed.**
+  `feedback_relation` records what a trace step showed. `ok` is the only verdict
+  that confirms an edge; `too_many` (with `wrong_column`, `needs_condition` or
+  `not_unique`) and `missing` make it `stale`, which stops the walker following it
+  until the column is fixed or the condition is added; `irrelevant` sends it to
+  `rejected`, the blacklist only a fresh `propose_relation` can lift. An edge
+  becomes `trusted` — followed without asking again — only after three
+  confirmations, with no rejection left standing, on an indexed or unique reference
+  column, with an average fanout of 5 or less; that badge is recomputed on every
+  confirmation rather than latched, so a join whose fanout grows falls back to
+  `confirmed`. `set_relation_condition` attaches the predicate a join needs without
+  changing its status, and `delete_edge` removes a typo outright. Traces now report
+  per-step fanout so a caller can pass the measured figure back.
+- **The relation graph has a page of its own.** The panel gained a **Relations**
+  tab: pick a data source, then read its edges as a list — each row shows the join
+  path (`t_line.trans_id → t_trans.id`), a status chip, the source, and how many
+  times it was confirmed. Filter chips narrow the list to all / pending / confirmed
+  / stale while the counters keep counting the whole graph, so a filter never hides
+  how much work is left. A pending edge offers confirm, reject (with the reason that
+  made the trace wrong) and add-condition; a stale edge shows what failed last and
+  offers a re-check or a delete; a rejected edge can be re-opened; a confirmed or
+  trusted edge shows its confirmation record. The page only calls the graph tools
+  through dedicated routes — it cannot run SQL.
+- **The trace result has a page too.** The **Trace** tab takes one value plus an
+  optional entry table, entry column and direction, and shows the walk as numbered
+  steps: the table, the condition with its bound values, the row count, a few sample
+  cells, the edge that carried it there, and that edge's status. Steps where the
+  chain broke (`0 rows — the chain stops here`), where the read was capped, or where
+  a warning was raised are marked in place; edges that were not followed because
+  they are still pending are listed separately with a pointer back to the graph. Each
+  step can be judged right / too many (with a reason) / missing / unrelated, and the
+  judgement is recorded against the edge behind it — so a wrong walk is also how the
+  graph gets corrected. The page accepts a value and never a statement: the SQL is
+  built server-side from the graph and bound as parameters, and the value itself is
+  never echoed back into the page.
+- **Joins can be mined out of the audit log.** Plenty of schemas declare no foreign
+  keys at all, yet the statements that already joined those tables are sitting in
+  `logs/audit.jsonl`. `mine_relations` reads the `execute_sql` and `explain_query`
+  lines, parses the equalities in their `on` clauses, and turns the recurring pairs
+  into edges — no statement is run again and no row data is involved. The statement
+  says the columns are equal, not which side owns the other, so the catalog decides:
+  the side whose column is a primary key or a single-column unique index becomes the
+  parent. A pair where neither side looks unique, or where both do, is reported under
+  `ambiguous` and left out of the graph instead of being guessed — the walker follows
+  every confirmed edge, so a wrong one is worse than a missing one. Mined edges
+  arrive `pending` with source `audit_mined`, and a source is never weakened (`fk` >
+  `manual` > `audit_mined` > `inferred`), so re-mining cannot relabel a declared key
+  or downgrade a hand proposal. The Relations page gained a **Mine the log** button
+  beside **Import foreign keys**.
+- **Joins can be mined out of a project's source tree too.** The log miner only sees
+  statements that already ran, which is nothing on the day a schema is first
+  explored — but a Spring Boot project has written its joins down. `scan_code_relations`
+  reads a project directory and takes SQL from exactly three places: mapper XML
+  (`select`/`insert`/`update`/`delete`/`sql`, with `<if>`/`<foreach>`/`<where>`
+  flattened the way MyBatis builds them), `@Select`/`@Insert`/`@Update`/`@Delete`
+  annotations, and MyBatis-Plus fragments (`.apply`, `.last`, `.inSql`, `.exists`,
+  `.notExists`, `.having`). Every other string literal is skipped on purpose: a log
+  message or a regex read as SQL would invent tables, and a scanner that guesses is
+  worse than one that finds nothing. `build`, `target` and `.git` are skipped so
+  generated copies do not count twice, and each edge records the `file:line` it came
+  from. Direction and ambiguity work exactly as in the log miner — the catalog decides
+  the parent side, and an undecidable pair is reported rather than guessed — and the
+  edges arrive `pending` with source `audit_mined`. Nothing is executed: the files are
+  read, never run. A project that only uses `BaseMapper` and single-table wrappers
+  reports zero, which is the correct answer for it.
+- **The audit log loads more as you scroll.** The panel used to show only the
+  newest 12 calls with no way to reach the older ones. A **Load more** button now
+  sits at the bottom of the audit card while entries remain, fetching the next
+  page without losing the ones on screen; it disappears once every stored line is
+  shown. `GET /audit` now returns a `total` alongside the page so the panel knows
+  when to stop.
+- **Every outside client can be configured for stdio or HTTP.** The client card
+  used to decide the transport itself: Claude Desktop and Codex always got a
+  stdio entry, while VS Code, Cursor, JetBrains Air and Claude Code had to have
+  the HTTP endpoint running before they could be configured. Each client row now
+  has two buttons — **Write stdio** and **Write HTTP** — so any of them can run
+  this server as a child process with no port open, or use the shared endpoint.
+  Writing one form replaces the other, and the configured pill shows which form
+  is in place. `POST /clients/configure` takes an optional `transport`; omitting
+  it keeps the old per-client default.
+- **A Spring Boot project can be scanned from the panel.** `scan_code_relations`
+  already read a repository, but only an agent could reach it; the Relations page now
+  has **Scan a project** beside *Import foreign keys* and *Mine the log*. Type the
+  folder or pick it with the host's directory dialog, then read back the counts, the
+  pairs the catalog could not orient and the files the scanner could not read — both
+  lists always shown, because a scan that quietly dropped half a project would look
+  identical to one that found nothing. Every edge a scan creates still arrives
+  `pending`.
+- **The scanner reads the MyBatis that real projects write.** `<include refid>`
+  fragments are expanded (and a `<choose>` contributes one branch, not all of them),
+  `@Select` strings concatenated over several lines and in `{...}` array form are one
+  statement each, `<resultMap>` `<association>`/`<collection>` entries that carry both
+  `column=` and `select=` become the join that convention stands for (resolved across
+  mapper files), and equalities are found in every shape SQL writes them: inner/left
+  joins, comma-separated `from` lists with their `where`, Oracle `(+)` outer joins,
+  and correlated `in (select …)` / `exists (select …)` subqueries. Table names are
+  compared case-insensitively, and a spelled-out schema stays a hint instead of
+  becoming part of an edge's identity.
+- **An edge remembers where it was read from.** Edges carry `places` — the
+  `file:line` spots a scan found the join in, up to ten, merged when a later scan
+  finds it written again somewhere else — and the Relations page prints them under the
+  join path. A catalog key or a hand proposal carries none, because it did not come
+  from a file.
 
 ### Changed
-
 - **Trust is withdrawn when the measurements turn, and a rejection resets the count.**
   `trusted` used to need three confirmations and "no rejection left standing", which
   meant one rejected edge could never earn trust again however many times it was
@@ -250,13 +370,31 @@ report of each version in more detail.
   row as focused. The data that pass needed — a scene with one member nothing joins and
   one whose joins all lead out of it — is checked in under `dev/fixtures/scenes-isolated/`,
   so the pass can be repeated and the fixture itself is guarded by tests.
+- **VS Code is configured through the Copilot harness file.** VS Code 1.147 and
+  newer read MCP servers from `$COPILOT_HOME/mcp-config.json` (the Copilot CLI
+  file, `~/.copilot/mcp-config.json` by default) and treat the per-profile
+  `mcp.json` as a deprecated destination — entries there keep working through
+  editor forwarding, but VS Code puts a **Migrate MCP Server** banner on them.
+  The VS Code row now writes the Copilot file with the portable entry shape
+  (`type` plus `tools: ["*"]`), and the separate VS Code Insiders row is gone
+  because both channels share that one file. Writing it also removes a stale
+  `dsh-db-mcp` entry from the deprecated profile files (other entries are left
+  alone), so the server is not registered twice and the banner has nothing to
+  point at.
+
+### Removed
+
+- **`list_relations` and `describe_table.foreignKeys` are gone.** Two copies of the
+  same answer invited a model to read the one the walker would not use. The catalog
+  still holds the foreign keys, and `discover_relations` still reads them — it just
+  puts them in the relation graph instead of answering per call. `engines.list_relations`
+  stays as an internal helper.
 
 ### Behavior changes
 
 These change what an existing caller observes; they are collected here so an
 upgrade can be reviewed before the version is cut. No version number is changed
 by this section.
-
 - **`confirm_slow` is now a list of edge ids, not a boolean.** It used to be
   `confirm_slow: true` meaning "run everything"; it now takes exactly the ids the
   caller has agreed to pay for (`confirm_slow: ["e_1a2b", …]`), and only those
@@ -305,7 +443,6 @@ by this section.
   all of the above, so the behaviour is checked on every test run.
 
 ### Fixed
-
 - **The Scenes / business-key / weak-link pass.** A batch of fixes to how a scene
   is previewed, saved and read: **Try it** now previews the keys in the unsaved draft
   (not only the last saved scene) and a 0-hit key is flagged independently of any
@@ -348,140 +485,6 @@ by this section.
   emitted one `depth_limit` warning per table it could have reached — five lines each
   naming a table already on screen, with nothing to act on. The cap is now collected
   during the walk and reported once, naming only the tables the walk never read.
-
-## [1.1.0] - 2026-11-25
-
-### Added
-
-- **The relation graph answers what joins what.** The catalog used to answer that
-  question in two places — `describe_table` repeated each table's foreign keys, and
-  `list_relations` flattened a whole schema — so the answer a model read was not
-  the answer a walker would follow. Both are gone. `discover_relations` imports the
-  declared foreign keys into a per-datasource graph stored in
-  `relations/<sourceId>.json`, `propose_relation` records a join the catalog does not
-  declare, and `list_edges` reports every edge with its source (`fk`, `manual`,
-  `inferred`, `audit_mined`), status (`pending`, `confirmed`, `trusted`, `stale`,
-  `rejected`), optional `condition`, and counts. A proposed edge starts `pending` and
-  is not followed until it is confirmed.
-
-- **`trace_by_key` follows a value across tables.** Give it a value and it finds
-  where the value lives, then walks the relation graph hop by hop — reporting each
-  table, the condition it used, the statement it ran, how many rows came back, and
-  which edge carried it there. It follows only `confirmed` and `trusted` edges; a
-  pending edge that would have continued the walk is listed separately with the
-  reason, and a step with no rows is reported as the place the chain breaks rather
-  than silently ending the trace. Values are always bound parameters, so the SQL it
-  reports is safe to log, and `max_depth` (1–6) and `max_rows_per_table` (1–200) bound
-  the work.
-
-- **An edge now has a state machine, and trust is measured rather than assumed.**
-  `feedback_relation` records what a trace step showed. `ok` is the only verdict
-  that confirms an edge; `too_many` (with `wrong_column`, `needs_condition` or
-  `not_unique`) and `missing` make it `stale`, which stops the walker following it
-  until the column is fixed or the condition is added; `irrelevant` sends it to
-  `rejected`, the blacklist only a fresh `propose_relation` can lift. An edge
-  becomes `trusted` — followed without asking again — only after three
-  confirmations, with no rejection left standing, on an indexed or unique reference
-  column, with an average fanout of 5 or less; that badge is recomputed on every
-  confirmation rather than latched, so a join whose fanout grows falls back to
-  `confirmed`. `set_relation_condition` attaches the predicate a join needs without
-  changing its status, and `delete_edge` removes a typo outright. Traces now report
-  per-step fanout so a caller can pass the measured figure back.
-
-- **The relation graph has a page of its own.** The panel gained a **Relations**
-  tab: pick a data source, then read its edges as a list — each row shows the join
-  path (`t_line.trans_id → t_trans.id`), a status chip, the source, and how many
-  times it was confirmed. Filter chips narrow the list to all / pending / confirmed
-  / stale while the counters keep counting the whole graph, so a filter never hides
-  how much work is left. A pending edge offers confirm, reject (with the reason that
-  made the trace wrong) and add-condition; a stale edge shows what failed last and
-  offers a re-check or a delete; a rejected edge can be re-opened; a confirmed or
-  trusted edge shows its confirmation record. The page only calls the graph tools
-  through dedicated routes — it cannot run SQL.
-
-- **The trace result has a page too.** The **Trace** tab takes one value plus an
-  optional entry table, entry column and direction, and shows the walk as numbered
-  steps: the table, the condition with its bound values, the row count, a few sample
-  cells, the edge that carried it there, and that edge's status. Steps where the
-  chain broke (`0 rows — the chain stops here`), where the read was capped, or where
-  a warning was raised are marked in place; edges that were not followed because
-  they are still pending are listed separately with a pointer back to the graph. Each
-  step can be judged right / too many (with a reason) / missing / unrelated, and the
-  judgement is recorded against the edge behind it — so a wrong walk is also how the
-  graph gets corrected. The page accepts a value and never a statement: the SQL is
-  built server-side from the graph and bound as parameters, and the value itself is
-  never echoed back into the page.
-
-- **Joins can be mined out of the audit log.** Plenty of schemas declare no foreign
-  keys at all, yet the statements that already joined those tables are sitting in
-  `logs/audit.jsonl`. `mine_relations` reads the `execute_sql` and `explain_query`
-  lines, parses the equalities in their `on` clauses, and turns the recurring pairs
-  into edges — no statement is run again and no row data is involved. The statement
-  says the columns are equal, not which side owns the other, so the catalog decides:
-  the side whose column is a primary key or a single-column unique index becomes the
-  parent. A pair where neither side looks unique, or where both do, is reported under
-  `ambiguous` and left out of the graph instead of being guessed — the walker follows
-  every confirmed edge, so a wrong one is worse than a missing one. Mined edges
-  arrive `pending` with source `audit_mined`, and a source is never weakened (`fk` >
-  `manual` > `audit_mined` > `inferred`), so re-mining cannot relabel a declared key
-  or downgrade a hand proposal. The Relations page gained a **Mine the log** button
-  beside **Import foreign keys**.
-
-- **Joins can be mined out of a project's source tree too.** The log miner only sees
-  statements that already ran, which is nothing on the day a schema is first
-  explored — but a Spring Boot project has written its joins down. `scan_code_relations`
-  reads a project directory and takes SQL from exactly three places: mapper XML
-  (`select`/`insert`/`update`/`delete`/`sql`, with `<if>`/`<foreach>`/`<where>`
-  flattened the way MyBatis builds them), `@Select`/`@Insert`/`@Update`/`@Delete`
-  annotations, and MyBatis-Plus fragments (`.apply`, `.last`, `.inSql`, `.exists`,
-  `.notExists`, `.having`). Every other string literal is skipped on purpose: a log
-  message or a regex read as SQL would invent tables, and a scanner that guesses is
-  worse than one that finds nothing. `build`, `target` and `.git` are skipped so
-  generated copies do not count twice, and each edge records the `file:line` it came
-  from. Direction and ambiguity work exactly as in the log miner — the catalog decides
-  the parent side, and an undecidable pair is reported rather than guessed — and the
-  edges arrive `pending` with source `audit_mined`. Nothing is executed: the files are
-  read, never run. A project that only uses `BaseMapper` and single-table wrappers
-  reports zero, which is the correct answer for it.
-
-- **The audit log loads more as you scroll.** The panel used to show only the
-  newest 12 calls with no way to reach the older ones. A **Load more** button now
-  sits at the bottom of the audit card while entries remain, fetching the next
-  page without losing the ones on screen; it disappears once every stored line is
-  shown. `GET /audit` now returns a `total` alongside the page so the panel knows
-  when to stop.
-
-- **Every outside client can be configured for stdio or HTTP.** The client card
-  used to decide the transport itself: Claude Desktop and Codex always got a
-  stdio entry, while VS Code, Cursor, JetBrains Air and Claude Code had to have
-  the HTTP endpoint running before they could be configured. Each client row now
-  has two buttons — **Write stdio** and **Write HTTP** — so any of them can run
-  this server as a child process with no port open, or use the shared endpoint.
-  Writing one form replaces the other, and the configured pill shows which form
-  is in place. `POST /clients/configure` takes an optional `transport`; omitting
-  it keeps the old per-client default.
-
-### Changed
-
-- **VS Code is configured through the Copilot harness file.** VS Code 1.147 and
-  newer read MCP servers from `$COPILOT_HOME/mcp-config.json` (the Copilot CLI
-  file, `~/.copilot/mcp-config.json` by default) and treat the per-profile
-  `mcp.json` as a deprecated destination — entries there keep working through
-  editor forwarding, but VS Code puts a **Migrate MCP Server** banner on them.
-  The VS Code row now writes the Copilot file with the portable entry shape
-  (`type` plus `tools: ["*"]`), and the separate VS Code Insiders row is gone
-  because both channels share that one file. Writing it also removes a stale
-  `dsh-db-mcp` entry from the deprecated profile files (other entries are left
-  alone), so the server is not registered twice and the banner has nothing to
-  point at.
-
-### Removed
-
-- **`list_relations` and `describe_table.foreignKeys` are gone.** Two copies of the
-  same answer invited a model to read the one the walker would not use. The catalog
-  still holds the foreign keys, and `discover_relations` still reads them — it just
-  puts them in the relation graph instead of answering per call. `engines.list_relations`
-  stays as an internal helper.
 
 ## [1.0.0] - 2026-11-19
 
@@ -939,6 +942,7 @@ The panel became a connection manager, and a source can only exist once.
 - **Set as default source.** With one list and one shared server the setting had nothing
   left to decide; `isDefault` is still read from an older registry but no longer written.
 
+
 ## [0.7.5] - 2026-11-09
 
 ### Added
@@ -1054,8 +1058,7 @@ it shipped as a single unreleased tree.
 - Read-only by default; a source becomes writable only when you say so.
 - Publishing through npm trusted publishing, so no token lives in the repository.
 
-[Unreleased]: https://github.com/halcyon6669/dsh-db-mcp/compare/v1.1.0...HEAD
-[1.1.0]: https://github.com/halcyon6669/dsh-db-mcp/compare/v1.0.0...v1.1.0
+[Unreleased]: https://github.com/halcyon6669/dsh-db-mcp/compare/v1.0.0...HEAD
 [1.0.0]: https://github.com/halcyon6669/dsh-db-mcp/compare/v0.9.10...v1.0.0
 [0.9.10]: https://github.com/halcyon6669/dsh-db-mcp/compare/v0.9.9...v0.9.10
 [0.9.9]: https://github.com/halcyon6669/dsh-db-mcp/compare/v0.9.8...v0.9.9

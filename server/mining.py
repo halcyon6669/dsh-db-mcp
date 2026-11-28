@@ -58,12 +58,30 @@ EQUALITY = re.compile(
 # The on-clause ends at the next clause keyword. An equality after `where` is a
 # filter, not the join condition, and must not be mined as one.
 CLAUSE_END = re.compile(
-    r"\b(where|group|order|having|limit|offset|union|except|intersect|join|inner|left|right|full|cross|natural|using)\b",
+    r"\b(where|group|order|having|limit|offset|union|except|intersect|join|inner|left|right|full|cross|natural|using|set|values|returning)\b",
     re.IGNORECASE,
 )
 
-# A statement is only interesting if it joins something.
+# A statement is only interesting if it joins something. A join is written three
+# ways, and all three are read: an explicit `join`, a comma-separated from-list
+# whose equality sits in `where`, and a subquery that correlates with the outer
+# query.
 JOIN_WORDS = re.compile(r"\bjoin\b", re.IGNORECASE)
+
+FROM_WORDS = re.compile(r"\bfrom\b", re.IGNORECASE)
+
+# Oracle's outer-join marker rides on one operand: `p.order_no (+) = o.order_no`.
+# It is a flavour of join, not part of the column name, so it is dropped first.
+OUTER_MARK = re.compile(r"\(\s*\+\s*\)")
+
+SUBQUERY = re.compile(r"\(\s*select\b", re.IGNORECASE)
+
+# `x in (select y from t)` correlates the outer operand with the subquery's
+# projection, an equality no `=` regex can see.
+IN_PROJECTION = re.compile(
+    rf"(?:({_IDENT})\.)?({_IDENT})\s+in\s*\(\s*select\s+(?:({_IDENT})\.)?({_IDENT})",
+    re.IGNORECASE,
+)
 
 
 def _clean(name: str) -> str:
@@ -72,6 +90,21 @@ def _clean(name: str) -> str:
     if "." in text:
         text = text.rsplit(".", 1)[-1]
     return text.strip().strip('"`[]')
+
+
+# The from-clause of one query, cut where the next clause starts. A comma-joined
+# from-list is the older spelling of a join and is still what Oracle code says.
+FROM_CLAUSE = re.compile(
+    rf"\bfrom\b(.*?)(?=\bwhere\b|\bgroup\b|\border\b|\bhaving\b|\blimit\b|\bunion\b|\bexcept\b|\bintersect\b"
+    rf"|\bjoin\b|\binner\b|\bleft\b|\bright\b|\bfull\b|\bcross\b|\bnatural\b|\bset\b|$)",
+    re.IGNORECASE | re.DOTALL,
+)
+
+# One entry of a comma-joined from-list: `t_order o`, `app.t_order as o`.
+PART_REF = re.compile(
+    rf"^\s*({_TABLE})(?:\s+(?:as\s+)?((?!{_RESERVED_ALT}\b){_IDENT}))?",
+    re.IGNORECASE,
+)
 
 
 def _alias_map(statement: str) -> dict[str, str]:
@@ -85,6 +118,21 @@ def _alias_map(statement: str) -> dict[str, str]:
         if alias and alias.casefold() not in RESERVED:
             found[alias.casefold()] = table
         found.setdefault(table.casefold(), table)
+    # `from t_a a, t_b b` — TABLE_REF only anchors on the `from` keyword, so the
+    # entries after the comma would be invisible and every equality between them
+    # unresolvable.
+    for clause in FROM_CLAUSE.finditer(statement):
+        for part in clause.group(1).split(","):
+            match = PART_REF.match(part)
+            if not match:
+                continue
+            table = _clean(match.group(1))
+            if not table:
+                continue
+            alias = _clean(match.group(2) or "")
+            if alias and alias.casefold() not in RESERVED:
+                found[alias.casefold()] = table
+            found.setdefault(table.casefold(), table)
     return found
 
 
@@ -119,8 +167,45 @@ def _on_clause(statement: str, start: int, end: int) -> str | None:
     return rest
 
 
+def _pairs_in(text: str, aliases: dict[str, str], tables: set[str]) -> list[tuple[dict, dict]]:
+    """Cross-table equalities in one stretch of SQL."""
+    pairs: list[tuple[dict, dict]] = []
+    for equality in EQUALITY.finditer(text or ""):
+        left = _side(equality.group(1) or "", equality.group(2), aliases, tables)
+        right = _side(equality.group(3) or "", equality.group(4), aliases, tables)
+        if not left or not right:
+            continue
+        if left["table"].casefold() == right["table"].casefold():
+            continue
+        pairs.append((left, right))
+    return pairs
+
+
+def _subquery_bodies(statement: str) -> list[str]:
+    """The text of every `( select ... )` in a statement, innermost included."""
+    bodies: list[str] = []
+    for match in SUBQUERY.finditer(statement):
+        depth = 0
+        index = match.start()
+        while index < len(statement):
+            character = statement[index]
+            if character == "(":
+                depth += 1
+            elif character == ")":
+                depth -= 1
+                if depth == 0:
+                    bodies.append(statement[match.start() + 1 : index])
+                    break
+            index += 1
+        else:
+            bodies.append(statement[match.start() + 1 :])
+    return bodies
+
+
 def _joins(statement: str) -> list[tuple[dict, dict]]:
     """Every equality between two different tables in this statement's joins."""
+    # `p.order_no (+) = o.order_no` is an outer join, not a column called `(+)`.
+    statement = OUTER_MARK.sub(" ", statement or "")
     aliases = _alias_map(statement)
     tables = set(aliases.values())
     if len(tables) < 2:
@@ -134,14 +219,36 @@ def _joins(statement: str) -> list[tuple[dict, dict]]:
         rest = _on_clause(statement, match.end(), end)
         if not rest:
             continue
-        for equality in EQUALITY.finditer(rest):
-            left = _side(equality.group(1) or "", equality.group(2), aliases, tables)
-            right = _side(equality.group(3) or "", equality.group(4), aliases, tables)
-            if not left or not right:
-                continue
-            if left["table"].casefold() == right["table"].casefold():
-                continue
-            pairs.append((left, right))
+        pairs.extend(_pairs_in(rest, aliases, tables))
+
+    # `from t_a a, t_b b where a.x = b.y` — the equality that joins a comma-list
+    # lives in the where clause, which is a filter for every other spelling.
+    for clause in FROM_CLAUSE.finditer(statement):
+        if "," not in clause.group(1):
+            continue
+        tail = statement[clause.end() :]
+        where = re.search(r"\bwhere\b", tail, re.IGNORECASE)
+        if not where:
+            continue
+        body = tail[where.end() :]
+        stop = CLAUSE_END.search(body)
+        if stop:
+            body = body[: stop.start()]
+        pairs.extend(_pairs_in(body, aliases, tables))
+
+    # A subquery correlates with the outer query through its own where clause
+    # (`exists (select 1 from t_refund r where r.order_no = o.order_no)`) or
+    # through its projection (`o.id in (select l.order_id from t_line l)`).
+    for body in _subquery_bodies(statement):
+        pairs.extend(_pairs_in(body, aliases, tables))
+    for match in IN_PROJECTION.finditer(statement):
+        left = _side(match.group(1) or "", match.group(2), aliases, tables)
+        right = _side(match.group(3) or "", match.group(4), aliases, tables)
+        if not left or not right:
+            continue
+        if left["table"].casefold() == right["table"].casefold():
+            continue
+        pairs.append((left, right))
     return pairs
 
 
@@ -179,7 +286,7 @@ def statements_candidates(statements, limit: int = 500) -> list[dict]:
     """
     seen: dict[tuple[str, str, str, str], int] = {}
     for sql in statements:
-        if not isinstance(sql, str) or not JOIN_WORDS.search(sql):
+        if not isinstance(sql, str) or not FROM_WORDS.search(sql):
             continue
         for left, right in _joins(sql):
             key = _key(left, right)

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.example.order.IdentifierMapper">
+
+    <!-- The catalog holds T_ORDER and t_line in mixed case; a project writes one
+         spelling and the SQL writes another. Both are the same table. -->
+    <select id="upperCase" resultType="map">
+        SELECT O.ID, L.SKU
+        FROM T_ORDER O
+        JOIN T_LINE L ON L.ORDER_ID = O.ID
+        WHERE O.CODE = #{code}
+    </select>
+
+    <!-- An explicit schema is a hint about where the table lives, not part of what
+         the join IS: the same join written without the schema is the same edge. -->
+    <select id="withSchema" resultType="map">
+        select o.id, p.amount
+        from app.t_order o
+        join app.t_payment p on p.order_no = o.order_no
+    </select>
+
+    <select id="withoutSchema" resultType="map">
+        select o.id, p.amount
+        from t_order o
+        join t_payment p on p.order_no = o.order_no
+    </select>
+
+</mapper>

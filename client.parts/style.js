@@ -2461,6 +2461,15 @@
         margin: 4px 0 0;
         font-variant-numeric: tabular-nums;
       }
+      /* Where a scanned join was read. Long mapper paths wrap instead of pushing
+         the row wider than the page. */
+      .dbmcp-edge-places {
+        margin: 2px 0 0;
+        overflow-wrap: anywhere;
+      }
+      .dbmcp-edge-place code {
+        font-size: 11px;
+      }
       .dbmcp-edge-when {
         margin: 2px 0 0;
         color: var(--dsw-alias-label-primary);

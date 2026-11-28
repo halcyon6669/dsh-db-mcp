@@ -572,11 +572,28 @@ a schema is first explored — so `scan_code_relations` reads the repository
 instead. `root` is the project directory; three places are read and nothing else:
 
 - MyBatis mapper XML — the bodies of `select` / `insert` / `update` / `delete` /
-  `sql`, with `<if>` / `<foreach>` / `<where>` children flattened the way MyBatis
-  builds them;
-- MyBatis annotations — `@Select`, `@Insert`, `@Update`, `@Delete`;
+  `sql`, with `<include refid="...">` expanded from the same file and
+  `<if>` / `<foreach>` / `<where>` children flattened the way MyBatis builds them.
+  A `<choose>` is the one exception: its branches are alternatives of the same
+  join, so only the first `<when>` (else the `<otherwise>`) is read — taking all
+  of them would count one join once per branch;
+- MyBatis annotations — `@Select`, `@Insert`, `@Update`, `@Delete`, including a
+  string concatenated over several lines and the `{...}` array form;
 - MyBatis-Plus fragments — `.apply(...)`, `.last(...)`, `.inSql(...)`,
   `.exists(...)`, `.notExists(...)`, `.having(...)`.
+
+`<resultMap>` is read too, but only where it states a link across two statements:
+an `<association>` or `<collection>` that carries both `column=` and `select=`
+means the parent's `column` matches the child statement's parameter, so the pair
+is reported as the join the convention stands for. A nested association that
+inlines its own `<id>`/`<result>` says nothing about another table and is ignored.
+The `select=` target may live in another mapper file; the whole tree is read once
+to resolve those names before any statement is turned into a join.
+
+Every shape SQL can write an equality in is read, not just the `join` keyword:
+an inner/left/right join, a comma-separated `from` list with its `where`, an
+Oracle `(+)` outer join (the marker is stripped, it is not a column), and the
+correlated `in (select ...)` / `exists (select ...)` subquery.
 
 Every other string literal in a `.java` file is skipped on purpose. A log message
 or a regex read as SQL would invent tables, and a scanner that guesses is worse
@@ -584,6 +601,18 @@ than one that finds nothing — the same reason the parser refuses an unqualifie
 column when a statement names more than one table. `build`, `target`, `out`,
 `.git`, `node_modules` and friends are skipped so generated copies do not count
 twice, and each statement carries `file:line` so the report points at the source.
+
+Table names are compared case-insensitively, because an Oracle project writes
+`T_ORDER` where the catalog says `t_order` and they are the same table. A schema
+someone spelled out (`from app.t_order`) is kept as a `schema` hint on the
+statement and shown to the reader, but it never becomes part of an edge's
+identity: the same join written with and without a prefix is one edge.
+
+The `file:line` places travel with the edge, not just with the report. `list_edges`
+returns `places` — up to ten, merged across rescans, because the same join is
+often written once in a mapper and once in an annotation — and the Relations page
+prints them under the join path so a reader can open the file. A catalog key or a
+hand proposal carries an empty list: those did not come from a file.
 
 Direction works exactly as it does for the log miner: the statement says the two
 columns are equal, the catalog says which side is the parent, and a pair where
@@ -605,8 +634,15 @@ The panel has two pages that talk to the graph, and neither of them accepts SQL:
   counters; filter chips for all / pending / confirmed / stale; the actions each
   status allows (confirm, reject with a reason, add a condition, re-open, delete);
   and the confirmation record of an edge that is already confirmed or trusted.
-  Two buttons fill the graph: **Import foreign keys** reads the catalog, and
-  **Mine the log** reads the statements already audited.
+  Three buttons fill the graph: **Import foreign keys** reads the catalog,
+  **Mine the log** reads the statements already audited, and **Scan a project**
+  reads a Spring Boot repository — type the folder or pick it with the host's
+  native dialog, then read back how many statements were read, how many joins
+  found, how many edges recorded, and — separately — the pairs the catalog could
+  not orient and the files the scanner could not read. A scan that quietly
+  dropped half a project would look identical to one that found nothing, so both
+  lists are always shown. An edge that came from a scan carries the `file:line`
+  places it was read from, printed under the join path.
 - **Trace** takes a value and an optional entry table/column, walks it, and draws the
   walk as a graph — one column per depth, one box per table, one line per join — with
   the picked step read underneath it: the values it was bound to, its rows (open

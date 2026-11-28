@@ -792,6 +792,38 @@ class ScanningTheSourceTree(unittest.TestCase):
         payload = self._scan()
         self.assertEqual(payload["edges"][0]["note"], "read from src/main/resources/mapper/TransMapper.xml:1")
 
+    def test_the_edge_keeps_every_place_the_join_is_written(self):
+        self._write(
+            "src/main/resources/mapper/TransMapper.xml",
+            '<mapper namespace="x"><select id="a">select * from t_trans t join t_order o on o.id = t.order_id</select></mapper>',
+        )
+        self._write(
+            "src/main/java/demo/TransMapper.java",
+            'package demo;\ninterface TransMapper {\n'
+            '  @Select("select * from t_trans t join t_order o on o.id = t.order_id")\n'
+            "  Object rows();\n}\n",
+        )
+        edge = self._scan()["edges"][0]
+        self.assertEqual(
+            sorted(edge["places"]),
+            ["src/main/java/demo/TransMapper.java:3", "src/main/resources/mapper/TransMapper.xml:1"],
+        )
+
+    def test_a_rescan_keeps_the_places_it_already_knew(self):
+        self._write(
+            "src/main/resources/mapper/TransMapper.xml",
+            '<mapper namespace="x"><select id="a">select * from t_trans t join t_order o on o.id = t.order_id</select></mapper>',
+        )
+        self._scan()
+        self._write(
+            "src/main/java/demo/TransMapper.java",
+            'package demo;\ninterface TransMapper {\n'
+            '  @Select("select * from t_trans t join t_order o on o.id = t.order_id")\n'
+            "  Object rows();\n}\n",
+        )
+        edge = self._scan()["edges"][0]
+        self.assertEqual(len(edge["places"]), 2, edge["places"])
+
     def test_an_undecidable_pair_is_reported(self):
         # Both sides are primary keys, so nothing says which one owns the other.
         self._write(

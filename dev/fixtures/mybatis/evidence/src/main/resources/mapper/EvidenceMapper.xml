@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.example.order.EvidenceMapper">
+
+    <select id="firstPlace" resultType="map">
+        select o.id, l.sku
+        from t_order o
+        join t_line l on l.order_id = o.id
+    </select>
+
+    <select id="secondPlace" resultType="map">
+        select l.sku
+        from t_line l
+        join t_order o on o.id = l.order_id
+        where l.sku = #{sku}
+    </select>
+
+</mapper>

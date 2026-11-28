@@ -257,15 +257,19 @@ def _orient(profile: dict, connection, schema: Optional[str], pairs: list[dict])
             ambiguous.append({**item, "reason": "both unique" if left_unique else "neither unique"})
             continue
         parent, child = (left, right) if left_unique else (right, left)
-        found.append(
-            {
-                "table": child["table"],
-                "column": child["column"],
-                "refTable": parent["table"],
-                "refColumn": parent["column"],
-                "name": item.get("name") or f"seen {item['hits']} time(s)",
-            }
-        )
+        row = {
+            "table": child["table"],
+            "column": child["column"],
+            "refTable": parent["table"],
+            "refColumn": parent["column"],
+            "name": item.get("name") or f"seen {item['hits']} time(s)",
+        }
+        # Where the join was read, so the edge itself can point a reader at the
+        # mapper that writes it. The graph is what someone opens weeks later; the
+        # scan report is gone by then.
+        if item.get("places"):
+            row["places"] = list(item["places"])
+        found.append(row)
     return found, ambiguous
 
 
@@ -611,7 +615,7 @@ def scan_code_relations(
                 key = mining._key(left, right)
                 spot = f"{item['file']}:{item['line']}"
                 bucket = places.setdefault(key, [])
-                if spot not in bucket and len(bucket) < 5:
+                if spot not in bucket and len(bucket) < relations.PLACES_LIMIT:
                     bucket.append(spot)
         for item in mined:
             left = item["left"]

@@ -47,7 +47,7 @@ const secretbox = await import(
 
 const API_PREFIX = "/plugins/db-mcp/api";
 const PLUGIN_NAME = "dsh-db-mcp";
-const PLUGIN_VERSION = "1.1.0";
+const PLUGIN_VERSION = "1.0.0";
 const SCHEMA_VERSION = 1;
 const REGISTRY_FILE = "datasources.json";
 const SECRETS_FILE = "secrets.json";
