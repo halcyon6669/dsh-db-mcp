@@ -771,6 +771,20 @@ its current size. All of the bundle logic lives in `server/bundle.py`:
   redacted, and the text is cut short). `health()` returns it as `catalog` and
   the Runtime diagnostics page shows it; a later successful write clears the
   latest failure but keeps the count.
+
+  Scrubbing covers the shapes a driver actually quotes, not just URLs: an
+  `user:password@` URL, `password=` / `token=` / `secret=` values, the Oracle
+  descriptor form `(HOST=…)(PORT=…)(SERVICE_NAME=…)` and the `user=` / `dsn=`
+  pairs, a bare `host:port[/service]`, and the same address written as an IPv4
+  literal. A clock time such as `12:30` is deliberately left alone, so the message
+  still reads like the error it came from.
+
+  This is best-effort, not a guarantee. It is a set of patterns matched against
+  text nobody controls, so a driver that invents a new way to spell an address
+  gets past it — and two shapes are knowingly not handled: an IP address with no
+  port (`10.20.30.40` on its own) and a free-form host name with no port. Treat
+  `catalog-health.json` as a file that may contain a host name, the same way the
+  audit log is treated as sensitive.
 - `apply_import(...)` takes the import lock, re-reads the current documents, and
   writes both through a temp file plus an atomic replace; every temp and final
   file is created with mode `0600` (on POSIX). If the second write fails, the

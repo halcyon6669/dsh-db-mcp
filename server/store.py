@@ -263,6 +263,25 @@ CATALOG_HEALTH_FILE = "catalog-health.json"
 _SECRET_PATTERNS = (
     (re.compile(r"[A-Za-z][A-Za-z0-9+.\-]*://[^\s/@]*:[^\s/@]*@", re.ASCII), "[redacted]://"),
     (re.compile(r"(?i)\b(password|passwd|pwd|token|secret)\s*[=:]\s*[^\s,;]+", re.ASCII), r"\1=[redacted]"),
+    # Oracle says the same thing in a descriptor instead of a URL:
+    # `(HOST=db.internal)(PORT=1521)(SERVICE_NAME=ORCLPDB1)`, and the driver adds
+    # `user=` / `dsn=`. Every one of those values names the server or the account,
+    # so the value goes and the key stays — the message must still be readable.
+    (
+        re.compile(
+            r"(?i)\b(host|port|service_name|sid|instance_name|server|user|username|dsn)"
+            r"\s*=\s*[^()\s;,]+",
+            re.ASCII,
+        ),
+        r"\1=[redacted]",
+    ),
+    # A bare `host:port[/service]`, which has no scheme for the first pattern to
+    # recognise. It needs a leading letter, so a clock time (12:30) or an error
+    # number is left alone.
+    (re.compile(r"\b[A-Za-z][A-Za-z0-9_.\-]*:\d{2,5}(?:/[A-Za-z0-9_$.\-]*)?", re.ASCII), "[redacted]"),
+    # The same address written with an IP: the leading-letter rule above cannot see
+    # it, and a lab server is named by its address more often than by its hostname.
+    (re.compile(r"\b\d{1,3}(?:\.\d{1,3}){3}:\d{2,5}(?:/[A-Za-z0-9_$.\-]*)?", re.ASCII), "[redacted]"),
 )
 
 

@@ -1217,6 +1217,68 @@ class CatalogFailureTrail(unittest.TestCase):
         self.assertNotIn("postgres://", blob, "a connection string must never be recorded")
         self.assertIn("cannot write", blob, "the reason itself is still useful")
 
+    def _record(self, message):
+        """Run one failed cache write with `message` and return the trail + file text."""
+        import store
+
+        profile, _ = store.resolve("shop")
+        saved = store.save_catalog
+
+        def broken(_profile, _catalog, **_kwargs):
+            raise OSError(message)
+
+        store.save_catalog = broken
+        try:
+            main._remember_catalog(profile, tables=["t_order"])
+        finally:
+            store.save_catalog = saved
+        path = store.catalog_health_path()
+        return store.catalog_health(), path.read_text(encoding="utf-8")
+
+    def test_an_oracle_address_and_service_never_land_on_disk(self):
+        # The classic Oracle connect error quotes the whole descriptor, which is
+        # where the host, the port and the service name live.
+        message = (
+            "ORA-12514: TNS:listener does not currently know of service requested in "
+            "connect descriptor (DESCRIPTION=(ADDRESS=(PROTOCOL=TCP)(HOST=db.internal)"
+            "(PORT=1521))(CONNECT_DATA=(SERVICE_NAME=ORCLPDB1)))"
+        )
+        trail, stored = self._record(message)
+        for raw in ("db.internal", "1521", "ORCLPDB1"):
+            self.assertNotIn(raw, trail.get("lastFailure") or "", f"{raw} must not be recorded")
+            self.assertNotIn(raw, stored, f"{raw} must not reach the file")
+        self.assertIn("ORA-12514", trail.get("lastFailure") or "", "the code still says what broke")
+
+    def test_the_user_name_a_driver_quotes_is_not_written_down(self):
+        message = 'ORA-01017: invalid username/password; logon denied: user=farmadmin dsn=ORCLPDB1'
+        trail, stored = self._record(message)
+        self.assertNotIn("farmadmin", trail.get("lastFailure") or "", "the user is not recorded")
+        self.assertNotIn("farmadmin", stored, "the user does not reach the file")
+        self.assertIn("ORA-01017", trail.get("lastFailure") or "", "the code survives")
+
+    def test_a_bare_dsn_is_not_written_down(self):
+        # No scheme, so the URL-with-credentials pattern never sees it.
+        message = "cannot connect: db.internal:1521/ORCLPDB1 (SERVICE_NAME=ORCLPDB1)"
+        trail, stored = self._record(message)
+        for raw in ("db.internal", "ORCLPDB1"):
+            self.assertNotIn(raw, trail.get("lastFailure") or "", f"{raw} must not be recorded")
+            self.assertNotIn(raw, stored, f"{raw} must not reach the file")
+        self.assertIn("cannot connect", trail.get("lastFailure") or "", "the reason stays useful")
+
+    def test_an_address_written_as_an_ip_is_not_written_down(self):
+        # Lab servers are named by address more often than by hostname, and an
+        # address has no leading letter for the host:port rule to catch.
+        message = "cannot reach 10.20.30.40:1521/ORCLPDB1 from this machine"
+        trail, stored = self._record(message)
+        for raw in ("10.20.30.40", "ORCLPDB1"):
+            self.assertNotIn(raw, trail.get("lastFailure") or "", f"{raw} must not be recorded")
+            self.assertNotIn(raw, stored, f"{raw} must not reach the file")
+
+    def test_a_clock_time_in_the_message_survives(self):
+        # Scrubbing must not eat ordinary text: `12:30` is not an address.
+        trail, _stored = self._record("write failed at 12:30 while rotating the log")
+        self.assertIn("12:30", trail.get("lastFailure") or "", "a timestamp is not a secret")
+
     def test_a_later_success_keeps_the_count_and_clears_the_latest_failure(self):
         import store
 
