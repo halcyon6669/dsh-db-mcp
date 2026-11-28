@@ -100,6 +100,45 @@ class BundleCli(unittest.TestCase):
         self.assertFalse(result.get("ok"))
         self.assertIn("op", result["error"]["message"])
 
+    def test_preview_without_a_catalog_hints_it_was_not_checked(self):
+        edge = {
+            "from": {"table": "t_order", "column": "id"},
+            "to": {"table": "t_line", "column": "order_id"},
+            "status": "trusted",
+        }
+        bundle = {"schemaVersion": 1, "kind": "db-mcp-bundle", "edges": [edge], "scenes": []}
+        result = _invoke({"op": "preview", "datasource": "trace-demo", "payload": bundle}, self.dir)
+        self.assertTrue(result.get("ok"), result)
+        self.assertTrue(result["plan"]["catalogHint"])
+        self.assertTrue(result["plan"]["respectStatus"])
+        self.assertEqual(result["plan"]["downgraded"][0]["reason"], "not_checked")
+
+    def test_preview_respect_status_toggle_forces_pending(self):
+        edge = {
+            "from": {"table": "t_order", "column": "id"},
+            "to": {"table": "t_line", "column": "order_id"},
+            "status": "trusted",
+        }
+        bundle = {"schemaVersion": 1, "kind": "db-mcp-bundle", "edges": [edge], "scenes": []}
+        result = _invoke(
+            {"op": "preview", "datasource": "trace-demo", "payload": bundle, "respectStatus": False},
+            self.dir,
+        )
+        self.assertTrue(result.get("ok"), result)
+        self.assertFalse(result["plan"]["respectStatus"])
+        self.assertTrue(all(item["reason"] == "pending_all" for item in result["plan"]["downgraded"]))
+
+    def test_a_stale_revision_is_reported(self):
+        bundle = {"schemaVersion": 1, "kind": "db-mcp-bundle", "edges": [], "scenes": []}
+        first = _invoke({"op": "preview", "datasource": "trace-demo", "payload": bundle}, self.dir)
+        revision = first["plan"]["revision"]
+        stale = _invoke(
+            {"op": "preview", "datasource": "trace-demo", "payload": bundle, "expectedRevision": revision + "x"},
+            self.dir,
+        )
+        self.assertTrue(stale.get("ok"), stale)
+        self.assertTrue(stale["plan"]["stalePreview"])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

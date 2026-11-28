@@ -141,6 +141,11 @@ try {
     (/dryRun/.test(hostSource) && /\/bundle\/import/.test(hostSource)) ||
       (/\/bundle\/preview/.test(hostSource) && /op:\s*isPreview\s*\?\s*["']preview["']/.test(hostSource)),
   )
+  check(
+    'the bundle routes forward the status toggle and the preview revision',
+    /respectStatus: payload\.respectStatus !== false/.test(hostSource) &&
+      /expectedRevision: payload\.expectedRevision/.test(hostSource),
+  )
 
   const sources = await client.callTool('list_datasources', {})
   check('list_datasources ok', sources.parsed?.ok === true, sources.text?.slice(0, 300))

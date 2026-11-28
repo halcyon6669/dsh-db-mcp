@@ -388,12 +388,58 @@ def _revision(relations_doc: dict, scenes_doc: dict) -> str:
     return hashlib.sha1(payload.encode("utf-8")).hexdigest()[:12]
 
 
-def _write_document(path, document: dict) -> None:
-    """Write one document to a temporary file next to its target."""
+def _lock_path(profile: dict) -> Path:
+    return Path(store.runtime_dir()) / "relations" / (store._source_key(profile) + ".bundle.lock")
+
+
+def acquire_lock(profile: dict) -> Path | None:
+    """Claim the import lock, or return None if another writer holds it."""
+    path = _lock_path(profile)
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as handle:
-        json.dump(document, handle, indent=2, ensure_ascii=False)
-        handle.write("\n")
+    try:
+        handle = os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    except FileExistsError:
+        return None
+    try:
+        os.write(handle, str(os.getpid()).encode("ascii"))
+    finally:
+        os.close(handle)
+    return path
+
+
+def release_lock(profile: dict, lock) -> None:
+    """Release a lock returned by ``acquire_lock`` (idempotent)."""
+    if lock is None:
+        return
+    try:
+        Path(lock).unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def _write_document(path, document: dict) -> None:
+    """Write one document to a private temporary file, then make it private on disk."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    # Create with 0600 from the start: a bundle can carry another team's table
+    # names and join conditions, so it must never be world-readable, not even
+    # for the instant before the final chmod.
+    descriptor = os.open(str(path), os.O_CREAT | os.O_TRUNC | os.O_WRONLY, 0o600)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            json.dump(document, handle, indent=2, ensure_ascii=False)
+            handle.write("\n")
+    except Exception:
+        try:
+            Path(path).unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+    try:
+        os.chmod(str(path), 0o600)
+    except OSError:
+        # Windows does not implement POSIX mode bits; the ACL inherited from
+        # the private runtime directory still restricts access.
+        pass
 
 
 def apply_import(profile: dict, result: dict) -> dict:
@@ -406,6 +452,21 @@ def apply_import(profile: dict, result: dict) -> dict:
     """
     if not isinstance(result, dict) or "relationsDoc" not in result or "scenesDoc" not in result:
         raise store.StoreError("user_error", "there is no calculated import to apply", "preview a bundle first")
+    lock = acquire_lock(profile)
+    if lock is None:
+        raise store.StoreError(
+            "user_error",
+            "the import lock is held by another writer",
+            "wait a moment and try again",
+        )
+    try:
+        return _apply_import_locked(profile, result)
+    finally:
+        release_lock(profile, lock)
+
+
+def _apply_import_locked(profile: dict, result: dict) -> dict:
+    """The commit itself, run with the import lock held."""
     rpath = relations.path_of(profile)
     spath = scenes.path_of(profile)
     originals = {}

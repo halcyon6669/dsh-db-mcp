@@ -52,9 +52,21 @@ def run(command: dict) -> dict:
             ),
         }
 
+    # The cached catalog is read only: no connection is opened, no data queried.
+    # When it is absent the resolver reports "not checked" and imports pending.
+    catalog = store.load_catalog(profile)
+    respect_status = command.get("respectStatus") is not False
+    expected_revision = command.get("expectedRevision")
+
     if op == "preview":
         payload = command.get("payload")
-        plan = bundle.import_bundle(profile, payload)
+        plan = bundle.import_bundle(
+            profile,
+            payload,
+            catalog=catalog,
+            respect_status=respect_status,
+            expected_revision=expected_revision,
+        )
         # The documents are large and private; the panel only needs the counts
         # and the conflicts to ask for a decision.
         plan.pop("relationsDoc", None)
@@ -65,7 +77,19 @@ def run(command: dict) -> dict:
         payload = command.get("payload")
         # Apply re-derives the plan against the current files so a preview that
         # sat open while somebody edited the graph cannot stamp over them.
-        result = bundle.import_bundle(profile, payload)
+        result = bundle.import_bundle(
+            profile,
+            payload,
+            catalog=catalog,
+            respect_status=respect_status,
+            expected_revision=expected_revision,
+        )
+        if result.get("stalePreview"):
+            return _fail(
+                "stale_preview",
+                "the graph changed since the preview",
+                "look at the new preview and confirm it again",
+            )
         applied = bundle.apply_import(profile, result)
         return {"ok": True, "applied": applied, "importId": result.get("importId")}
 

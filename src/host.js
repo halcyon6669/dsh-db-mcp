@@ -3661,6 +3661,8 @@ export function createHost(options = {}) {
           op: isPreview ? "preview" : "import",
           datasource: trimmed(payload.datasource) || undefined,
           payload: payload.payload,
+          respectStatus: payload.respectStatus !== false,
+          expectedRevision: payload.expectedRevision || undefined,
         });
         return sendJson(response, result.ok === false ? 400 : 200, result);
       }

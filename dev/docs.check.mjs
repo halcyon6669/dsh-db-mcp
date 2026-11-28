@@ -76,9 +76,13 @@ function inspect(file) {
 for (const file of files) inspect(file)
 
 /**
- * The README tool tables must list exactly the tools an agent can call: the twenty
- * Python MCP tools plus the Host-native session_scope. Deriving both sides keeps the
- * tables from drifting when a tool is added or removed.
+ * The README tool tables must list exactly the tools an agent can call. Two counts
+ * are in play and are deliberately different:
+ *   - 21 = Python MCP tools from server/main.py (`mcp__db__*` via @mcp.tool()).
+ *   - 22 = those 21 plus the Host-native `session_scope` registered in src/tools.js.
+ * The README tables use the 22 figure (an agent can call all of them); the bundle
+ * sharing CLI adds no MCP tool, so neither count changes when bundles are shared.
+ * Deriving both sides keeps the tables from drifting when a tool is added or removed.
  */
 {
   const server = readFileSync(join(root, 'server/main.py'), 'utf8')

@@ -299,6 +299,82 @@ class ImportingABundle(unittest.TestCase):
         self.assertEqual(relations.load(self.profile)["edges"], [])
         self.assertEqual(scenes.load(self.profile)["scenes"], [])
 
+    def test_a_written_document_is_private_on_posix(self):
+        if os.name == "nt":
+            self.skipTest("POSIX permission bits are not meaningful on Windows")
+        relations.save(self.profile, relations._blank(self.profile))
+        wire = self._wire(_edge("t_order", "id", "t_line", "order_id"))
+        result = bundle.import_bundle(self.profile, self._bundle(edges=[wire]))
+        bundle.apply_import(self.profile, result)
+        for path in (relations.path_of(self.profile), scenes.path_of(self.profile)):
+            self.assertEqual(path.stat().st_mode & 0o077, 0, f"{path.name} is readable by others")
+
+    def test_a_failed_second_write_leaves_no_temp_files(self):
+        original_replace = bundle.os.replace
+        calls = {"n": 0}
+
+        def _fail_on_second(src, dst):
+            calls["n"] += 1
+            if calls["n"] == 2:
+                raise OSError("disk full")
+            return original_replace(src, dst)
+
+        relations.save(self.profile, relations._blank(self.profile))
+        scenes.save(self.profile, scenes._blank(self.profile))
+        wire = self._wire(_edge("t_order", "id", "t_line", "order_id"))
+        result = bundle.import_bundle(self.profile, self._bundle(edges=[wire]))
+        bundle.os.replace = _fail_on_second
+        try:
+            with self.assertRaises(OSError):
+                bundle.apply_import(self.profile, result)
+        finally:
+            bundle.os.replace = original_replace
+        leftovers = list(relations.path_of(self.profile).parent.glob("*.bundle.tmp"))
+        self.assertEqual(leftovers, [])
+
+    def test_a_second_import_is_refused_while_a_lock_is_held(self):
+        wire = self._wire(_edge("t_order", "id", "t_line", "order_id"))
+        result = bundle.import_bundle(self.profile, self._bundle(edges=[wire]))
+        lock = bundle.acquire_lock(self.profile)
+        self.assertTrue(lock)
+        try:
+            with self.assertRaises(store.StoreError) as caught:
+                bundle.apply_import(self.profile, result)
+            self.assertIn("lock", caught.exception.message.lower())
+        finally:
+            bundle.release_lock(self.profile, lock)
+
+    def test_a_released_lock_can_be_taken_again(self):
+        lock = bundle.acquire_lock(self.profile)
+        self.assertTrue(lock)
+        bundle.release_lock(self.profile, lock)
+        again = bundle.acquire_lock(self.profile)
+        self.assertTrue(again)
+        bundle.release_lock(self.profile, again)
+
+    def test_a_preview_against_changed_files_is_flagged_stale(self):
+        wire = self._wire(_edge("t_order", "id", "t_line", "order_id"))
+        payload = self._bundle(edges=[wire])
+        relations.save(self.profile, relations._blank(self.profile))
+        scenes.save(self.profile, scenes._blank(self.profile))
+        preview = bundle.import_bundle(self.profile, payload)
+        revision = preview["revision"]
+        # Somebody edits the graph between preview and apply.
+        other = bundle.import_bundle(self.profile, self._bundle(edges=[self._wire(_edge("t_a", "id", "t_b", "a_id"))]))
+        bundle.apply_import(self.profile, other)
+        result = bundle.import_bundle(self.profile, payload, expected_revision=revision)
+        self.assertTrue(result["stalePreview"])
+        self.assertEqual(result["imported"], 1)
+
+    def test_a_preview_against_unchanged_files_is_fresh(self):
+        wire = self._wire(_edge("t_order", "id", "t_line", "order_id"))
+        payload = self._bundle(edges=[wire])
+        relations.save(self.profile, relations._blank(self.profile))
+        scenes.save(self.profile, scenes._blank(self.profile))
+        preview = bundle.import_bundle(self.profile, payload)
+        result = bundle.import_bundle(self.profile, payload, expected_revision=preview["revision"])
+        self.assertFalse(result["stalePreview"])
+
     def test_a_failed_second_write_leaves_both_files_unchanged(self):
         original_replace = bundle.os.replace
         calls = {"n": 0}
