@@ -3,13 +3,17 @@
 `logs/audit.jsonl` used to have exactly one writer: the Host half, whose wrapper
 around each tool call knew the conversation the call came from. That wrapper only
 ever sees calls it forwarded itself — the agent's stdio calls and the panel's
-`/mcp/call` route. A client pointed straight at the HTTP endpoint (VS Code, Cursor,
-Codex…) never touches the Host, so its calls left no line at all.
+`/mcp/call` route. Every other process is invisible to it: a client pointed
+straight at the HTTP endpoint (VS Code, Cursor, Codex…), and just as much a stdio
+server an outside client spawned from the entry the panel printed.
 
-So the HTTP child writes its own lines now. It is the only process that can: it is
-the one that ran the statement. The switch is `DB_MCP_AUDIT=1`, set by the Host when
-it spawns the HTTP child and left unset for the stdio child, which keeps exactly one
-writer per call — no call is ever recorded twice.
+So a process writes its own lines whenever it owns them: it is the one that ran
+the statement, so it is the only one that can. The switch is `DB_MCP_AUDIT=1`,
+set by whoever starts the process for a client that does not come back through
+the Host — the Host for its HTTP child, and the `env` block of the printed stdio
+entry for the client's own child. The Host's own stdio child is started without
+it, because the Host records those calls, which keeps exactly one writer per call
+— no call is ever recorded twice.
 
 The shape matches the Host's entries field for field, because the panel parses both
 with the same reader. `auditLog: false` in `settings.json` still silences it: the
@@ -88,9 +92,11 @@ def _settings() -> dict:
 def enabled() -> bool:
     """True when this process is the one that should be recording.
 
-    The environment decides who owns the file (the Host sets `DB_MCP_AUDIT=1` for
-    the HTTP child only); `settings.json` decides whether the user wants lines at
-    all. Both have to agree.
+    The environment decides who owns the file: `DB_MCP_AUDIT=1` is set by whoever
+    starts this process on behalf of a client that does not come back through the
+    Host. `settings.json` decides whether the user wants lines at all, and it is
+    read here rather than cached, so the switch in the panel reaches a process
+    that is already running. Both have to agree.
     """
     if os.environ.get("DB_MCP_AUDIT") != "1":
         return False

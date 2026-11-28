@@ -63,8 +63,8 @@ the port can speak JSON-RPC to it and call every tool the Python server publishe
 `execute_sql` included. Treat loopback as the boundary.
 
 What still applies is everything the Python server enforces on arrival: the read-only
-flag, `allowDdl`, the row caps (`DB_MCP_MAX_ROWS`, `DB_MCP_MAX_ROWS_HARD`) and
-`DB_MCP_ALLOW_WRITE`, which the Host passes at spawn time from the global write switch.
+flag, `allowDdl`, the row caps (`DB_MCP_MAX_ROWS`, `DB_MCP_MAX_ROWS_HARD`) and the
+global write switch, which that process re-reads out of `settings.json` on every call.
 What does **not** apply is the disabled-tool list: `disabledTools` is filtered in the
 Host when it registers `mcp__db__*` with DSH, so it narrows the agent's tool list only
 and an outside client still sees every tool. Stopping the endpoint (`POST /http/stop`)
@@ -211,7 +211,9 @@ for them again instead of reporting a bogus authentication failure.
 `settings.json` holds `{ "allowWrite": false, "auditLog": true, "httpEnabled": true, "httpPort": 8765, "disabledTools": [], "textPolicy": "auto", "cost": { … }, "updatedAt": "…" }`.
 `limits` holds `{ "sampleRows": 20, "maxRows": 200 }`: the row counts handed to `sample_rows`
 and `execute_sql` when the model does not name one. Out-of-range values fall back to those
-defaults.
+defaults. The Host injects them into the agent's calls, and the Python server re-reads the same
+two numbers out of this file as its own default, so an outside client that names no limit gets
+the panel's number too.
 `cost` holds `{ "slowMs": 200, "timingWindow": 5, "trustSamples": 3, "bigTableRows": 1000000 }`:
 the four thresholds that decide what a traced step may cost. They are set on the relation
 graph page and read by the Python server on every decision, so a change applies to the next
@@ -223,8 +225,8 @@ rendered into the model context. `auto` keeps the first and last 50 characters a
 size tag either way. The marker is English like every other string the Python server emits:
 it has no locale service to ask, and a reader that is a model does not need one. The policy
 is applied when the result is rendered, so the rows themselves are never truncated. An
-unknown value falls back to `auto`; the Python server reads it from `DB_MCP_TEXT_POLICY` at
-spawn time, so changing it restarts the child.
+unknown value falls back to `auto`; the Python server re-reads it out of this file on every
+call, so changing it applies to the next statement without a restart.
 `disabledTools` lists tool names without the `mcp__db__` prefix (for example `["get_ddl"]`):
 those are left out of the agent's registry, while the Python server keeps serving them over
 stdio and HTTP.
@@ -686,20 +688,21 @@ walk is one click away.
 {"at":"2026-11-08T06:20:28.000Z","tool":"mcp__db__execute_sql","datasource":"pg-demo","ok":true,"ms":41,"rows":3,"sql":"select id, name from customers order by id","client":"dsh-agent"}
 ```
 
-The writer is the Python process that ran the call, which is what lets a call that
-came straight into the HTTP endpoint appear here. `DB_MCP_AUDIT=1` in the child's
-environment marks it as the one owning the file; the Host sets it for the HTTP child
-only and records the stdio child's calls itself, so a call never produces two lines.
-`auditLog: false` in `settings.json` stops the Python writer too — it re-reads the
+The writer is the Python process that ran the call. `DB_MCP_AUDIT=1` in the child's
+environment marks it as the one owning the file: the Host sets it for its HTTP child, and
+the stdio entry the panel prints carries it too, so a client that spawns that entry itself
+writes its own lines rather than leaving none. The Host's own stdio child is started
+without the variable and has its calls recorded by the Host, so a call never produces two
+lines. `auditLog: false` in `settings.json` stops the Python writer too — it re-reads the
 file on every call, so no restart is needed.
 
 `client` says who made the call. The Host stamps `dsh-agent` for the stdio child it
 drives on the agent's behalf, and `panel` for the calls the panel's own probe route
-makes. A call that arrives over HTTP is stamped by the Python child from the
-`clientInfo` the MCP client sent when it connected — `"Cursor 0.44.0"`,
-`"probe-client 9.9.9"` — so a shared endpoint can be told apart from the agent. A
-client that sends no name is recorded as `unnamed client`; a line written outside any
-request (a direct call from a script) simply has no `client` key.
+makes. A call that arrives over HTTP or through a client-spawned stdio process is stamped
+by that Python child from the `clientInfo` the MCP client sent when it connected —
+`"Cursor 0.44.0"`, `"probe-client 9.9.9"` — so a shared endpoint can be told apart from
+the agent. A client that sends no name is recorded as `unnamed client`; a line written
+outside any request (a direct call from a script) simply has no `client` key.
 
 ### Data source fields
 
@@ -817,13 +820,15 @@ The bundle row in the profile accepts these options (all optional):
 | `mcpServerName` | `db` | prefix after `mcp__` when publishing tools |
 | `debug` | `false` | log Host activity to the DSH console |
 
-The Python side reads `DB_MCP_RUNTIME`, `DB_MCP_ALLOW_WRITE`, `DB_MCP_TEXT_POLICY`,
-`DB_MCP_AUDIT`, `DB_MCP_MAX_ROWS`, `DB_MCP_MAX_ROWS_HARD` and
-`DB_MCP_STATEMENT_TIMEOUT_MS`; the Host sets the first four when spawning — and sets
-`DB_MCP_AUDIT=1` for the HTTP child only, because that child is the sole writer for
-calls that arrive over HTTP. `DB_MCP_STATEMENT_TIMEOUT_MS` is read by the
-Python child itself, so setting it in the environment before DSH starts is enough —
-it does not have to be a bundle option.
+The Python side reads `DB_MCP_RUNTIME`, `DB_MCP_AUDIT`, `DB_MCP_MAX_ROWS`,
+`DB_MCP_MAX_ROWS_HARD` and `DB_MCP_STATEMENT_TIMEOUT_MS`; `DB_MCP_ALLOW_WRITE` and
+`DB_MCP_TEXT_POLICY` are still honoured as overrides, but by default both come from
+`settings.json`, which the Python child re-reads on every call so the panel's switches
+need no restart. The Host sets `DB_MCP_RUNTIME` for both children, `DB_MCP_AUDIT=1` for
+the HTTP child and for the stdio entry the panel prints (the only owners of a log for
+calls that never come back through the Host), and leaves it unset for its own stdio
+child. `DB_MCP_STATEMENT_TIMEOUT_MS` is read by the Python child itself, so setting it
+in the environment before DSH starts is enough — it does not have to be a bundle option.
 
 ## Runtime requirements
 

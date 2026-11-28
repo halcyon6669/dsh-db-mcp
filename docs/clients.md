@@ -55,9 +55,10 @@ works even with the HTTP endpoint stopped. **Write HTTP** writes the shared
 endpoint URL and needs that endpoint running — the button reports an error and a
 hint if it is not. Writing one form replaces the other in the same file, and the
 configured pill shows which form is currently in place (`stdio` stays lowercase,
-`HTTP` is capitalised). Every client reads the
-same `datasources.json` and `secrets.json`, so a source added in the panel shows up
-everywhere without a restart of the client — only of the MCP server itself.
+`HTTP` is capitalised). Every client reads the same `datasources.json`, `secrets.json`
+and `settings.json`; sources and panel switches are re-read per call, so a change made
+in the panel is in force for the next call in a client that is already running — no
+process has to be restarted.
 
 The Copilot entry carries `type` and `tools: ["*"]` because that file takes the
 portable shape; the other JSON clients get the bare `command`/`url` entry.
@@ -67,9 +68,17 @@ so on Linux Claude Desktop is absent.
 
 One rule is DSH-only and is **not** available to those clients: the per-conversation
 limit (it keys off the DSH conversation id). The audit log used to be in that group and
-no longer is: the HTTP child records its own calls, so an outside client's tool call
-lands in the same `logs/audit.jsonl` the panel reads. Read-only enforcement still
-applies, because it lives in Python.
+no longer is. Every client ends up in the same `logs/audit.jsonl` the panel reads,
+whichever transport it picked: the HTTP child records its own calls, and so does the
+stdio process an outside client spawns from the entry the panel printed — the `env` block
+in that entry carries `DB_MCP_AUDIT=1` for exactly that reason. An outside call is stamped
+with the client name from the MCP handshake, so the log still answers "which program ran
+this". Read-only enforcement still applies, because it lives in Python.
+
+Switches in the panel reach those clients too, without a restart. `allowWrite`, the text
+policy and the row defaults are re-read out of `settings.json` by whichever Python process
+is about to run the statement, so a client that was already running picks the change up on
+its next call — even the one DSH never started and therefore cannot replace.
 
 The **Tools** tab shows **Tools the agent sees** — one row per tool with
 a switch. Switching a tool off stops the plugin from publishing it, so the model never

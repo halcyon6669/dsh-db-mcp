@@ -131,13 +131,29 @@ mcp = FastMCP(
 )
 
 
+def _row_default() -> int:
+    """The default row cap, re-read per call.
+
+    The panel writes `limits.maxRows` into `settings.json`, and a process that an
+    outside client started cannot be restarted by us — so the number is read here
+    rather than captured when the interpreter came up.
+    """
+    limits = store.load_settings().get("limits")
+    if isinstance(limits, dict):
+        value = limits.get("maxRows")
+        if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+            return min(value, HARD_MAX_ROWS)
+    return DEFAULT_MAX_ROWS
+
+
 def _clamp_rows(limit: Optional[int]) -> int:
+    default = _row_default()
     try:
-        value = int(limit) if limit is not None else DEFAULT_MAX_ROWS
+        value = int(limit) if limit is not None else default
     except (TypeError, ValueError):
-        value = DEFAULT_MAX_ROWS
+        value = default
     if value <= 0:
-        value = DEFAULT_MAX_ROWS
+        value = default
     return min(value, HARD_MAX_ROWS)
 
 
@@ -276,11 +292,15 @@ def _orient(profile: dict, connection, schema: Optional[str], pairs: list[dict])
 def _audited(fn):
     """Record one audit line per call, when this process owns the log.
 
-    The Host's wrapper only sees the calls it forwarded itself, so a client pointed
-    straight at the HTTP endpoint would otherwise leave no trace. Every tool goes
-    through here; `audit.record` is a no-op unless the Host set `DB_MCP_AUDIT=1`,
-    which it does for the HTTP child only — so the stdio path keeps exactly one
-    writer and the file never gets two lines for one call.
+    Every tool goes through here, and whoever started this process decides
+    whether the log is ours: the Host sets `DB_MCP_AUDIT=1` for the process it
+    starts for an outside client, and leaves it unset for its own stdio child,
+    whose calls the Host records itself. One call is logged once, by whoever owns
+    it — `audit.record` is a no-op when this process does not.
+
+    The same wrapper refreshes the switches that live in `settings.json`, so a
+    change made in the panel is in force on the next call rather than at the next
+    restart this process may never get.
 
     `functools.wraps` keeps the signature FastMCP reads for the tool schema.
     """
@@ -288,6 +308,7 @@ def _audited(fn):
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
         started = time.time()
+        engines.apply_settings()
         # FastMCP calls tools by keyword, but a direct call in the tests may not:
         # zip the extra positional ones back onto the parameter names so the
         # recorded line always carries `datasource`, `sql` and `table`.

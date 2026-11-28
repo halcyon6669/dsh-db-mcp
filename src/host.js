@@ -2056,10 +2056,21 @@ export function createHost(options = {}) {
       "server",
       "main.py",
     );
+    /* `DB_MCP_AUDIT` belongs in here because the process this entry starts is
+       not ours: the client spawns it, its calls never reach the Host, and no
+       restart of ours could ever reach it. Whoever runs the statement writes the
+       line — that is this child for an outside client, and the Host for its own
+       stdio child, which is started without the variable so nothing is logged
+       twice. */
     return {
       command: interpreter || "python",
       args: [entry],
-      env: { PYTHONIOENCODING: "utf-8", PYTHONUTF8: "1", DB_MCP_RUNTIME: dir },
+      env: {
+        PYTHONIOENCODING: "utf-8",
+        PYTHONUTF8: "1",
+        DB_MCP_RUNTIME: dir,
+        DB_MCP_AUDIT: "1",
+      },
     };
   }
 
@@ -3233,7 +3244,7 @@ export function createHost(options = {}) {
           });
         if (route === "/tools") {
           const settingsNow = await readSettings();
-          const listing = bridge.toolCatalog();
+          const listing = await bridge.toolCatalog();
           return sendJson(response, 200, {
             ok: true,
             disabled: settingsNow.disabledTools || [],
@@ -3382,23 +3393,15 @@ export function createHost(options = {}) {
             ok: false,
             error: "httpPort must be an integer between 1024 and 65535",
           });
-        if (
-          payload.allowWrite !== undefined ||
-          payload.disabledTools !== undefined ||
-          payload.limits !== undefined ||
-          payload.textPolicy !== undefined
-        ) {
+        /* Only the publishing set needs a new process: `registerTools` filters
+           the tool list once, at boot, so hiding or showing a tool means
+           re-registering it. Everything else in this file — the write switch,
+           the text policy, the row limits — is re-read by whichever process is
+           about to run the statement, so an outside client's stdio child picks
+           the change up on its next call instead of being replaced (which we
+           could not do anyway: it is not our child). */
+        if (payload.disabledTools !== undefined) {
           void bridge.restart().catch(() => {});
-        }
-        /* `allowWrite` is read by the Python child when it starts, so the HTTP
-           process has to be replaced too — restarting only the stdio one leaves
-           every outside client on the old answer. The stdio restart above and
-           this one are independent; neither waits for the other. */
-        if (
-          payload.allowWrite !== undefined ||
-          payload.textPolicy !== undefined
-        ) {
-          void bridge.restartHttp().catch(() => {});
         }
         return sendJson(response, 200, { ok: true, settings });
       }

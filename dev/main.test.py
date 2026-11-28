@@ -70,6 +70,25 @@ class ErrorShape(unittest.TestCase):
 class RowClamp(unittest.TestCase):
     """`_clamp_rows` bounds what a caller may ask for."""
 
+    def setUp(self):
+        import os
+        import tempfile
+
+        # The default is re-read from `settings.json` on every call, so an empty
+        # runtime directory keeps these cases independent of the machine's panel.
+        self.tmp = tempfile.TemporaryDirectory()
+        self.saved = os.environ.get("DB_MCP_RUNTIME")
+        os.environ["DB_MCP_RUNTIME"] = self.tmp.name
+
+    def tearDown(self):
+        import os
+
+        if self.saved is None:
+            os.environ.pop("DB_MCP_RUNTIME", None)
+        else:
+            os.environ["DB_MCP_RUNTIME"] = self.saved
+        self.tmp.cleanup()
+
     def test_a_missing_value_takes_the_default(self):
         self.assertEqual(main._clamp_rows(None), main.DEFAULT_MAX_ROWS)
         self.assertEqual(main._clamp_rows(0), main.DEFAULT_MAX_ROWS)
@@ -79,6 +98,18 @@ class RowClamp(unittest.TestCase):
 
     def test_a_normal_value_passes_through(self):
         self.assertEqual(main._clamp_rows(5), 5)
+
+    def test_the_panel_limit_is_the_default_for_an_unnamed_call(self):
+        import json
+        from pathlib import Path
+
+        (Path(self.tmp.name) / "settings.json").write_text(
+            json.dumps({"limits": {"sampleRows": 5, "maxRows": 40}}), encoding="utf-8"
+        )
+        self.assertEqual(main._clamp_rows(None), 40)
+        # An explicit number is still the caller's own choice, up to the hard cap.
+        self.assertEqual(main._clamp_rows(7), 7)
+        self.assertEqual(main._clamp_rows(10**9), main.HARD_MAX_ROWS)
 
 
 @unittest.skipUnless(HAVE_MAIN, "the MCP SDK is not installed for this interpreter")

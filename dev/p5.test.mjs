@@ -276,34 +276,37 @@ try {
     String(startedUrl),
   )
 
-  /* The Python child reads the global write switch at start-up, so flipping it
-     has to replace that process. Restarting only the stdio one used to leave
-     every outside client on the old answer — the endpoint kept allowing writes
-     after the switch was turned off. */
+  /* A settings switch no longer replaces the Python child. The child re-reads
+     `settings.json` on every call, which is the only way a panel change can
+     reach a process the Host does not own — the stdio child an outside client
+     spawned. So the process stays, and the new answer is live for the next
+     statement. */
   const firstPid = (started.body?.http || httpAfter.body?.http || {}).pid
   if (firstPid) {
     await post('/settings', { allowWrite: true })
-    let secondPid = null
-    for (let attempt = 0; attempt < 40; attempt += 1) {
-      const state = await get('/http/status')
-      secondPid = state.body?.pid ?? state.body?.http?.pid ?? null
-      if (secondPid && secondPid !== firstPid) break
-      await new Promise((resolve) => setTimeout(resolve, 250))
-    }
+    // Long enough that the old behaviour (restart on write) would have shown.
+    await new Promise((resolve) => setTimeout(resolve, 1500))
+    const seen = await get('/http/status')
+    const secondPid = seen.body?.pid ?? seen.body?.http?.pid ?? null
     check(
-      'flipping the write switch replaces the HTTP child',
-      Boolean(secondPid) && secondPid !== firstPid,
+      'flipping the write switch leaves the HTTP child alone',
+      secondPid === firstPid,
       `${firstPid} -> ${secondPid}`,
     )
-    const samePort = await get('/http/status')
+    const live = await get('/settings')
     check(
-      'the restarted endpoint keeps its port',
-      samePort.body?.port === (started.body?.http || httpAfter.body?.http || {}).port,
-      `${(started.body?.http || httpAfter.body?.http || {}).port} -> ${samePort.body?.port}`,
+      'the write switch is readable straight after the flip',
+      live.body?.settings?.allowWrite === true,
+      JSON.stringify(live.body?.settings?.allowWrite),
+    )
+    check(
+      'the endpoint keeps its port',
+      seen.body?.port === (started.body?.http || httpAfter.body?.http || {}).port,
+      `${(started.body?.http || httpAfter.body?.http || {}).port} -> ${seen.body?.port}`,
     )
     await post('/settings', { allowWrite: false })
   } else {
-    check('flipping the write switch replaces the HTTP child', true, 'skipped: no endpoint on this machine')
+    check('flipping the write switch leaves the HTTP child alone', true, 'skipped: no endpoint on this machine')
   }
   await post('/http/stop', {})
 
@@ -337,6 +340,15 @@ try {
       Array.isArray(cursorCfg.mcpServers?.['dsh-db-mcp']?.args) &&
       Boolean(cursorCfg.mcpServers?.['dsh-db-mcp']?.env?.DB_MCP_RUNTIME),
     JSON.stringify(cursorCfg.mcpServers?.['dsh-db-mcp']),
+  )
+  /* The process this entry starts is not the Host's, and its calls never come
+     back through the Host — so it has to write its own audit lines. The Host's
+     own stdio child is deliberately started without the variable instead, which
+     is what keeps one call from being recorded twice. */
+  check(
+    'the stdio entry asks the outside process to write its own audit lines',
+    cursorCfg.mcpServers?.['dsh-db-mcp']?.env?.DB_MCP_AUDIT === '1',
+    JSON.stringify(cursorCfg.mcpServers?.['dsh-db-mcp']?.env),
   )
   const codexStdio = await post('/clients/configure', { client: 'codex', transport: 'stdio' })
   const codexText = await readFile(clientFiles.codex, 'utf8')

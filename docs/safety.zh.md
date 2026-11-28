@@ -16,7 +16,7 @@
 
 可写的数据源可以写登录能看到的每一个模式 —— 不再有逐模式白名单。剩下的边界是数据库本身：能写 `hr.employees` 的登录，换个客户端照样能写。要硬限制，请同时给这个数据源一个更窄的 `GRANT`。
 
-Python 服务在启动时读取全局开关，开关一动 Host 就重启它。在引擎允许的地方，只读还会在驱动层再拦一次（SQLite 用 `mode=ro`，PostgreSQL 用 `default_transaction_read_only`，MySQL 用 `SET SESSION TRANSACTION READ ONLY`）。
+Python 服务每次调用都从 `settings.json` 重读全局开关，所以面板里一翻，下一次语句就按新值走 —— 不用重启任何东西，包括 DSH 根本管不到的那个进程。在引擎允许的地方，只读还会在驱动层再拦一次（SQLite 用 `mode=ro`，PostgreSQL 用 `default_transaction_read_only`，MySQL 用 `SET SESSION TRANSACTION READ ONLY`）。
 
 ## 哪些规则在 DSH 之外仍然生效
 
@@ -24,18 +24,17 @@ Python 服务在启动时读取全局开关，开关一动 Host 就重启它。�
 
 | 规则 | 强制位置 | DSH 智能体 | 外部 MCP 客户端 |
 | --- | --- | --- | --- |
-| 全局写开关（`allowWrite`） | Python，子进程启动时从环境变量读 | 生效 | 生效 —— 开关翻转时 Host 会同时替换 HTTP 子进程 |
+| 全局写开关（`allowWrite`） | Python，每次调用都重读 `settings.json` | 生效 | 生效 —— 不用重启，下一次调用就是新值 |
 | 单源 `readOnly` | Python，每次调用都重读注册表 | 生效 | 生效 |
 | `allowDdl` | Python，连目标模式都还没解析就判定 | 生效 | 生效 |
 | 单会话限制（`mcp__db__session_scope`） | Host，按 DSH 会话 id 索引 | 生效 | 不生效 —— 外部客户端没有可索引的会话 |
-| 审计日志 | Python，由真正执行调用的进程每调一行 | 生效 | 生效 —— HTTP 子进程写同一个文件，并记下连上来的客户端 |
-| 行数默认值（面板里的 `sample_rows`、`execute_sql`） | Host，调用前塞进参数 | 生效 | 不生效 —— 但服务端的硬上限照旧 |
+| 审计日志 | Python，由真正执行调用的进程每调一行 | 生效 | 生效 —— HTTP 子进程和外部客户端自己拉起的 stdio 子进程都写同一个文件，并记下连上来的客户端 |
+| 行数默认值（面板里的 `sample_rows`、`execute_sql`） | 给智能体时由 Host 塞进参数；Python 把同一个文件当作自己的默认值 | 生效 | 生效 —— 调用方没写数字时服务端就用这个值 |
 | *工具* 标签里被关掉的工具 | Host，注册工具时过滤 | 生效 | 不生效 —— Python 服务照旧发布全部工具 |
 
-两个值得知道的后果：
+一个值得知道的后果：在 *工具* 标签关掉一个工具，只是把模型能看见的清单削短了，能力并没有收回：外部客户端照样能调它，面板自己的 `/mcp/call` 接口也是。
 
-- 在 *工具* 标签关掉一个工具，只是把模型能看见的清单削短了，能力并没有收回：外部客户端照样能调它，面板自己的 `/mcp/call` 接口也是。
-- 因为 `allowWrite` 只读一次，翻动它会同时替换两个 Python 子进程 —— 智能体背后的 stdio 那个，和外部客户端背后的 HTTP 那个。两者回到同一个端口，所以已经指向该端点的客户端不需要重新配置。
+上面这些都不需要重启才生效。面板写 `settings.json`，每个 Python 进程每次调用都从这个文件读自己的开关，所以早就在跑的客户端 —— 包括 DSH 从没启动、因而也没法替换的那个 —— 下一次语句就会看到新答案。
 
 ## DDL
 
@@ -88,9 +87,9 @@ Python 服务在启动时读取全局开关，开关一动 Host 就重启它。�
 
 每次 MCP 工具调用都会往 `<runtime>/logs/audit.jsonl`（0600）追加一行 JSON：时间、工具、调用方、数据源、耗时、行数、截断到 2000 字符的 SQL，以及失败时的错误。结果行本身从不记录。文件到 512 KiB 会轮转为 `audit.1.jsonl`，日志可用 `auditLog: false` 关闭。
 
-写这一行的是真正执行调用的 Python 进程，不是 Host。这对直连 HTTP 端点的外部客户端很关键：VS Code、Cursor 之类的请求根本不经过 Host，Host 外面的包装层看不见它们。两边各记各的 —— Host 记 stdio 子进程的调用，HTTP 子进程记自己的 —— 所以一次调用仍然只有一行。
+写这一行的是真正执行调用的 Python 进程，不是 Host。这对直连 HTTP 端点的外部客户端很关键：VS Code、Cursor 之类的请求根本不经过 Host，而它们自己拉起的 stdio 进程同样不经过，Host 外面的包装层这两种都看不见。各记各的 —— Host 记自己那个 stdio 子进程的调用，HTTP 子进程和外部客户端拉起的 stdio 进程记自己的 —— 所以一次调用仍然只有一行。
 
-`client` 记的是谁发起的调用，多人共用一个端点时靠它区分：Host 为 agent 发起的调用写 `dsh-agent`，为自己探测写 `panel`；HTTP 子进程写的是 MCP 客户端在连接时报上的名字（`Cursor 0.44.0`，什么都没报就是 `unnamed client`）。没有 `client` 键的行来自脚本直接调用工具，不属于任何请求。
+`client` 记的是谁发起的调用，多人共用一个端点时靠它区分：Host 为 agent 发起的调用写 `dsh-agent`，为自己探测写 `panel`；Python 进程写的是 MCP 客户端在连接时报上的名字（`Cursor 0.44.0`，什么都没报就是 `unnamed client`）。没有 `client` 键的行来自脚本直接调用工具，不属于任何请求。
 
 面板按 **你本机的时钟** 显示最近十几次记录，**带日期**，昨天和一小时前的调用不会混在一起；文件里保存的是 UTC，以便跨机器比较。悬停时显示同一时刻与时区。
 

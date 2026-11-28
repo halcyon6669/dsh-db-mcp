@@ -9,6 +9,7 @@ vanished when the connection closed. Run it through `dev/engines.test.mjs`
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import shutil
 import socket
@@ -134,6 +135,150 @@ CONFIG = {
     "mysql": {"database": "testdb"},
     "oracle": {"user": "TEST"},
 }
+
+
+class LiveSettings(unittest.TestCase):
+    """The panel's switches are read from `settings.json`, on every call.
+
+    The bug this guards against: `allowWrite` and the text policy were read once,
+    when the process started. Flipping a switch in the panel therefore had to
+    replace both Python children — and could never reach the stdio process an
+    outside client had started, which no restart of ours can replace.
+
+    The environment still wins when it says something, which is why the classes
+    above can keep flipping `DB_MCP_ALLOW_WRITE` without writing a settings file.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.saved_runtime = os.environ.get("DB_MCP_RUNTIME")
+        self.saved_write = os.environ.get("DB_MCP_ALLOW_WRITE")
+        self.saved_policy = os.environ.get("DB_MCP_TEXT_POLICY")
+        self.saved_policy_value = engines.TEXT_POLICY
+        os.environ["DB_MCP_RUNTIME"] = self.tmp.name
+        os.environ.pop("DB_MCP_ALLOW_WRITE", None)
+        os.environ.pop("DB_MCP_TEXT_POLICY", None)
+
+    def tearDown(self):
+        engines.TEXT_POLICY = self.saved_policy_value
+        for key, value in (
+            ("DB_MCP_RUNTIME", self.saved_runtime),
+            ("DB_MCP_ALLOW_WRITE", self.saved_write),
+            ("DB_MCP_TEXT_POLICY", self.saved_policy),
+        ):
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        self.tmp.cleanup()
+
+    def _write(self, **payload):
+        (Path(self.tmp.name) / "settings.json").write_text(json.dumps(payload), encoding="utf-8")
+
+    def test_no_settings_file_reads_as_no_permission(self):
+        self.assertFalse(engines.allow_write())
+
+    def test_the_write_switch_comes_from_the_file_when_the_environment_is_silent(self):
+        self._write(allowWrite=True)
+        self.assertTrue(engines.allow_write())
+        self._write(allowWrite=False)
+        self.assertFalse(engines.allow_write(), "a rewrite must be seen on the next call")
+
+    def test_only_a_real_true_grants_a_write(self):
+        for value in ("true", 1, "yes", None):
+            with self.subTest(value=value):
+                self._write(allowWrite=value)
+                self.assertFalse(engines.allow_write())
+
+    def test_the_environment_still_overrides_the_file(self):
+        self._write(allowWrite=True)
+        os.environ["DB_MCP_ALLOW_WRITE"] = "0"
+        self.assertFalse(engines.allow_write())
+        self._write(allowWrite=False)
+        os.environ["DB_MCP_ALLOW_WRITE"] = "1"
+        self.assertTrue(engines.allow_write())
+
+    def test_the_text_policy_is_refreshed_from_the_file(self):
+        self._write(textPolicy="full")
+        engines.apply_settings()
+        self.assertEqual(engines.TEXT_POLICY, "full")
+        long = "x" * 300
+        self.assertEqual(engines._cell(long), long)
+        self._write(textPolicy="auto")
+        engines.apply_settings()
+        self.assertEqual(engines.TEXT_POLICY, "auto")
+        self.assertIn("…(300 chars)…", engines._cell(long))
+
+    def test_an_unknown_policy_in_the_file_falls_back_to_auto(self):
+        self._write(textPolicy="headtail")
+        engines.apply_settings()
+        self.assertEqual(engines.TEXT_POLICY, "auto")
+
+    def test_an_exported_policy_wins_over_the_file(self):
+        os.environ["DB_MCP_TEXT_POLICY"] = "auto"
+        self._write(textPolicy="full")
+        engines.apply_settings()
+        self.assertEqual(engines.TEXT_POLICY, "auto")
+
+    def test_a_settings_document_can_be_passed_in(self):
+        self._write(textPolicy="auto")
+        engines.apply_settings({"textPolicy": "full"})
+        self.assertEqual(engines.TEXT_POLICY, "full")
+
+    def test_a_corrupt_settings_file_is_no_preference_not_a_crash(self):
+        (Path(self.tmp.name) / "settings.json").write_text("{not json", encoding="utf-8")
+        self.assertFalse(engines.allow_write())
+        engines.apply_settings()
+        self.assertEqual(engines.TEXT_POLICY, "auto")
+
+
+class SettingsCache(unittest.TestCase):
+    """`store.load_settings` is called on every tool call, so it caches the parse.
+
+    A cache that merely expires after a fixed delay is not enough: the panel writes
+    the file, and the very next call has to see it. These cases pin that, and pin
+    that a rewrite is noticed even when it lands with the same length.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.saved = os.environ.get("DB_MCP_RUNTIME")
+        os.environ["DB_MCP_RUNTIME"] = self.tmp.name
+        import store
+
+        self.store = store
+        self.path = Path(self.tmp.name) / "settings.json"
+        store._settings_cache = None
+
+    def tearDown(self):
+        self.store._settings_cache = None
+        if self.saved is None:
+            os.environ.pop("DB_MCP_RUNTIME", None)
+        else:
+            os.environ["DB_MCP_RUNTIME"] = self.saved
+        self.tmp.cleanup()
+
+    def test_a_missing_file_is_an_empty_document(self):
+        self.assertEqual(self.store.load_settings(), {})
+
+    def test_a_rewrite_is_visible_on_the_very_next_call(self):
+        self.path.write_text(json.dumps({"allowWrite": False}), encoding="utf-8")
+        self.assertFalse(self.store.load_settings()["allowWrite"])
+        self.path.write_text(json.dumps({"allowWrite": True}), encoding="utf-8")
+        self.assertTrue(self.store.load_settings()["allowWrite"])
+
+    def test_a_same_length_rewrite_is_still_noticed(self):
+        # `auto` and `full` are the same length, so a cache keyed on size — or one
+        # that trusts a timestamp with a coarse granularity — would hand back the
+        # old policy. The bytes themselves have to be compared.
+        self.path.write_text(json.dumps({"textPolicy": "auto"}), encoding="utf-8")
+        self.assertEqual(self.store.load_settings()["textPolicy"], "auto")
+        self.path.write_text(json.dumps({"textPolicy": "full"}), encoding="utf-8")
+        self.assertEqual(self.store.load_settings()["textPolicy"], "full")
+
+    def test_a_corrupt_file_reads_as_no_preference(self):
+        self.path.write_text("{not json", encoding="utf-8")
+        self.assertEqual(self.store.load_settings(), {})
 
 
 def profile(kind: str, read_only: bool = False, allow_ddl: bool = False) -> dict:

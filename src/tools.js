@@ -515,7 +515,7 @@ export function createBridge({
       if (!active || !active.running) {
         throw new McpError('the database MCP server is not running', { code: 'not_running' });
       }
-      const result = await active.callTool(name, withRowLimit(name, args), {
+      const result = await active.callTool(name, await withRowLimit(name, args), {
         timeoutMs: TOOL_TIMEOUT_MS,
       });
       if (audited) auditEntry(name, args, startedAt, result, null, caller);
@@ -637,12 +637,33 @@ export function createBridge({
 
   let rowLimits = { sampleRows: 20, maxRows: 200 };
 
-  function withRowLimit(name, args) {
+  /**
+   * The row limits in force right now.
+   *
+   * Read from `settings.json` on every call instead of once at start-up: the
+   * panel writes that file, and a process the user is not going to restart (the
+   * one an outside client owns, and the Host's own child too) has to see the
+   * change on the next call, not the next boot.
+   */
+  async function currentRowLimits() {
+    if (!settings) return rowLimits;
+    const live = await settings().catch(() => null);
+    const limits = live && live.limits ? live.limits : {};
+    const next = {};
+    for (const [name, rule] of Object.entries(ROW_LIMIT_TOOLS)) {
+      const value = limits[rule.key];
+      if (Number.isInteger(value)) next[rule.key] = Math.min(Math.max(value, rule.min), rule.max);
+    }
+    return { ...rowLimits, ...next };
+  }
+
+  async function withRowLimit(name, args) {
     const rule = ROW_LIMIT_TOOLS[name];
     if (!rule) return args;
     const explicit = args[rule.argument];
     if (explicit !== undefined && explicit !== null && explicit !== '') return args;
-    const value = rowLimits[rule.key];
+    const limits = await currentRowLimits();
+    const value = limits[rule.key];
     if (!Number.isInteger(value)) return args;
     return { ...args, [rule.argument]: value };
   }
@@ -651,7 +672,8 @@ export function createBridge({
    * What the panel shows: every tool the server offers, its purpose, and whether
    * it is currently published to the agent.
    */
-  function toolCatalog() {
+  async function toolCatalog() {
+    const limits = await currentRowLimits();
     const tools = catalog.map((tool) => {
       const rule = ROW_LIMIT_TOOLS[tool.name];
       return {
@@ -664,7 +686,7 @@ export function createBridge({
           ? {
               key: rule.key,
               argument: rule.argument,
-              value: rowLimits[rule.key],
+              value: limits[rule.key],
               min: rule.min,
               max: rule.max,
             }
@@ -763,8 +785,6 @@ export function createBridge({
       throw new McpError(`server/main.py not found under ${packageDir}`, { code: 'server_missing' });
     }
     const current = settings ? await settings().catch(() => ({ allowWrite: false })) : { allowWrite: false };
-    const allowWrite = current && current.allowWrite === true;
-    const textPolicy = current && current.textPolicy ? current.textPolicy : 'auto';
     disabledTools = Array.isArray(current && current.disabledTools)
       ? current.disabledTools.map((name) => String(name || '').trim()).filter(Boolean)
       : [];
@@ -784,12 +804,14 @@ export function createBridge({
         command: candidate,
         args: [entry],
         cwd: join(packageDir, 'server'),
+        /* The write switch and the text policy are deliberately *not* passed
+           here: this child re-reads `settings.json` on every call, so a panel
+           change reaches it without a restart. Pinning them at spawn time is
+           what used to make `allowWrite` stale until the process was replaced. */
         env: {
           PYTHONIOENCODING: 'utf-8',
           PYTHONUTF8: '1',
           DB_MCP_RUNTIME: runtimeDir,
-          DB_MCP_ALLOW_WRITE: allowWrite ? '1' : '0',
-          DB_MCP_TEXT_POLICY: textPolicy,
         },
         label: `db-mcp (${candidate})`,
       });
@@ -995,19 +1017,16 @@ export function createBridge({
       return httpStatus();
     }
     const entry = serverEntry(packageDir);
-    const current = settings ? await settings().catch(() => ({ allowWrite: false })) : { allowWrite: false };
     const child = spawn(python, [entry, '--http', '--host', host, '--port', String(bindPort), '--path', HTTP_PATH], {
       cwd: join(packageDir, 'server'),
+      /* As in `boot()`: the switches come from `settings.json` per call, so they
+         are not pinned here. What *is* set is `DB_MCP_AUDIT`, because this child
+         serves clients that never pass through the Host and therefore has to
+         write its own lines. */
       env: childEnvironment({
         PYTHONIOENCODING: 'utf-8',
         PYTHONUTF8: '1',
         DB_MCP_RUNTIME: runtimeDir,
-        DB_MCP_ALLOW_WRITE: current && current.allowWrite === true ? '1' : '0',
-        DB_MCP_TEXT_POLICY: current && current.textPolicy ? current.textPolicy : 'auto',
-        // This child serves clients that never pass through the Host, so it has
-        // to write its own audit lines. The stdio child deliberately does not
-        // get this: the Host records those calls, and one call must not be
-        // logged twice.
         DB_MCP_AUDIT: '1',
       }),
       windowsHide: true,
@@ -1048,10 +1067,11 @@ export function createBridge({
   }
 
   /**
-   * Restart the HTTP process in place, so a settings change that the child reads
-   * at start-up (`allowWrite`) takes effect there too. Only does anything when an
-   * endpoint is already running: a stopped one stays stopped, because the panel
-   * decides when to listen, not a settings write.
+   * Restart the HTTP process in place, keeping its port.
+   *
+   * Settings no longer need this — the child re-reads them per call — so it is
+   * only for an operator who wants the process itself replaced. A stopped
+   * endpoint stays stopped, because the panel decides when to listen.
    */
   async function restartHttp() {
     const previous = httpState;

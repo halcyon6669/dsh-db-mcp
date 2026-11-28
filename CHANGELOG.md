@@ -274,6 +274,20 @@ report of each version in more detail.
   finds it written again somewhere else — and the Relations page prints them under the
   join path. A catalog key or a hand proposal carries none, because it did not come
   from a file.
+- **A stdio client that spawns the entry itself now writes audit lines too.** Only the
+  HTTP child used to own a `logs/audit.jsonl`; a Claude Desktop or Codex process started
+  from the printed stdio entry had its calls recorded by nobody, because they never come
+  back through the Host. That entry's `env` now carries `DB_MCP_AUDIT=1`, so the process
+  that ran the statement writes the line and stamps it with the client name from the MCP
+  handshake. The Host's own stdio child is still started without the variable and keeps
+  having its calls recorded by the Host, so one call is still one line.
+- **Every panel switch is live, in every process.** `allowWrite`, `textPolicy` and the
+  row defaults used to be read once, when a Python child started, which is why flipping
+  the write switch had to replace both children — and could never reach a stdio process
+  an outside client had started. The Python side now re-reads `settings.json` per call
+  (`server/store.py` `load_settings`, comparing the file's bytes so an unchanged file
+  only costs a read and no parse), `audit.enabled()` already did, and the Host reads
+  the row limits per call as well. A restart is no longer part of saving a setting.
 
 ### Changed
 - **Trust is withdrawn when the measurements turn, and a rejection resets the count.**
@@ -421,6 +435,12 @@ by this section.
   when a trace reports its timings, with one `trust withdrawn` line in the edge
   history; a single slow sample among fast ones does not. `cost_of` also returns
   the `timings` window, not just `lastMs`/`avgMs`.
+- **Saving a setting no longer replaces a Python child.** Flipping the write switch
+  used to restart both children, which meant a brief window with no endpoint and, for
+  the stdio process an outside client started, no effect at all. The switches are
+  re-read per call now, so the PID stays put and the next statement sees the new answer.
+  Only the disabled-tool list still re-registers the tools, because that list is applied
+  once, when the Host publishes them.
 - **Business-key and weak-match lookups now take the same approval gate as a walk
   step.** A costly alias or weak query is refused and listed in `confirmTargets`
   with a `query id` rather than a relation edge id — `alias:<hash(table,column)>`

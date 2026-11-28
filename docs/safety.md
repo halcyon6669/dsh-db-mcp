@@ -37,9 +37,10 @@ per-schema allow list any more. The remaining boundary is the database itself: a
 login that can write `hr.employees` can still do it over any other client. For a
 hard limit, give the source a narrower `GRANT` as well.
 
-The Python server reads the global flag at start-up and the host restarts it
-whenever the switch flips. Read-only is enforced again at the driver where the
-engine allows it (`mode=ro` for SQLite, `default_transaction_read_only` for
+The Python server re-reads the global flag out of `settings.json` on every call, so the
+switch in the panel is in force for the next statement without restarting anything —
+including in a process DSH does not own. Read-only is enforced again at the driver where
+the engine allows it (`mode=ro` for SQLite, `default_transaction_read_only` for
 PostgreSQL, `SET SESSION TRANSACTION READ ONLY` for MySQL).
 
 ## Which rules follow you out of DSH
@@ -50,23 +51,22 @@ the host half can apply to one. That line is the whole table:
 
 | Rule | Enforced in | DSH agent | Outside MCP client |
 | --- | --- | --- | --- |
-| Global write switch (`allowWrite`) | Python, read from the environment when the child starts | yes | yes — the host also replaces the HTTP child when the switch flips |
+| Global write switch (`allowWrite`) | Python, re-read from `settings.json` on every call | yes | yes — no restart needed, the next call sees it |
 | `readOnly` per source | Python, re-read from the registry on every call | yes | yes |
 | `allowDdl` | Python, before the target schema is even resolved | yes | yes |
 | Per-conversation limit (`mcp__db__session_scope`) | Host, keyed by the DSH conversation id | yes | no — an outside client has no conversation to key off |
-| Audit log | Python, one line per call from the process that ran it | yes | yes — the HTTP child writes the same file, and names the client that connected |
-| Row-count defaults (`sample_rows`, `execute_sql` in the panel) | Host, injected into the arguments before the call | yes | no — but the server's own hard cap still applies |
+| Audit log | Python, one line per call from the process that ran it | yes | yes — the HTTP child and the stdio child an outside client starts both write the same file, and name the client that connected |
+| Row-count defaults (`sample_rows`, `execute_sql` in the panel) | Host injects them for the agent; Python re-reads the same file as its own default | yes | yes — the server applies the same number when the caller names none |
 | Rows switched off on the *Tools* tab | Host, filtered when the tools are registered | yes | no — the Python server still publishes every tool |
 
-Two consequences worth knowing:
+One consequence worth knowing: turning a tool off on the *Tools* tab trims what the
+model can see. It does not take the capability away: an outside client can still call
+that tool, and so can the panel's own `/mcp/call` route.
 
-- Turning a tool off on the *Tools* tab trims what the model can see. It does not take
-  the capability away: an outside client can still call that tool, and so can the
-  panel's own `/mcp/call` route.
-- Because `allowWrite` is read once at start-up, flipping it replaces both Python
-  children — the stdio one behind the agent and the HTTP one behind outside clients.
-  Both come back on the same port, so a client already pointed at the endpoint does not
-  need to be reconfigured.
+Nothing above needs a restart to take effect. The panel writes `settings.json`, and each
+Python process reads its switches out of that file per call, so a client that was already
+running — including one DSH never started and therefore cannot replace — sees the new
+answer on its next statement.
 
 ## DDL
 
@@ -199,13 +199,15 @@ rotates to `audit.1.jsonl` at 512 KiB and logging can be switched off with
 
 The line is written by the Python process that ran the call, not by the Host. That
 matters for outside clients: a VS Code or Cursor pointed straight at the HTTP
-endpoint never passes through the Host, so a Host-side wrapper could not see it.
-Each process writes only for itself — the Host records the stdio child's calls, the
-HTTP child records its own — so one call still leaves exactly one line.
+endpoint never passes through the Host, and neither does the stdio process one of
+those clients starts itself, so a Host-side wrapper could not see either. Each
+process writes only for itself — the Host records its own stdio child's calls, the
+HTTP child and a client-spawned stdio child record theirs — so one call still
+leaves exactly one line.
 
 `client` names the caller, which is how a shared endpoint stays attributable: the
 Host writes `dsh-agent` for what the agent asked and `panel` for its own probes, and
-the HTTP child writes whatever the MCP client announced at connect time
+a Python process writes whatever the MCP client announced at connect time
 (`Cursor 0.44.0`, `unnamed client` when it announced nothing). A line with no
 `client` key came from a script calling the tool directly, outside any request.
 

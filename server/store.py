@@ -14,6 +14,10 @@ from pathlib import Path
 import secretbox
 
 SCHEMA_VERSION = 1
+SETTINGS_FILE = "settings.json"
+
+# path, the bytes last read, the parsed document
+_settings_cache: tuple[Path, str, dict] | None = None
 
 
 class StoreError(Exception):
@@ -56,6 +60,38 @@ def load_secrets() -> dict:
     data = _read_json(runtime_dir() / "secrets.json", {"secrets": {}})
     secrets = data.get("secrets")
     return secrets if isinstance(secrets, dict) else {}
+
+
+def load_settings() -> dict:
+    """Read settings.json, staying cheap enough to call on every tool call.
+
+    The panel writes this file and the next call has to see the change, so the
+    document is re-read rather than frozen at import. Only the *parse* is cached:
+    the bytes are compared against the last read, which is a few hundred bytes
+    and happens once per tool call — not once per cell, which is what made a
+    timestamp cache look tempting. Comparing the text rather than the mtime also
+    means a rewrite is noticed even when it lands in the same clock tick with the
+    same length, which a timestamp comparison misses. A missing or malformed file
+    reads as "no preference expressed", never as an error: a corrupt settings
+    file must not take the database down with it.
+    """
+    global _settings_cache
+    path = runtime_dir() / SETTINGS_FILE
+    cached = _settings_cache
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        _settings_cache = (path, None, {})
+        return {}
+    if cached and cached[0] == path and cached[1] == raw:
+        return cached[2]
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        data = {}
+    _settings_cache = (path, raw, data if isinstance(data, dict) else {})
+    return _settings_cache[2]
+    return _settings_cache[3]
 
 
 def password_of(profile: dict, secrets: dict | None = None) -> str | None:

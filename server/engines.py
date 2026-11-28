@@ -17,6 +17,7 @@ import time
 from pathlib import Path
 from urllib.parse import quote
 
+import store
 import writes
 
 # Statements that only read. `set` and `pragma` used to sit here, which let a
@@ -90,8 +91,18 @@ PG_LIKE = ("postgres", "gauss")
 
 
 def allow_write() -> bool:
-    """Global write switch, exported by the host when it spawns this server."""
-    return os.environ.get("DB_MCP_ALLOW_WRITE", "0") == "1"
+    """Global write switch.
+
+    The environment still wins when it says something: a test or an operator who
+    exports `DB_MCP_ALLOW_WRITE` means it. Otherwise the answer comes from
+    `settings.json` on every call, so flipping the switch in the panel reaches a
+    process that is already running — including one an outside client started,
+    which no restart of ours could ever reach.
+    """
+    raw = os.environ.get("DB_MCP_ALLOW_WRITE")
+    if raw is not None:
+        return raw == "1"
+    return store.load_settings().get("allowWrite") is True
 
 
 # How long one statement may run. A query that runs for minutes holds a server
@@ -128,6 +139,24 @@ def text_policy(value: str | None) -> str:
 
 
 TEXT_POLICY = text_policy(os.environ.get("DB_MCP_TEXT_POLICY", "auto"))
+
+
+def apply_settings(settings: dict | None = None) -> None:
+    """Refresh the switches that live in `settings.json`.
+
+    Called at the top of every tool call, so a choice made in the panel is in
+    force for the next statement without restarting anything — including in a
+    process an outside client started, which no restart of ours could reach.
+    The environment still wins when it says something: an operator (or a test)
+    who exports `DB_MCP_TEXT_POLICY` means it, and the file is only the fallback.
+    """
+    global TEXT_POLICY
+    if os.environ.get("DB_MCP_TEXT_POLICY") is not None:
+        return
+    document = settings if settings is not None else store.load_settings()
+    TEXT_POLICY = text_policy(document.get("textPolicy"))
+
+
 # A cell longer than this many characters is summarised under `auto`.
 TEXT_SUMMARY_AT = 200
 # Fragment kept from each side of a long cell under `auto`.
