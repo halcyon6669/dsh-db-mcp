@@ -104,6 +104,49 @@ class AuditTest(unittest.TestCase):
         self.assertNotIn("hunter2", json.dumps(line))
         self.assertNotIn("columns", line)
 
+    def test_binding_values_are_never_written(self):
+        # A bound value is a cell's real content — the same thing the row sample
+        # is — so `binds` must not travel into the log the way `sql` does.
+        line = audit.entry(
+            "execute_sql",
+            {"sql": "select * from t_order where order_no = ?", "binds": ["SO-TOPSECRET-42"]},
+            0.0,
+            {"ok": True, "rowCount": 1},
+            None,
+            now=0,
+        )
+        self.assertNotIn("binds", line)
+        self.assertNotIn("SO-TOPSECRET-42", json.dumps(line))
+
+    def test_a_password_argument_is_never_written(self):
+        # A tool may be handed a credential (a datasource test, an import). It
+        # belongs in the OS secret store, never in a line anyone can read back.
+        line = audit.entry(
+            "save_datasource",
+            {"datasource": "pg", "password": "hunter2", "#password": "hunter2"},
+            0.0,
+            {"ok": True},
+            None,
+            now=0,
+        )
+        self.assertNotIn("password", line)
+        self.assertNotIn("#password", line)
+        self.assertNotIn("hunter2", json.dumps(line))
+
+    def test_an_error_message_can_still_name_a_binding_safely(self):
+        # The exception text is allowed through (it is how a failure is read),
+        # but it is the driver's own wording, not the arguments we passed.
+        line = audit.entry(
+            "execute_sql",
+            {"sql": "select 1", "binds": ["hunter2"]},
+            0.0,
+            None,
+            ValueError("bad table"),
+            now=0,
+        )
+        self.assertEqual(line["error"], "ValueError: bad table")
+        self.assertNotIn("hunter2", json.dumps(line))
+
     def test_a_failure_returned_as_data_keeps_the_code(self):
         line = audit.entry(
             "execute_sql",

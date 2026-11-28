@@ -91,7 +91,6 @@ def load_settings() -> dict:
         data = {}
     _settings_cache = (path, raw, data if isinstance(data, dict) else {})
     return _settings_cache[2]
-    return _settings_cache[3]
 
 
 def password_of(profile: dict, secrets: dict | None = None) -> str | None:

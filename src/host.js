@@ -18,7 +18,7 @@
  *
  * The Python MCP server and the MCP row wiring arrive in P3.
  */
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { createDecipheriv } from "node:crypto";
 import {
   chmod,
@@ -2344,6 +2344,70 @@ export function createHost(options = {}) {
     };
   }
 
+  // Sharing uses a thin stdin/stdout CLI rather than a new MCP tool. The Host
+  // already spawns the bundled venv Python; here we do the same for bundle_cli,
+  // passing the runtime dir and reading exactly one JSON line back. `spawn`
+  // (not execFile) is used because the command arrives on stdin.
+  function callBundleCli(command) {
+    return new Promise((resolve) => {
+      const packageDir =
+        options.packageDir || fileURLToPath(new URL("..", import.meta.url));
+      const serverDir = join(packageDir, "server");
+      const venvPython =
+        process.platform === "win32"
+          ? join(dir, ".venv", "Scripts", "python.exe")
+          : join(dir, ".venv", "bin", "python");
+      const interpreter = existsSync(venvPython) ? venvPython : "python";
+      const child = spawn(interpreter, [join(serverDir, "bundle_cli.py")], {
+        cwd: serverDir,
+        windowsHide: true,
+        env: {
+          ...process.env,
+          DB_MCP_RUNTIME: dir,
+          PYTHONIOENCODING: "utf-8",
+          PYTHONUTF8: "1",
+        },
+      });
+      let out = "";
+      let err = "";
+      let settled = false;
+      const finish = (value) => {
+        if (settled) return;
+        settled = true;
+        resolve(value);
+      };
+      child.stdout.on("data", (chunk) => {
+        out += String(chunk);
+      });
+      child.stderr.on("data", (chunk) => {
+        err += String(chunk);
+      });
+      child.on("error", (error) =>
+        finish({ ok: false, error: { code: "infra_error", message: String(error.message || error) } }),
+      );
+      child.on("close", () => {
+        const lines = out.split("\n").filter((line) => line.trim());
+        if (!lines.length)
+          return finish({
+            ok: false,
+            error: { code: "infra_error", message: (err || "bundle CLI produced no output").slice(-400) },
+          });
+        try {
+          finish(JSON.parse(lines[lines.length - 1]));
+        } catch (error) {
+          finish({
+            ok: false,
+            error: { code: "infra_error", message: "bundle CLI returned invalid JSON: " + String(error.message) },
+          });
+        }
+      });
+      child.stdin.on("error", () => {
+        /* the child may close stdin first; the close handler decides the result */
+      });
+      child.stdin.end(JSON.stringify(command));
+    });
+  }
+
   async function setupPython() {
     const python = await detectPython(config, pythonCache);
     if (!python.ok || !python.command) {
@@ -3285,6 +3349,14 @@ export function createHost(options = {}) {
             ...listing,
           });
         }
+        if (route === "/bundle/export") {
+          const search = new URL(request.url, "http://localhost").searchParams;
+          const result = await callBundleCli({
+            op: "export",
+            datasource: search.get("datasource") || undefined,
+          });
+          return sendJson(response, result.ok === false ? 400 : 200, result);
+        }
         if (route === "/python/env" || route === "/python/status")
           return sendJson(response, 200, { ok: true, ...(await pythonEnv()) });
         if (route === "/http/status") {
@@ -3582,6 +3654,23 @@ export function createHost(options = {}) {
           datasource: trimmed(payload.datasource) || undefined,
         });
         return sendJson(response, result.status, result.body);
+      }
+      if (route === "/bundle/preview" || route === "/bundle/import") {
+        const isPreview = route === "/bundle/preview";
+        const result = await callBundleCli({
+          op: isPreview ? "preview" : "import",
+          datasource: trimmed(payload.datasource) || undefined,
+          payload: payload.payload,
+        });
+        return sendJson(response, result.ok === false ? 400 : 200, result);
+      }
+      if (route === "/bundle/undo") {
+        const result = await callBundleCli({
+          op: "undo",
+          datasource: trimmed(payload.datasource) || undefined,
+          importId: trimmed(payload.importId),
+        });
+        return sendJson(response, result.ok === false ? 400 : 200, result);
       }
       if (route === "/mcp/start" || route === "/mcp/restart") {
         const state =

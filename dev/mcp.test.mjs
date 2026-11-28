@@ -114,6 +114,34 @@ try {
     ) && /input_alias: typeof payload\.input_alias === "string"/.test(hostSource),
   )
 
+  // Sharing is a Host-only feature: no MCP tool is added, so the Host reaches
+  // the pure bundle functions through a thin stdin/stdout CLI. Check the routes
+  // and the CLI wiring at source level (no extra MCP tool may appear).
+  check(
+    'no bundle MCP tool was added',
+    !names.some((name) => /bundle/i.test(name)),
+    names.join(', '),
+  )
+  check(
+    'the bundle routes are wired through the Python CLI',
+    [
+      '/bundle/export',
+      '/bundle/preview',
+      '/bundle/import',
+      '/bundle/undo',
+      'bundle_cli.py',
+      'sameOrigin(request)',
+    ].every((token) => hostSource.includes(token)) &&
+      /"op":\s*"export"|op:\s*"export"/.test(hostSource),
+  )
+  check(
+    'a preview happens before an import writes anything',
+    // The spec allows either a dryRun flag on /bundle/import OR a separate
+    // /bundle/preview route; the panel uses the preview route.
+    (/dryRun/.test(hostSource) && /\/bundle\/import/.test(hostSource)) ||
+      (/\/bundle\/preview/.test(hostSource) && /op:\s*isPreview\s*\?\s*["']preview["']/.test(hostSource)),
+  )
+
   const sources = await client.callTool('list_datasources', {})
   check('list_datasources ok', sources.parsed?.ok === true, sources.text?.slice(0, 300))
   const sqlite = sources.parsed?.datasources?.find((source) => source.kind === 'sqlite')

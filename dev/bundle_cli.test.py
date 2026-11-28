@@ -1,0 +1,105 @@
+"""Regression tests for `server/bundle_cli.py`, the stdin/stdout bridge the
+panel Host uses to reach the pure bundle functions without adding MCP tools.
+
+The CLI speaks one JSON object in, one JSON object out. It must never let a
+StoreError escape as a traceback (the Host parses stdout), must resolve the
+datasource by name, and must keep preview read-only while apply writes.
+Run through `dev/engines.test.mjs` (`npm test`).
+"""
+
+from __future__ import annotations
+
+import importlib.util
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+PACKAGE = Path(__file__).resolve().parent.parent
+CLI = PACKAGE / "server" / "bundle_cli.py"
+VENV = Path(os.environ.get("DB_MCP_RUNTIME") or Path.home() / ".dsh" / "db-mcp") / ".venv"
+
+
+def _python() -> str:
+    for candidate in (
+        VENV / "Scripts" / "python.exe",
+        VENV / "bin" / "python",
+    ):
+        if candidate.exists():
+            return str(candidate)
+    return sys.executable
+
+
+def _invoke(command: dict, runtime: Path) -> dict:
+    env = dict(os.environ)
+    env["DB_MCP_RUNTIME"] = str(runtime)
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUTF8"] = "1"
+    proc = subprocess.run(
+        [_python(), str(CLI)],
+        input=json.dumps(command, ensure_ascii=False),
+        text=True,
+        capture_output=True,
+        env=env,
+        cwd=str(PACKAGE / "server"),
+        timeout=30,
+    )
+    lines = [line for line in proc.stdout.splitlines() if line.strip()]
+    if not lines:
+        return {"ok": False, "error": {"code": "no_output", "message": proc.stderr[-400:]}}
+    return json.loads(lines[-1])
+
+
+class BundleCli(unittest.TestCase):
+    def setUp(self):
+        self.saved = dict(os.environ)
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dir = Path(self.tmp.name)
+        # A registry with one default source, so store.resolve("trace-demo")
+        # works inside the child process.
+        registry = {
+            "schemaVersion": 1,
+            "datasources": [{"id": "trace-demo", "name": "trace-demo", "kind": "sqlite", "isDefault": True, "config": {}}],
+            "groups": [],
+        }
+        (self.dir / "datasources.json").write_text(json.dumps(registry), encoding="utf-8")
+
+    def tearDown(self):
+        os.environ.clear()
+        os.environ.update(self.saved)
+        self.tmp.cleanup()
+
+    def test_export_reads_the_current_graph(self):
+        result = _invoke({"op": "export", "datasource": "trace-demo"}, self.dir)
+        self.assertTrue(result.get("ok"), result)
+        self.assertEqual(result["bundle"]["edges"], [])
+        self.assertEqual(result["bundle"]["scenes"], [])
+
+    def test_preview_is_read_only_and_reports_imports(self):
+        edge = {
+            "from": {"table": "t_order", "column": "id"},
+            "to": {"table": "t_line", "column": "order_id"},
+        }
+        bundle = {"schemaVersion": 1, "kind": "db-mcp-bundle", "edges": [edge], "scenes": []}
+        result = _invoke({"op": "preview", "datasource": "trace-demo", "payload": bundle}, self.dir)
+        self.assertTrue(result.get("ok"), result)
+        self.assertEqual(result["plan"]["imported"], 1)
+        self.assertFalse((self.dir / "relations" / "trace-demo.json").exists())
+
+    def test_a_store_error_is_json_not_a_traceback(self):
+        result = _invoke({"op": "preview", "datasource": "trace-demo", "payload": {"schemaVersion": 999}}, self.dir)
+        self.assertFalse(result.get("ok"))
+        self.assertEqual(result["error"]["code"], "user_error")
+        self.assertIn("schemaVersion", result["error"]["message"])
+
+    def test_unknown_op_is_a_clean_error(self):
+        result = _invoke({"op": "nope", "datasource": "trace-demo"}, self.dir)
+        self.assertFalse(result.get("ok"))
+        self.assertIn("op", result["error"]["message"])
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)
