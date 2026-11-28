@@ -364,7 +364,12 @@ connection details or result rows, so it is safe to paste into a ticket.
   outcomes are reported apart: tables read, tables that really are gone, and
   tables it never got to (timed out or failed) — a table it never reached is
   *unknown*, so the preview says "not checked" instead of calling the join
-  missing. The cache is also filled as you browse tables and relations
+  missing. A refresh gives up after 5 seconds on one table and 60 seconds on the
+  whole run; both numbers are editable just below (they are saved to
+  `settings.json`, so they survive a restart). It also reports how long the reads
+  took — p50, p95 and the slowest table — which is what you look at the first
+  time you point it at a real database instead of guessing. The cache is also
+  filled as you browse tables and relations
   elsewhere, and each table keeps its own read time, so a partial read cannot
   make an old table look fresh. A cache older than seven days is treated as
   stale: the preview still works, but it warns you to refresh first and lowers

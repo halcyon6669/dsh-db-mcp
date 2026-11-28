@@ -1501,6 +1501,31 @@ export function createHost(options = {}) {
     return cost;
   }
 
+  /* The catalog refresh limits, in milliseconds. One slow table used to be able to
+     hold the connection for the engine's thirty-second statement timeout, and a
+     graph with hundreds of tables could run for minutes — so both are bounded by
+     default and both can be changed here. `server/store.py` keeps the same two
+     numbers (`CATALOG_LIMIT_DEFAULTS` / `CATALOG_LIMIT_BOUNDS`); they must agree. */
+  const CATALOG_LIMIT_DEFAULTS = { perTableMs: 5000, totalMs: 60000 };
+  const CATALOG_LIMIT_CAPS = {
+    perTableMs: [500, 60000],
+    totalMs: [1000, 600000],
+  };
+
+  function catalogLimits(value) {
+    const source = cleanRecord(value);
+    const catalog = {};
+    for (const key of Object.keys(CATALOG_LIMIT_DEFAULTS)) {
+      const raw = Number(source[key]);
+      const [low, high] = CATALOG_LIMIT_CAPS[key];
+      catalog[key] =
+        Number.isInteger(raw) && raw >= low && raw <= high
+          ? raw
+          : CATALOG_LIMIT_DEFAULTS[key];
+    }
+    return catalog;
+  }
+
   async function readSettings() {
     const read = await readJson(settingsFile);
     const value = cleanRecord(read.value);
@@ -1526,6 +1551,7 @@ export function createHost(options = {}) {
       limits: rowLimits(value.limits),
       textPolicy: textPolicy(value.textPolicy),
       cost: costSettings(value.cost),
+      catalog: catalogLimits(value.catalog),
       httpPort:
         Number.isInteger(port) && port >= HTTP_PORT_MIN && port <= HTTP_PORT_MAX
           ? port
@@ -1602,6 +1628,12 @@ export function createHost(options = {}) {
         patch.cost === undefined
           ? current.cost
           : { ...current.cost, ...cleanRecord(patch.cost) },
+      ),
+      /* Same partial-patch rule for the catalog refresh limits. */
+      catalog: catalogLimits(
+        patch.catalog === undefined
+          ? current.catalog
+          : { ...current.catalog, ...cleanRecord(patch.catalog) },
       ),
       httpPort: port,
       updatedAt: isoNow(),
@@ -3335,6 +3367,7 @@ export function createHost(options = {}) {
             limits: settingsNow.limits,
             textPolicy: settingsNow.textPolicy,
             cost: settingsNow.cost,
+            catalog: settingsNow.catalog,
             tools: listing.tools,
             scopeTool: listing.scopeTool,
           });
@@ -3477,6 +3510,7 @@ export function createHost(options = {}) {
           limits: payload.limits,
           textPolicy: payload.textPolicy,
           cost: payload.cost,
+          catalog: payload.catalog,
           httpEnabled: payload.httpEnabled,
           httpPort: payload.httpPort,
         });

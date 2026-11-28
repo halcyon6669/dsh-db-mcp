@@ -267,6 +267,15 @@ window.__ModuleLoader__.load({
         'cost.bigTableRowsUnit': 'rows',
         'cost.bigTableRowsHint': 'Above this many rows an unindexed column is treated as a full table scan, and tracing asks before running that step. Row counts come from the catalog, never count(*).',
         'cost.saved': 'Cost threshold saved.',
+        'catalog.title': 'Catalog refresh limits',
+        'catalog.hint': 'How long refreshing the cached directory may take. A table slower than its own limit, or one the run never reached, is reported as "not checked" — unknown, not missing. Change these if a real database needs longer than five seconds for one table.',
+        'catalog.perTableMs': 'One table',
+        'catalog.perTableMsUnit': 'ms',
+        'catalog.perTableMsHint': 'A table that takes longer than this is left unread and listed as not checked. Five seconds is generous for a catalog lookup; raise it only if a real database disagrees.',
+        'catalog.totalMs': 'Whole run',
+        'catalog.totalMsUnit': 'ms',
+        'catalog.totalMsHint': 'The refresh stops once this much time has passed, leaving the rest unread. The batch order means the tables it gives up on are the least trusted ones.',
+        'catalog.saved': 'Catalog limit saved.',
         'scopes.title': 'Conversation limits',
         'scopes.empty': 'No conversation is limited — every session can reach every data source.',
         'scopes.summary': '{n} conversation(s) limited · {rules} rule(s)',
@@ -359,6 +368,8 @@ window.__ModuleLoader__.load({
         'share.refreshChecked': 'Read ({n}): {names}',
         'share.refreshMissing': 'Gone ({n}): {names}',
         'share.refreshNotChecked': 'Not read ({n}): {names} — unknown, not missing',
+        'share.refreshTiming': 'Read times: p50 {p50} ms, p95 {p95} ms, max {max} ms',
+        'share.refreshLimits': 'Limits: {perTable} ms per table, {total} ms for the run — change them below',
         'share.notCheckedTables': 'The directory was not read completely ({n} table(s) not checked): {names}',
         'share.catalogAge': 'Directory cached {age} ago',
         'share.staleCatalog': 'This directory cache is over 7 days old — refresh it before trusting the status match. You can still continue.',
@@ -882,6 +893,15 @@ window.__ModuleLoader__.load({
         'cost.bigTableRowsUnit': '行',
         'cost.bigTableRowsHint': '超过这个行数的表，无索引列会被当成全表扫描，追踪到这一步会先问一句再跑。行数取自数据库目录统计，绝不是 count(*)。',
         'cost.saved': '代价阈值已保存。',
+        'catalog.title': '目录刷新限制',
+        'catalog.hint': '刷新目录缓存最多花多久。单表超过自己的限制、或整轮没轮到，都记为"未检查"——是未知，不是缺失。真实库单表超过五秒再调大。',
+        'catalog.perTableMs': '单表',
+        'catalog.perTableMsUnit': '毫秒',
+        'catalog.perTableMsHint': '一张表读得比这久就放弃，记为未检查。目录查询五秒已经很宽松；只有真库确实更慢才调大。',
+        'catalog.totalMs': '整轮',
+        'catalog.totalMsUnit': '毫秒',
+        'catalog.totalMsHint': '超过这个时长就停止刷新，剩下的记为未读。按信任程度排序，所以放弃的是最不重要的那批。',
+        'catalog.saved': '目录限制已保存。',
         'scopes.title': '会话访问范围',
         'scopes.empty': '没有会话被限制——每个会话都能访问所有数据源。',
         'scopes.summary': '{n} 个会话受限 · 共 {rules} 条规则',
@@ -974,6 +994,8 @@ window.__ModuleLoader__.load({
         'share.refreshChecked': '已读（{n}）：{names}',
         'share.refreshMissing': '确实没有（{n}）：{names}',
         'share.refreshNotChecked': '未检查（{n}）：{names}——是未知，不是缺失',
+        'share.refreshTiming': '读取耗时：p50 {p50} 毫秒，p95 {p95} 毫秒，最长 {max} 毫秒',
+        'share.refreshLimits': '限制：单表 {perTable} 毫秒，整轮 {total} 毫秒——可在下方调整',
         'share.notCheckedTables': '目录未完整读取（{n} 张未查）：{names}',
         'share.catalogAge': '目录缓存于 {age} 前',
         'share.staleCatalog': '这份目录缓存已超过 7 天——建议先刷新再相信状态对照。你仍可继续。',
@@ -7038,6 +7060,36 @@ function groupTables(tables) {
         return values
       }, [tools])
 
+      /* The two limits a catalog refresh obeys: one table, and the whole run.
+         They live in settings.json next to the cost thresholds, so the panel
+         edits them and the next refresh reads the new numbers. */
+      const [catalogDraft, setCatalogDraft] = React.useState({})
+
+      /* Same defaults and bounds as `CATALOG_LIMIT_DEFAULTS` /
+         `CATALOG_LIMIT_BOUNDS` in server/store.py and the same pair in
+         src/host.js: the three layers have to agree or an input the panel accepts
+         would be silently changed underneath. */
+      const CATALOG_RULES = [
+        { key: 'perTableMs', min: 500, max: 60000, fallback: 5000 },
+        { key: 'totalMs', min: 1000, max: 600000, fallback: 60000 },
+      ]
+
+      const catalogName = (rule) => (rule.key === 'perTableMs' ? t('catalog.perTableMs') : t('catalog.totalMs'))
+
+      const catalogUnit = (rule) => (rule.key === 'perTableMs' ? t('catalog.perTableMsUnit') : t('catalog.totalMsUnit'))
+
+      const catalogHint = (rule) => (rule.key === 'perTableMs' ? t('catalog.perTableMsHint') : t('catalog.totalMsHint'))
+
+      const catalogValues = React.useMemo(() => {
+        const stored = (tools && tools.catalog) || {}
+        const values = {}
+        for (const rule of CATALOG_RULES) {
+          const raw = Number(stored[rule.key])
+          values[rule.key] = Number.isInteger(raw) ? raw : rule.fallback
+        }
+        return values
+      }, [tools])
+
       /* ------------------------------------------------------- relation graph
          Page A reads one datasource's graph and nothing else. The panel has no
          SQL box on purpose: every action here is one of the six graph tools, so
@@ -7210,13 +7262,17 @@ function groupTables(tables) {
             return
           }
           // "read", "gone" and "never got to it" are three different answers and
-          // the panel shows all three rather than one total.
+          // the panel shows all three rather than one total. The timings come
+          // along so the first refresh against a real database says what that
+          // database costs instead of leaving the reader to guess from a total.
           setShareRefresh({
             checked: (data.checked || []).slice(0),
             missing: (data.missing || []).slice(0),
             notChecked: (data.notChecked || []).slice(0),
             savedAt: data.savedAt || null,
             schema: data.schema || null,
+            timing: data.timing || null,
+            limits: data.limits || null,
           })
           setShareNotice(
             fmt(t('share.catalogRefreshed'), {
@@ -8037,6 +8093,27 @@ function groupTables(tables) {
         } catch (error) {
           setCostDraft({ ...costDraft, [rule.key]: String(costValues[rule.key]) })
           setNotice({ message: String((error && error.message) || error), isError: true })
+        }
+      }
+
+      /** Save one catalog refresh limit; the server clamps it to the same range. */
+      const commitCatalogLimit = async (rule) => {
+        const raw = Number(catalogDraft[rule.key])
+        if (!Number.isInteger(raw) || raw < rule.min || raw > rule.max) {
+          const fallback = catalogValues[rule.key]
+          setCatalogDraft({ ...catalogDraft, [rule.key]: fallback === undefined ? undefined : String(fallback) })
+          return
+        }
+        if (raw === catalogValues[rule.key]) return
+        const next = { ...catalogValues, [rule.key]: raw }
+        try {
+          await apiPost('/settings', { catalog: next })
+          setCatalogDraft({ ...catalogDraft, [rule.key]: undefined })
+          setShareNotice(t('catalog.saved'))
+          await load()
+        } catch (error) {
+          setCatalogDraft({ ...catalogDraft, [rule.key]: String(catalogValues[rule.key]) })
+          setShareError(String((error && error.message) || error))
         }
       }
 
@@ -8929,6 +9006,27 @@ function groupTables(tables) {
                 shareRefresh.schema
                   ? h('p', null, fmt(t('share.schemaUsed'), { schema: shareRefresh.schema }))
                   : null,
+                shareRefresh.timing && shareRefresh.timing.count
+                  ? h(
+                      'p',
+                      null,
+                      fmt(t('share.refreshTiming'), {
+                        p50: shareRefresh.timing.p50,
+                        p95: shareRefresh.timing.p95,
+                        max: shareRefresh.timing.max,
+                      }),
+                    )
+                  : null,
+                shareRefresh.limits
+                  ? h(
+                      'p',
+                      { className: 'dbmcp-hint' },
+                      fmt(t('share.refreshLimits'), {
+                        perTable: shareRefresh.limits.perTableMs,
+                        total: shareRefresh.limits.totalMs,
+                      }),
+                    )
+                  : null,
               )
             : null,
           h(
@@ -9218,8 +9316,59 @@ function groupTables(tables) {
          edge cheap? They set what counts as slow, how many measurements are kept,
          how many are needed before an edge is trusted, and how large a table has
          to be before an unindexed column means a full scan worth asking about. */
-      const renderCost = () =>
+      /* The catalog refresh limits: how long one table may take, and how long the
+         whole run may take. A single slow table used to hold the connection until
+         the engine's thirty-second statement timeout; a graph with hundreds of
+         tables could run for minutes. Tables that exceed either limit land in
+         "not checked", which the Share page reports apart from "gone". */
+      const renderCatalogLimits = () =>
         h(
+          Card,
+          { title: t('catalog.title') },
+          h('p', { className: 'dbmcp-hint' }, t('catalog.hint')),
+          h(
+            'div',
+            { className: 'dbmcp-render-fields' },
+            CATALOG_RULES.map((rule) =>
+              h(
+                'div',
+                { key: rule.key, className: 'dbmcp-render-field' },
+                h(
+                  'label',
+                  { className: 'dbmcp-render-head' },
+                  h('span', { className: 'dbmcp-render-label' }, catalogName(rule)),
+                  h(
+                    'span',
+                    { className: 'dbmcp-render-input' },
+                    h('input', {
+                      type: 'number',
+                      className: 'dbmcp-input dbmcp-limit',
+                      min: rule.min,
+                      max: rule.max,
+                      step: 1,
+                      value: catalogDraft[rule.key] !== undefined ? catalogDraft[rule.key] : catalogValues[rule.key],
+                      'aria-label': catalogName(rule),
+                      disabled: busy,
+                      onClick: (event) => event.stopPropagation(),
+                      onChange: (event) => setCatalogDraft({ ...catalogDraft, [rule.key]: event.target.value }),
+                      onBlur: () => commitCatalogLimit(rule),
+                      onKeyDown: (event) => {
+                        if (event.key === 'Enter') {
+                          event.preventDefault()
+                          event.currentTarget.blur()
+                        }
+                      },
+                    }),
+                    h('span', { className: 'dbmcp-limit-unit' }, catalogUnit(rule)),
+                  ),
+                ),
+                h('p', { className: 'dbmcp-render-hint' }, catalogHint(rule)),
+              ),
+            ),
+          ),
+        )
+
+      const renderCost = () =>        h(
           Card,
           { title: t('cost.title') },
           h('p', { className: 'dbmcp-hint' }, t('cost.hint')),
@@ -12160,6 +12309,7 @@ function groupTables(tables) {
           tab !== 'tools' ? null : renderTools(),
           tab !== 'tools' ? null : renderResults(),
           tab !== 'share' ? null : renderShare(),
+          tab !== 'share' ? null : renderCatalogLimits(),
           tab !== 'audit'
             ? null
             : h(            Card,

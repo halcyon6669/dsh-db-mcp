@@ -11,12 +11,23 @@ outcomes instead of one:
 * ``notChecked`` — timed out, over a limit, or failed. Never "missing": the
   difference decides whether a join is called absent or merely unknown.
 
+A refresh also carries a limit of its own — five seconds for one table, sixty for
+the whole run — because a single slow table used to hold the connection until the
+statement timeout at thirty seconds, and a graph with hundreds of tables could
+run for minutes. The numbers live in ``settings.json`` so the panel can change
+them without restarting the MCP process.
+
+The run reports how long the reads took (p50 / p95 / max in milliseconds), so the
+first refresh against a real database says what that database costs instead of
+leaving the reader to guess from a total.
+
 Run through `dev/engines.test.mjs` (`npm test`).
 """
 
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import sys
 import tempfile
@@ -326,6 +337,138 @@ class RefreshOrder(unittest.TestCase):
         result = bundle_cli.refresh(self.profile, payload=payload, timeout_ms=5_000, clock=lambda: next(ticks))
         self.assertEqual(result["checked"], ["t_confirmed", "t_trusted"], result)
         self.assertEqual(sorted(name.casefold() for name in result["notChecked"]), ["t_pending", "t_scene"])
+
+
+class RefreshLimits(unittest.TestCase):
+    """A refresh stops itself before the engine's or the reader's patience runs out.
+
+    The numbers live in `settings.json` under `catalog`, so the panel can change
+    them and the next refresh obeys without the MCP process being restarted.
+    """
+
+    def setUp(self):
+        self.saved = os.environ.get("DB_MCP_RUNTIME")
+        self.tmp = tempfile.TemporaryDirectory()
+        os.environ["DB_MCP_RUNTIME"] = self.tmp.name
+        self.profile = _profile()
+        self.engine = FakeEngine(
+            {
+                "t_order": {"id": "integer"},
+                "t_line": {"order_id": "integer"},
+                "t_payment": {"id": "integer"},
+            }
+        )
+        self.saved_engines = bundle_cli.engines
+        bundle_cli.engines = self.engine
+
+    def tearDown(self):
+        bundle_cli.engines = self.saved_engines
+        if self.saved is None:
+            os.environ.pop("DB_MCP_RUNTIME", None)
+        else:
+            os.environ["DB_MCP_RUNTIME"] = self.saved
+        self.tmp.cleanup()
+
+    def _settings(self, **catalog) -> None:
+        path = Path(self.tmp.name) / "settings.json"
+        path.write_text(json.dumps({"catalog": catalog}), encoding="utf-8")
+
+    def _three_tables(self) -> dict:
+        return _bundle(("t_order", "id"), ("t_line", "order_id"), ("t_payment", "id"), ("t_order", "id"))
+
+    def test_the_defaults_are_five_seconds_for_a_table_and_sixty_for_the_run(self):
+        self.assertEqual(store.catalog_limits(), {"perTableMs": 5000, "totalMs": 60000})
+
+    def test_the_numbers_can_be_changed_in_the_settings_file(self):
+        self._settings(perTableMs=1500, totalMs=9000)
+        self.assertEqual(store.catalog_limits(), {"perTableMs": 1500, "totalMs": 9000})
+
+    def test_a_value_out_of_range_falls_back_to_the_default_like_the_cost_settings(self):
+        self._settings(perTableMs=1, totalMs="soon")
+        self.assertEqual(store.catalog_limits(), {"perTableMs": 500, "totalMs": 60000}, "the floor, not a broken number")
+        self._settings(perTableMs=10_000_000, totalMs=True)
+        self.assertEqual(store.catalog_limits(), {"perTableMs": 60000, "totalMs": 60000}, "the ceiling, and True is not a number")
+
+    def test_a_table_slower_than_the_limit_is_left_unchecked(self):
+        self._settings(perTableMs=5000, totalMs=60000)
+        # Each read asks the timer twice: before the describe and after it. The
+        # first table takes six seconds, the others ten milliseconds each.
+        ticks = iter([0, 6000, 6100, 6110, 6200, 6210])
+        result = bundle_cli.refresh(self.profile, payload=self._three_tables(), timer=lambda: next(ticks))
+        self.assertEqual(result["checked"], ["t_line", "t_payment"])
+        self.assertEqual(sorted(result["notChecked"]), ["t_order"])
+        self.assertEqual(result["missing"], [], "slow is unknown, not absent")
+
+    def test_a_slow_table_does_not_stop_the_ones_after_it(self):
+        self._settings(perTableMs=5000, totalMs=60000)
+        ticks = iter([0, 6000, 6100, 6110, 6200, 6210])
+        result = bundle_cli.refresh(self.profile, payload=self._three_tables(), timer=lambda: next(ticks))
+        self.assertEqual(len(result["checked"]), 2)
+
+    def test_the_sixty_second_budget_applies_without_being_asked_for(self):
+        # The caller passes no timeout_ms, so the default 60 s must bite.
+        ticks = iter([0, 70_000, 70_001, 70_002, 70_003])
+        result = bundle_cli.refresh(self.profile, payload=self._three_tables(), clock=lambda: next(ticks))
+        self.assertEqual(result["checked"], [])
+        self.assertEqual(sorted(result["notChecked"]), ["t_line", "t_order", "t_payment"])
+
+    def test_an_explicit_timeout_still_wins_over_the_setting(self):
+        self._settings(perTableMs=5000, totalMs=60000)
+        ticks = iter([0, 2_000, 2_001, 2_002, 2_003])
+        result = bundle_cli.refresh(self.profile, payload=self._three_tables(), timeout_ms=1_000, clock=lambda: next(ticks))
+        self.assertEqual(result["checked"], [])
+
+
+class RefreshTiming(unittest.TestCase):
+    """What the reads cost, in the unit a person reads: milliseconds."""
+
+    def setUp(self):
+        self.saved = os.environ.get("DB_MCP_RUNTIME")
+        self.tmp = tempfile.TemporaryDirectory()
+        os.environ["DB_MCP_RUNTIME"] = self.tmp.name
+        self.profile = _profile()
+        tables = {"t_order": {"id": "integer"}, "t_line": {"id": "integer"}, "t_payment": {"id": "integer"}, "t_note": {"id": "integer"}}
+        self.engine = FakeEngine(tables)
+        self.saved_engines = bundle_cli.engines
+        bundle_cli.engines = self.engine
+
+    def tearDown(self):
+        bundle_cli.engines = self.saved_engines
+        if self.saved is None:
+            os.environ.pop("DB_MCP_RUNTIME", None)
+        else:
+            os.environ["DB_MCP_RUNTIME"] = self.saved
+        self.tmp.cleanup()
+
+    def test_the_run_reports_p50_p95_and_max(self):
+        payload = _bundle(("t_order", "id"), ("t_line", "id"), ("t_payment", "id"), ("t_note", "id"))
+        # Four reads: 4, 8, 15, 42 ms.
+        ticks = iter([0, 4, 10, 18, 30, 45, 100, 142])
+        result = bundle_cli.refresh(self.profile, payload=payload, timer=lambda: next(ticks))
+        timing = result["timing"]
+        self.assertEqual(timing["count"], 4)
+        self.assertEqual(timing["max"], 42)
+        self.assertEqual(timing["p50"], 8, "the lower median of an even count")
+        self.assertEqual(timing["p95"], 42)
+
+    def test_the_percentiles_are_whole_milliseconds(self):
+        payload = _bundle(("t_order", "id"), ("t_line", "id"), ("t_payment", "id"), ("t_note", "id"))
+        ticks = iter([0, 4, 10, 18, 30, 45, 100, 142])
+        result = bundle_cli.refresh(self.profile, payload=payload, timer=lambda: next(ticks))
+        for key in ("p50", "p95", "max", "mean"):
+            self.assertIsInstance(result["timing"][key], int, key)
+
+    def test_only_tables_that_were_actually_read_are_timed(self):
+        self.engine.failing["t_line"] = RuntimeError("driver went away")
+        payload = _bundle(("t_order", "id"), ("t_line", "id"), ("t_payment", "id"), ("t_note", "id"))
+        ticks = iter([0, 4, 10, 12, 30, 35, 100, 142])
+        result = bundle_cli.refresh(self.profile, payload=payload, timer=lambda: next(ticks))
+        self.assertEqual(result["timing"]["count"], 3)
+        self.assertEqual(result["timing"]["max"], 42, "4 + 5 + 42 for the three that answered")
+
+    def test_a_run_with_nothing_to_read_reports_zeroes_rather_than_raising(self):
+        result = bundle_cli.refresh(self.profile, payload={"schemaVersion": 1, "edges": [], "scenes": []})
+        self.assertEqual(result["timing"], {"count": 0, "p50": 0, "p95": 0, "max": 0, "mean": 0})
 
 
 if __name__ == "__main__":

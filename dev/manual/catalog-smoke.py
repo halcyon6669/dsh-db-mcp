@@ -246,12 +246,19 @@ def main() -> int:
         #    table without letting one hang hold the run;
         #  * the budget covers the whole batch at p95 pace with headroom, so a
         #    refresh of the tables a reader actually looks at finishes.
+        # The numbers below come from tables this script just created empty, in
+        # Docker on one machine, over a loopback network. A catalog lookup cost
+        # depends on the engine, the load and the network, so these are a floor
+        # to reason from, not a setting to copy onto a remote database.
         p95 = summary["perTable"]["p95"] or 0.0
         suggested_table = max(1000, int(round(p95 * 5 / 250.0)) * 250) if p95 else None
         batch = summary["checked"] or summary["asked"]
         suggested_budget = max(5000, int(round(batch * p95 * 3 / 1000.0)) * 1000) if p95 else None
         print()
         print("suggestion (report only — nothing here changes a default):")
+        print("  based on empty tables created just now, in Docker on this machine,")
+        print("  over loopback. For reference only: not valid for a remote database,")
+        print("  where network latency and engine load dominate the same lookup.")
         if suggested_table:
             print(f"  per-table timeout ≈ {suggested_table} ms   (≈5× p95 {p95:.0f} ms)")
         if suggested_budget:

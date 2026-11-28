@@ -539,6 +539,43 @@ try {
     JSON.stringify(partialCost.body?.cost),
   )
 
+  const catalogDefaults = await get('/tools')
+  check(
+    'the tool list carries the two catalog refresh limits',
+    catalogDefaults.body?.catalog?.perTableMs === 5000 && catalogDefaults.body?.catalog?.totalMs === 60000,
+    JSON.stringify(catalogDefaults.body?.catalog),
+  )
+
+  await post('/settings', { catalog: { perTableMs: 3000, totalMs: 45000 } })
+  const savedCatalog = await get('/tools')
+  check(
+    'the catalog refresh limits are saved',
+    savedCatalog.body?.catalog?.perTableMs === 3000 && savedCatalog.body?.catalog?.totalMs === 45000,
+    JSON.stringify(savedCatalog.body?.catalog),
+  )
+  const catalogOnDisk = JSON.parse(await readFile(join(dir, 'settings.json'), 'utf8'))
+  check(
+    'the catalog limits land in the same settings file',
+    catalogOnDisk?.catalog?.perTableMs === 3000 && catalogOnDisk?.catalog?.totalMs === 45000,
+    JSON.stringify(catalogOnDisk?.catalog),
+  )
+
+  await post('/settings', { catalog: { perTableMs: 1, totalMs: 'later' } })
+  const clampedCatalog = await get('/tools')
+  check(
+    'out of range catalog limits fall back to the defaults',
+    clampedCatalog.body?.catalog?.perTableMs === 5000 && clampedCatalog.body?.catalog?.totalMs === 60000,
+    JSON.stringify(clampedCatalog.body?.catalog),
+  )
+
+  await post('/settings', { catalog: { perTableMs: 2500 } })
+  const partialCatalog = await get('/tools')
+  check(
+    'a partial catalog patch keeps the other limit',
+    partialCatalog.body?.catalog?.perTableMs === 2500 && partialCatalog.body?.catalog?.totalMs === 60000,
+    JSON.stringify(partialCatalog.body?.catalog),
+  )
+
   const limitTools = (limits.body?.tools || []).filter((tool) => tool.limit)
   check(
     'row-limited tools advertise their range',

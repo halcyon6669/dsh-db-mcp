@@ -94,6 +94,34 @@ def load_settings() -> dict:
     return _settings_cache[2]
 
 
+# The catalog refresh limits, in milliseconds. A single table used to be able to
+# hold the connection for the engine's thirty-second statement timeout, and a
+# graph with several hundred tables could run for minutes; these numbers cap both.
+CATALOG_LIMIT_DEFAULTS = {"perTableMs": 5000, "totalMs": 60000}
+CATALOG_LIMIT_BOUNDS = {"perTableMs": (500, 60000), "totalMs": (1000, 600000)}
+
+
+def _clamp_catalog_limit(key: str, value) -> int:
+    """One limit, clamped like the cost thresholds: a bad number is a default."""
+    default = CATALOG_LIMIT_DEFAULTS[key]
+    low, high = CATALOG_LIMIT_BOUNDS[key]
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return default
+    return max(low, min(high, int(value)))
+
+
+def catalog_limits() -> dict:
+    """The refresh limits the settings file asks for, read fresh on every call.
+
+    Same reasoning as `relations.cost_settings`: the panel writes settings.json
+    and the very next refresh must obey, without the MCP process being restarted.
+    """
+    data = load_settings()
+    section = data.get("catalog")
+    section = section if isinstance(section, dict) else {}
+    return {key: _clamp_catalog_limit(key, section.get(key)) for key in CATALOG_LIMIT_DEFAULTS}
+
+
 def _source_key(profile: dict) -> str:
     """The file stem a datasource's graph, scenes and catalog share."""
     return str(profile.get("id") or "default")

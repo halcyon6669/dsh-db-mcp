@@ -53,7 +53,13 @@ report of each version in more detail.
   `list_tables`, one `describe_table`) can no longer make an old table look fresh;
   a cache written before per-table stamps still works through its file-level
   `savedAt`. A cache older than seven days is still treated as stale — a hint that
-  tells you to refresh but lets you continue.
+  tells you to refresh but lets you continue. Two limits bound a refresh: 5 seconds
+  for one table and 60 seconds for the whole run, both editable on the Share page
+  (they live in `settings.json`). A table that answers too slowly is left out of the
+  cache and reported as `notChecked` too — it answered, but nothing that slow belongs
+  in a cache. The reply now also carries `timing`: `p50`, `p95`, `max` and `mean` in
+  milliseconds over the tables actually read, so the first refresh against a real
+  database reports what that database cost instead of requiring a guess.
 - **The directory is cached per schema.** The cache file is keyed by data source and
   schema, the refresh button takes an optional schema (blank = the data source's
   configured one), and the Share page says which schema was read. The preview looks

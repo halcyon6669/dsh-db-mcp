@@ -754,6 +754,15 @@ its current size. All of the bundle logic lives in `server/bundle.py`:
   deadline runs out it is the least trusted tables that go unread, never a mixed
   selection from every rank. The Share page shows all three counts and the schema
   that was read.
+  A refresh is bounded twice: one table may take 5 seconds and the whole run 60
+  seconds by default, both editable on the Share page (they live in
+  `settings.json` under `catalog`, bounded to 500–60000 ms per table and
+  1000–600000 ms per run). A table that answers but takes longer than its own
+  limit is still left out of the cache and reported as `notChecked`: it answered,
+  but nothing that slow belongs in a cache a person refreshes on a whim. The
+  reply carries `timing` — `count`, `p50`, `p95`, `max` and `mean` in whole
+  milliseconds, over the tables actually read — so the first refresh against a
+  real database reports what that database costs instead of guessing.
   Each table entry carries its own `readAt`; a partial read (a filtered
   `list_tables`, one `describe_table`) updates only the tables it touched, so it
   cannot make an old table look fresh. A table's staleness is judged by its own

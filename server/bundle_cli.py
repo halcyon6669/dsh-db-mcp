@@ -20,6 +20,7 @@ traceback, because the Host parses the last stdout line. Operations:
 from __future__ import annotations
 
 import json
+import math
 import sys
 import time
 
@@ -96,27 +97,62 @@ def _is_absent(error: Exception) -> bool:
     return False
 
 
+def _percentile(values: list[int], fraction: float) -> int:
+    """The nearest-rank percentile: no interpolation, whole milliseconds."""
+    if not values:
+        return 0
+    ordered = sorted(values)
+    rank = max(0, min(len(ordered) - 1, math.ceil(fraction * len(ordered)) - 1))
+    return int(ordered[rank])
+
+
+def _timing_summary(elapsed: list[int]) -> dict:
+    """How long the reads took, in the numbers a person actually reads."""
+    if not elapsed:
+        return {"count": 0, "p50": 0, "p95": 0, "max": 0, "mean": 0}
+    return {
+        "count": len(elapsed),
+        "p50": _percentile(elapsed, 0.5),
+        "p95": _percentile(elapsed, 0.95),
+        "max": max(elapsed),
+        "mean": int(sum(elapsed) / len(elapsed)),
+    }
+
+
 def refresh(profile: dict, payload: dict | None = None, schema: str | None = None,
-            timeout_ms: int | None = None, clock=None) -> dict:
+            timeout_ms: int | None = None, clock=None, timer=None) -> dict:
     """Read the tables a bundle mentions and say what happened to each.
 
     Three outcomes, kept apart on purpose:
 
     * ``checked``    — described, so the cache may speak for it;
     * ``missing``    — every case variant was asked for and none existed;
-    * ``notChecked`` — the deadline passed, the statement timed out, or the read
-      failed. Never "missing": calling an unread table absent turns "look again"
-      into "your join is wrong".
+    * ``notChecked`` — the deadline passed, one table took longer than its own
+      limit, the statement timed out, or the read failed. Never "missing":
+      calling an unread table absent turns "look again" into "your join is wrong".
+
+    Two limits apply, both read from `settings.json` (see `store.catalog_limits`):
+    a per-table limit and a limit for the whole run. A single slow table used to
+    hold the connection up to the engine's thirty-second statement timeout, and a
+    graph with hundreds of tables could run for minutes. The whole-run limit stops
+    the batch; tables it never reached are "not checked", not "missing".
 
     Only the tables read this time get a fresh stamp; everything else in the
-    cache keeps its own. ``timeout_ms`` bounds the whole refresh (not one
-    statement), so one slow schema cannot hold the panel.
+    cache keeps its own. ``timeout_ms`` overrides the configured run limit, and
+    the result carries the read timings so the first refresh against a real
+    database reports what that database costs.
     """
     payload = payload if isinstance(payload, dict) else {}
     wanted = _wanted_tables(payload)
     schema = str(schema).strip() if isinstance(schema, str) and schema.strip() else None
-    budget = int(timeout_ms) if isinstance(timeout_ms, int) and timeout_ms > 0 else None
+    limits = store.catalog_limits()
+    budget = int(timeout_ms) if isinstance(timeout_ms, int) and timeout_ms > 0 else limits["totalMs"]
+    per_table = limits["perTableMs"]
     now = clock or (lambda: int(time.time() * 1000))
+    # A separate clock for timings: `clock` is wall-clock milliseconds and is what
+    # tests drive to simulate a deadline; measuring one table's cost must not eat
+    # the same ticks, so the timer defaults to a monotonic reading of its own.
+    timer = timer or (lambda: int(time.perf_counter() * 1000))
     started = now()
 
     password = store.password_of(profile, store.load_secrets())
@@ -125,6 +161,7 @@ def refresh(profile: dict, payload: dict | None = None, schema: str | None = Non
     missing: list[str] = []
     not_checked: list[str] = []
     read: list = []
+    elapsed: list[int] = []
     try:
         for name in wanted:
             if budget is not None and now() - started > budget:
@@ -132,6 +169,7 @@ def refresh(profile: dict, payload: dict | None = None, schema: str | None = Non
                 continue
             described = None
             absent = False
+            began = timer()
             for variant in _case_variants(name):
                 try:
                     described = engines.describe_table(profile, connection, variant, schema)
@@ -142,12 +180,19 @@ def refresh(profile: dict, payload: dict | None = None, schema: str | None = Non
                         continue
                     absent = False
                     break
+            spent = max(0, timer() - began)
             if described is None:
                 if absent:
                     missing.append(name)
                 else:
                     not_checked.append(name)
                 continue
+            if spent > per_table:
+                # It answered, but nothing that slow belongs in a cache refreshed
+                # from a panel click — the next run may well time out instead.
+                not_checked.append(name)
+                continue
+            elapsed.append(spent)
             columns = {}
             for col in described.get("columns") or []:
                 if isinstance(col, dict) and col.get("name"):
@@ -185,6 +230,8 @@ def refresh(profile: dict, payload: dict | None = None, schema: str | None = Non
         "savedAt": saved.get("savedAt"),
         "tableCount": len(tables),
         "schema": schema,
+        "timing": _timing_summary(elapsed),
+        "limits": {"perTableMs": per_table, "totalMs": budget},
     }
 
 
