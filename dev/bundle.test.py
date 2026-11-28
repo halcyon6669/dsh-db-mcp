@@ -85,8 +85,18 @@ class BundleShape(unittest.TestCase):
         self.assertEqual(len(exported["scenes"]), 1)
         # Trust is local: a shared edge arrives pending, with zero confirmations.
         self.assertNotIn("confirmCount", json.dumps(exported["edges"][0]))
-        self.assertNotIn("status", exported["edges"][0])
         self.assertIn("fingerprint", exported)
+        # The status travels only as a *hint* — the recipient recomputes its own.
+        self.assertEqual(exported["edges"][0]["status"], "trusted")
+
+    def test_export_does_not_carry_confirm_count_or_history(self):
+        edge = _edge("t_order", "id", "t_line", "order_id", status="confirmed")
+        edge["stats"]["confirmCount"] = 3
+        edge["history"] = [{"at": "x", "what": "trusted"}]
+        exported = bundle.export_bundle({"edges": [edge]}, {"scenes": []})
+        self.assertNotIn("confirmCount", json.dumps(exported["edges"][0]))
+        self.assertNotIn("history", exported["edges"][0])
+        self.assertNotIn("stats", exported["edges"][0])
 
     def test_a_missing_source_file_is_an_empty_bundle(self):
         result = bundle.export_bundle(
@@ -311,6 +321,129 @@ class ImportingABundle(unittest.TestCase):
         finally:
             bundle.os.replace = original_replace
         self.assertEqual((relations.path_of(self.profile).read_bytes(), scenes.path_of(self.profile).read_bytes()), before)
+
+
+class StatusFromCatalog(unittest.TestCase):
+    """Trust is local: a shared status is a hint, checked against a local catalog.
+
+    The catalog is a *cached* table/column directory passed in by the caller. No
+    connection is opened here. With no catalog the reader cannot compare, so all
+    edges arrive pending with a reason the panel can show.
+    """
+
+    def setUp(self):
+        self.saved = dict(os.environ)
+        self.tmp = tempfile.TemporaryDirectory()
+        os.environ["DB_MCP_RUNTIME"] = str(self.tmp.name)
+        self.profile = {"id": "trace-demo", "kind": "gauss"}
+
+    def tearDown(self):
+        os.environ.clear()
+        os.environ.update(self.saved)
+        self.tmp.cleanup()
+
+    def _catalog(self):
+        return {
+            "tables": {
+                "t_order": {"columns": {"id": "integer", "code": "character varying(16)"}},
+                "t_line": {"columns": {"order_id": "integer", "sku": "character varying(32)"}},
+            }
+        }
+
+    def _wire(self, status, frm=("t_order", "id"), to=("t_line", "order_id")):
+        edge = _edge(frm[0], frm[1], to[0], to[1], status=status)
+        wire = {
+            "from": dict(edge["from"]),
+            "to": dict(edge["to"]),
+            "condition": None,
+            "note": None,
+            "places": [],
+            "status": status,
+        }
+        return wire
+
+    def _payload(self, *wires):
+        return {"schemaVersion": bundle.SCHEMA_VERSION, "edges": list(wires), "scenes": []}
+
+    def test_no_catalog_means_all_pending_with_a_reason(self):
+        result = bundle.import_bundle(self.profile, self._payload(self._wire("trusted")))
+        edge = result["relationsDoc"]["edges"][0]
+        self.assertEqual(edge["status"], "pending")
+        self.assertFalse(result.get("catalogChecked"))
+        self.assertTrue(result.get("catalogHint"))
+        self.assertTrue(any(item.get("reason") == "not_checked" for item in result.get("downgraded", [])))
+
+    def test_catalog_checked_confirmed_stays_confirmed_with_zero_count(self):
+        wire = self._wire("confirmed")
+        wire["stats"] = {"confirmCount": 3}
+        result = bundle.import_bundle(self.profile, self._payload(wire), catalog=self._catalog())
+        edge = result["relationsDoc"]["edges"][0]
+        self.assertTrue(result.get("catalogChecked"))
+        self.assertEqual(edge["status"], "confirmed")
+        self.assertEqual(edge["stats"]["confirmCount"], 0)
+        self.assertEqual(result.get("downgraded"), [])
+
+    def test_catalog_checked_trusted_becomes_confirmed(self):
+        result = bundle.import_bundle(self.profile, self._payload(self._wire("trusted")), catalog=self._catalog())
+        self.assertEqual(result["relationsDoc"]["edges"][0]["status"], "confirmed")
+
+    def test_pending_stays_pending_even_with_catalog(self):
+        result = bundle.import_bundle(self.profile, self._payload(self._wire("pending")), catalog=self._catalog())
+        self.assertEqual(result["relationsDoc"]["edges"][0]["status"], "pending")
+
+    def test_missing_table_is_pending_with_a_reason(self):
+        wire = self._wire("trusted", frm=("t_order", "id"), to=("t_ghost", "order_id"))
+        result = bundle.import_bundle(self.profile, self._payload(wire), catalog=self._catalog())
+        edge = result["relationsDoc"]["edges"][0]
+        self.assertEqual(edge["status"], "pending")
+        self.assertTrue(edge.get("stale"))
+        self.assertTrue(any(item.get("reason") == "missing_table" for item in result.get("downgraded", [])))
+
+    def test_missing_column_is_pending_with_a_reason(self):
+        wire = self._wire("trusted", frm=("t_order", "id"), to=("t_line", "no_such_col"))
+        result = bundle.import_bundle(self.profile, self._payload(wire), catalog=self._catalog())
+        edge = result["relationsDoc"]["edges"][0]
+        self.assertEqual(edge["status"], "pending")
+        self.assertTrue(any(item.get("reason") == "missing_column" for item in result.get("downgraded", [])))
+
+    def test_type_incompatible_is_pending_with_a_reason(self):
+        wire = self._wire("trusted", frm=("t_order", "code"), to=("t_line", "order_id"))
+        result = bundle.import_bundle(self.profile, self._payload(wire), catalog=self._catalog())
+        edge = result["relationsDoc"]["edges"][0]
+        self.assertEqual(edge["status"], "pending")
+        self.assertTrue(any(item.get("reason") == "type_incompatible" for item in result.get("downgraded", [])))
+
+    def test_catalog_lookup_is_case_insensitive(self):
+        wire = self._wire("confirmed", frm=("T_ORDER", "ID"), to=("T_LINE", "ORDER_ID"))
+        result = bundle.import_bundle(self.profile, self._payload(wire), catalog=self._catalog())
+        self.assertEqual(result["relationsDoc"]["edges"][0]["status"], "confirmed")
+
+    def test_toggle_pending_all_forces_everything_pending(self):
+        result = bundle.import_bundle(
+            self.profile, self._payload(self._wire("trusted")), catalog=self._catalog(), respect_status=False
+        )
+        self.assertEqual(result["relationsDoc"]["edges"][0]["status"], "pending")
+        self.assertTrue(any(item.get("reason") == "pending_all" for item in result.get("downgraded", [])))
+
+    def test_rejected_with_condition_conflict_keeps_the_local_edge(self):
+        wire = self._wire("rejected")
+        wire["condition"] = "o.state = 'PAID'"
+        local = [_edge("t_order", "id", "t_line", "order_id", condition="o.state = 'NEW'")]
+        result = bundle.import_bundle(
+            self.profile,
+            self._payload(wire),
+            relations_doc={"edges": local, "schemaVersion": relations.SCHEMA_VERSION},
+            scenes_doc={"scenes": [], "schemaVersion": scenes.SCHEMA_VERSION},
+            catalog=self._catalog(),
+        )
+        self.assertEqual(result["relationsDoc"]["edges"][0]["condition"], "o.state = 'NEW'")
+        self.assertEqual(len(result["conflicts"]), 1)
+
+    def test_a_catalog_cache_round_trips_and_missing_is_none(self):
+        catalog = self._catalog()
+        self.assertIsNone(store.load_catalog(self.profile))
+        store.save_catalog(self.profile, catalog)
+        self.assertEqual(store.load_catalog(self.profile), catalog)
 
 
 if __name__ == "__main__":

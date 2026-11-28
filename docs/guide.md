@@ -343,10 +343,22 @@ connection details or result rows, so it is safe to paste into a ticket.
   of tables), any joins whose condition differs from the local one or is missing
   locally, and keys that point at tables your catalogue no longer has. Those
   conditions are *not* adopted, and those keys are marked stale.
-- **Import for real** applies the previewed plan atomically. Every join imported
-  this way arrives **pending** with source `imported` and needs three local
-  confirmations before it can guide a walk — a bundle never inherits the
-  sender's trust. Scene ids are regenerated, so an import cannot overwrite one
+- **How to import join status** has two choices: *use the sender status (when the
+  catalog allows)* — the default — or *make every join pending*. **Trust is
+  never inherited; a confirmation is only a reference.** The preview checks each
+  edge against your local cached catalog only — it opens no connection and reads
+  no data. A join whose table or column is missing, whose column types are
+  incompatible, or that cannot be checked because there is no cached catalog is
+  lowered to **pending** no matter what the sender claimed; a missing table or
+  column is also marked stale. Only when the catalog agrees does a sender
+  `confirmed`/`trusted` arrive as `confirmed` (never `trusted`) with its
+  confirmation count reset to zero — it still needs three local confirmations
+  before a walk follows it. The preview lists every lowered join and the reason
+  (missing table / missing column / incompatible types / catalog not checked).
+- **Import for real** applies the previewed plan atomically under a lock: it
+  re-reads the current graph first, so a change between preview and import is
+  detected and you are asked to preview again. Every join imported this way gets
+  source `imported`. Scene ids are regenerated, so an import cannot overwrite one
   of your scenes by id.
 - If the bundle was not what you wanted, **Undo this import** removes exactly the
   joins and scenes that import added and leaves everything else alone.

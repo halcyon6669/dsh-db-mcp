@@ -340,6 +340,17 @@ window.__ModuleLoader__.load({
         'share.undoDone': 'Removed the joins and scenes from that import.',
         'share.needBundle': 'Paste a bundle first.',
         'share.error': 'The bundle was not accepted.',
+        'share.statusMode': 'How to import join status',
+        'share.statusOriginal': 'Use the sender status (when the catalog allows)',
+        'share.statusPendingAll': 'Make every join pending',
+        'share.noCatalog': 'No cached catalog for this source — nothing was checked, so every join arrives pending.',
+        'share.downgraded': 'Lowered to pending (trust is never inherited):',
+        'share.reason.missing_table': 'missing table',
+        'share.reason.missing_column': 'missing column',
+        'share.reason.type_incompatible': 'incompatible types',
+        'share.reason.not_checked': 'catalog not checked',
+        'share.reason.pending_all': 'imported as pending by choice',
+        'share.stalePreview': 'The graph changed since the preview — look at the new preview and confirm again.',
         'graph.title': 'Relation graph',
         'graph.hint': 'Every join this datasource knows about. An edge is a claim, so it only gets followed once you have confirmed it — pending edges are listed but never walked.',
         'graph.busy': 'working…',
@@ -923,6 +934,17 @@ window.__ModuleLoader__.load({
         'share.undoDone': '已移除那次导入的连接和场景。',
         'share.needBundle': '请先粘贴一个包。',
         'share.error': '这个包未被接受。',
+        'share.statusMode': '连接状态的导入方式',
+        'share.statusOriginal': '按原状态导入（目录允许时）',
+        'share.statusPendingAll': '全部作为待确认',
+        'share.noCatalog': '这个数据源没有已缓存的目录——未作对照，所有连接都按待确认导入。',
+        'share.downgraded': '降为待确认（信任不可继承）：',
+        'share.reason.missing_table': '缺少表',
+        'share.reason.missing_column': '缺少列',
+        'share.reason.type_incompatible': '类型不兼容',
+        'share.reason.not_checked': '未对照目录',
+        'share.reason.pending_all': '选择按待确认导入',
+        'share.stalePreview': '预览之后关系图有变化——请查看新的预览再确认。',
         'graph.title': '关系图',
         'graph.hint': '这个数据源知道的所有表间连接。一条边是一个「说法」，只有你确认过才会被跟随——待确认的边会列出来，但从不参与追踪。',
         'graph.busy': '处理中…',
@@ -6429,6 +6451,10 @@ function groupTables(tables) {
          table names, so neither is written to the browser store. */
       const [shareBundle, setShareBundle] = React.useState('')
       const [sharePreview, setSharePreview] = React.useState(null)
+      /* Default is "import by the sender's status (when the catalog allows it)";
+         the toggle makes every edge arrive pending. Both are decided here, not
+         remembered — the same bundle can be imported into different databases. */
+      const [shareRespectStatus, setShareRespectStatus] = React.useState(true)
       const [shareLastImport, setShareLastImport] = React.useState('')
       const [shareBusy, setShareBusy] = React.useState(false)
       const [shareError, setShareError] = React.useState(null)
@@ -7134,7 +7160,11 @@ function groupTables(tables) {
         setShareError(null)
         setSharePreview(null)
         try {
-          const data = await apiPost('/bundle/preview', { datasource: shareTarget, payload })
+          const data = await apiPost('/bundle/preview', {
+            datasource: shareTarget,
+            payload,
+            respectStatus: shareRespectStatus,
+          })
           if (!data || data.ok === false) {
             setShareError(bundleFailure(data))
             return
@@ -7156,9 +7186,18 @@ function groupTables(tables) {
         setShareBusy(true)
         setShareError(null)
         try {
-          const data = await apiPost('/bundle/import', { datasource: shareTarget, payload })
+          const data = await apiPost('/bundle/import', {
+            datasource: shareTarget,
+            payload,
+            respectStatus: shareRespectStatus,
+            expectedRevision: sharePreview && sharePreview.revision,
+          })
           if (!data || data.ok === false) {
             setShareError(bundleFailure(data))
+            if (data && data.error && data.error.code === 'stale_preview') {
+              setSharePreview(null)
+              setShareNotice(t('share.stalePreview'))
+            }
             return
           }
           setShareLastImport(data.importId || '')
@@ -8674,6 +8713,15 @@ function groupTables(tables) {
         const conflicts = (sharePreview && sharePreview.conflicts) || []
         const stale = (sharePreview && sharePreview.stale) || []
         const scenes = (sharePreview && sharePreview.scenes) || []
+        const downgraded = (sharePreview && sharePreview.downgraded) || []
+        // Literal t() calls so the i18n dead-key check can see every reason.
+        const downgradeReason = {
+          missing_table: t('share.reason.missing_table'),
+          missing_column: t('share.reason.missing_column'),
+          type_incompatible: t('share.reason.type_incompatible'),
+          not_checked: t('share.reason.not_checked'),
+          pending_all: t('share.reason.pending_all'),
+        }
         return h(
           Card,
           { title: t('share.title') },
@@ -8717,6 +8765,25 @@ function groupTables(tables) {
             }),
           ),
           h(
+            'label',
+            { className: 'dbmcp-cell' },
+            h('span', { className: 'dbmcp-label' }, t('share.statusMode')),
+            h(
+              'select',
+              {
+                className: 'dbmcp-select',
+                value: shareRespectStatus ? 'original' : 'pending',
+                'aria-label': t('share.statusMode'),
+                onChange: (event) => {
+                  setShareRespectStatus(event.target.value !== 'pending')
+                  setSharePreview(null)
+                },
+              },
+              h('option', { value: 'original' }, t('share.statusOriginal')),
+              h('option', { value: 'pending' }, t('share.statusPendingAll')),
+            ),
+          ),
+          h(
             'div',
             { className: 'dbmcp-inline' },
             h(
@@ -8753,6 +8820,19 @@ function groupTables(tables) {
                   ' — ',
                   sharePreview.fingerprintMatches ? t('share.fingerprintMatch') : t('share.fingerprintMismatch'),
                 ),
+                sharePreview.catalogHint
+                  ? h('p', { className: 'dbmcp-hint is-warn' }, t('share.noCatalog'))
+                  : null,
+                downgraded.length
+                  ? h(
+                      'div',
+                      null,
+                      h('p', { className: 'dbmcp-label' }, t('share.downgraded')),
+                      downgraded.map((item, index) =>
+                        h('p', { key: index, className: 'dbmcp-hint' }, `${item.table}.${item.column} — ${downgradeReason[item.reason] || item.reason}`),
+                      ),
+                    )
+                  : null,
                 sharePreview.importId
                   ? h('p', { className: 'dbmcp-hint' }, h('span', { className: 'dbmcp-label' }, `${t('share.undo')}: `), h('code', null, sharePreview.importId))
                   : null,

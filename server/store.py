@@ -93,6 +93,40 @@ def load_settings() -> dict:
     return _settings_cache[2]
 
 
+def _source_key(profile: dict) -> str:
+    """The file stem a datasource's graph, scenes and catalog share."""
+    return str(profile.get("id") or "default")
+
+
+def catalog_path(profile: dict) -> Path:
+    return runtime_dir() / "catalog" / f"{_source_key(profile)}.json"
+
+
+def load_catalog(profile: dict) -> dict | None:
+    """Read a cached table/column catalog, or None when one was never saved.
+
+    A preview consults this only — it must never open a database connection or
+    look at table data. A missing or malformed file reads as "not checked", which
+    is the honest answer when the reader has no local directory to compare with.
+    """
+    data = _read_json(catalog_path(profile), None)
+    if not isinstance(data, dict):
+        return None
+    return data
+
+
+def save_catalog(profile: dict, catalog: dict) -> None:
+    """Write a catalog snapshot. Callers populate it from list_tables/describe."""
+    path = catalog_path(profile)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as handle:
+        json.dump(catalog, handle, indent=2, ensure_ascii=False)
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
+
+
 def password_of(profile: dict, secrets: dict | None = None) -> str | None:
     secrets = secrets if secrets is not None else load_secrets()
     entry = secrets.get(profile.get("id"))

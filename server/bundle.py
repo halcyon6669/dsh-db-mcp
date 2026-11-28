@@ -15,6 +15,13 @@ Two rules shape this module:
   its endpoints with the local ``relations.edge_id``; a scene's id is always
   regenerated. The whole-bundle fingerprint is only a hint that the two sides
   are looking at the same set of tables.
+* Trust is never inherited, but a confirmation is a reference. A sender's
+  ``status`` travels as a hint only. The real status is recomputed against the
+  reader's *cached* catalog: a join whose endpoints exist there with compatible
+  types keeps a confirmed/trusted sender status (downgraded to ``confirmed``,
+  with ``confirmCount`` reset to zero); an endpoint missing from the catalog, a
+  type clash, or no catalog at all means ``pending``. Nobody's trust verdict is
+  copied blindly into somebody else's graph.
 """
 
 from __future__ import annotations
@@ -24,7 +31,9 @@ import hashlib
 import json
 import os
 import uuid
+from pathlib import Path
 
+import engines
 import relations
 import scenes
 import store
@@ -73,10 +82,12 @@ def bundle_fingerprint(edges) -> str:
 
 
 def _wire_edge(edge: dict) -> dict:
-    """The shareable part of an edge: endpoints, condition, note, places.
+    """The shareable part of an edge: endpoints, condition, note, places, status.
 
-    Deliberately absent: status, stats/confirmCount, history and source. A
-    recipient starts from pending and proves the join for themselves.
+    ``status`` travels only as a *hint* — the recipient recomputes its own status
+    against the cached catalog (see ``_resolve_status``). Deliberately absent:
+    stats/confirmCount, history and source, which are local decisions and never
+    cross a trust boundary.
     """
     return {
         "from": dict(edge.get("from") or {}),
@@ -84,7 +95,61 @@ def _wire_edge(edge: dict) -> dict:
         "condition": edge.get("condition"),
         "note": edge.get("note"),
         "places": list(edge.get("places") or []),
+        "status": edge.get("status"),
     }
+
+
+def _resolve_status(wire: dict, catalog: dict | None, respect_status: bool):
+    """Recompute a join's status from the reader's cached catalog.
+
+    Returns ``(status, reason, stale)``. The sender's ``status`` is only consulted
+    *after* the catalog says both endpoints exist with compatible types; it is a
+    reference for a confirmation, never inherited trust. A reason is returned
+    whenever the join lands in ``pending`` so the panel can explain the downgrade.
+    """
+    sender = wire.get("status")
+    if not respect_status:
+        return "pending", "pending_all", False
+    if not isinstance(catalog, dict):
+        return "pending", "not_checked", False
+
+    frm = wire.get("from") or {}
+    to = wire.get("to") or {}
+    raw_tables = catalog.get("tables")
+    if not isinstance(raw_tables, dict):
+        return "pending", "not_checked", False
+    tables = {
+        str(name).casefold(): (info if isinstance(info, dict) else {})
+        for name, info in raw_tables.items()
+    }
+
+    def lookup(table_info, column):
+        cols = table_info.get("columns") or {}
+        if isinstance(cols, dict):
+            folded = {str(name).casefold(): value for name, value in cols.items()}
+            return folded.get(str(column or "").casefold())
+        for item in cols:
+            if isinstance(item, dict) and str(item.get("name", "")).casefold() == str(column or "").casefold():
+                return item.get("type")
+        return None
+
+    left = tables.get(str(frm.get("table") or "").casefold())
+    right = tables.get(str(to.get("table") or "").casefold())
+    if left is None or right is None:
+        return "pending", "missing_table", True
+    left_type = lookup(left, frm.get("column"))
+    right_type = lookup(right, to.get("column"))
+    if left_type is None or right_type is None:
+        return "pending", "missing_column", True
+    left_family = engines.column_family(left_type)
+    right_family = engines.column_family(right_type)
+    if left_family != right_family and "any" not in (left_family, right_family):
+        return "pending", "type_incompatible", False
+    if sender in ("confirmed", "trusted"):
+        # A confirmation is a reference; trust is earned here, so the ceiling is
+        # `confirmed` and the count starts again at zero.
+        return "confirmed", None, False
+    return "pending", None, False
 
 
 def _wire_scene(scene: dict) -> dict:
@@ -131,13 +196,19 @@ def import_bundle(
     payload: dict,
     relations_doc: dict | None = None,
     scenes_doc: dict | None = None,
+    catalog: dict | None = None,
+    respect_status: bool = True,
+    expected_revision: str | None = None,
 ) -> dict:
     """Calculate an import without writing anything.
 
     ``relations_doc``/``scenes_doc`` let a caller preview against documents it
     already holds (for instance a previous preview). When they are omitted the
-    current files are read, but never changed. The returned ``relationsDoc`` and
-    ``scenesDoc`` are the documents that ``apply_import`` will write.
+    current files are read, but never changed. ``catalog`` is the reader's cached
+    table/column directory: no connection is opened, no data is queried. It is
+    the yardstick every sender status is checked against. ``respect_status=False``
+    is the panel's "make everything pending" toggle. The returned documents are
+    what ``apply_import`` will write.
     """
     if not isinstance(payload, dict):
         raise store.StoreError("user_error", "a bundle must be an object", "export one from the sharing page and paste it as-is")
@@ -172,6 +243,12 @@ def import_bundle(
     current_rel["schemaVersion"] = relations.SCHEMA_VERSION
     current_scn["schemaVersion"] = scenes.SCHEMA_VERSION
 
+    # A revision is a fingerprint of what the preview actually looked at. If the
+    # caller re-imports with a stale one, it must recompute against the latest
+    # files instead of committing a plan made over documents that changed.
+    revision = _revision(current_rel, current_scn)
+    stale_preview = bool(expected_revision) and str(expected_revision) != revision
+
     import_id = "i_" + uuid.uuid4().hex[:10]
     by_id = {edge.get("id"): edge for edge in current_rel.get("edges", [])}
     imported = 0
@@ -179,6 +256,7 @@ def import_bundle(
     skipped = 0
     conflicts: list[dict] = []
     unknown: list[str] = []
+    downgraded: list[dict] = []
 
     for wire in raw_edges:
         if not isinstance(wire, dict):
@@ -197,10 +275,25 @@ def import_bundle(
         target_id = relations.edge_id(frm, to)
         condition = wire.get("condition")
         local = by_id.get(target_id)
+        status, reason, stale = _resolve_status(wire, catalog, respect_status)
         if local is None:
             edge = relations._blank_edge(frm, to, "imported", wire.get("note"))
             edge["condition"] = condition
             edge["importId"] = import_id
+            edge["status"] = status
+            # A confirmed arrival earns a fresh confirmation run, never the
+            # sender's count. Pending keeps its zero count.
+            edge["stats"]["confirmCount"] = 0
+            if stale:
+                edge["stale"] = True
+            if reason:
+                edge["downgradeReason"] = reason
+                downgraded.append({
+                    "edge": target_id,
+                    "table": frm["table"],
+                    "column": frm["column"],
+                    "reason": reason,
+                })
             places = wire.get("places")
             if isinstance(places, list):
                 edge["places"] = [str(place) for place in places if str(place).strip()][:relations.PLACES_LIMIT]
@@ -251,6 +344,7 @@ def import_bundle(
         current_scn.setdefault("scenes", []).append(scene)
 
     fingerprint = bundle_fingerprint(raw_edges)
+    catalog_checked = isinstance(catalog, dict)
     return {
         "imported": imported,
         "updated": updated,
@@ -258,12 +352,40 @@ def import_bundle(
         "conflicts": conflicts,
         "unknown": unknown,
         "stale": stale,
+        "downgraded": downgraded,
+        "catalogChecked": catalog_checked,
+        "catalogHint": not catalog_checked,
+        "respectStatus": bool(respect_status),
+        "revision": revision,
+        "stalePreview": stale_preview,
         "fingerprint": fingerprint,
         "fingerprintMatches": str(payload.get("fingerprint") or "") == fingerprint,
         "importId": import_id,
         "relationsDoc": current_rel,
         "scenesDoc": current_scn,
     }
+
+
+def _revision(relations_doc: dict, scenes_doc: dict) -> str:
+    """Fingerprint the two documents a preview was calculated against."""
+    payload = json.dumps(
+        {
+            "edges": [
+                [edge.get("id"), edge.get("status"), edge.get("condition"), edge.get("importId")]
+                for edge in (relations_doc or {}).get("edges", [])
+                if isinstance(edge, dict)
+            ],
+            "scenes": [
+                [scene.get("id"), scene.get("name"), scene.get("tables"), scene.get("importId")]
+                for scene in (scenes_doc or {}).get("scenes", [])
+                if isinstance(scene, dict)
+            ],
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha1(payload.encode("utf-8")).hexdigest()[:12]
 
 
 def _write_document(path, document: dict) -> None:

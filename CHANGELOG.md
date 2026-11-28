@@ -27,9 +27,17 @@ report of each version in more detail.
   details or result rows), previews an import before writing anything, applies it
   atomically, and can undo exactly that import by its `importId`. The panel reaches
   it through `GET /bundle/export` and `POST /bundle/preview|import|undo`, backed by
-  a thin Python CLI — no new MCP tool. Imported edges arrive `pending` with
-  `source: "imported"` and still need three local confirmations; per-edge
-  fingerprints in the file are ignored in favour of locally recomputed ids.
+  a thin Python CLI — no new MCP tool. Per-edge fingerprints and ids in the file
+  are ignored in favour of locally recomputed ids. **Trust is never inherited;
+  a confirmation is only a reference**: an imported edge's status is decided by
+  the local cached catalog first, then the sender's status as a hint — a missing
+  table/column, incompatible types or no catalog to check forces `pending` (with
+  a downgrade reason), while a catalog-checked `confirmed`/`trusted` arrives as
+  `confirmed` with `confirmCount` reset to zero. A preview toggle chooses
+  "use the sender status" (default) or "make every join pending"; the preview
+  reads no connection and writes nothing. Imports run under a lock, re-read the
+  current graph, detect a stale preview, write 0600 temp and final files, and can
+  be undone by `importId`.
 - **An edge now knows what it costs.** `propose_relation` and `feedback_relation`
   read the target column's index and the table's row estimate from the catalogue
   (`pg_class.reltuples`, `information_schema.TABLES.TABLE_ROWS`, `ALL_TABLES.NUM_ROWS`

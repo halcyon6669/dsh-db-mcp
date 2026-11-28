@@ -677,22 +677,44 @@ same pure functions in `server/bundle.py`, so the agent's tool catalog stays at
 its current size. All of the bundle logic lives in `server/bundle.py`:
 
 - `export_bundle(relations, scenes, datasource)` is pure: it copies only the
-  allow-listed fields, drops every status, counter, history and source, and adds
-  a whole-bundle fingerprint — the SHA-1, first 12 hex characters, of every
-  `table.column` endpoint sorted and case-folded. That fingerprint is a hint
-  about whether two bundles describe the same schema; it is never an identity.
+  allow-listed fields — including each edge's `status` — but drops every counter,
+  history and source, and adds a whole-bundle fingerprint — the SHA-1, first 12
+  hex characters, of every `table.column` endpoint sorted and case-folded. That
+  fingerprint is a hint about whether two bundles describe the same schema; it is
+  never an identity. The exported `status` travels only as a **hint** for the
+  reader; it is never copied into the local graph as trust.
 - `import_bundle(...)` is also pure and returns the *plan* — `imported`,
-  `updated`, `skipped`, `conflicts`, `unknown`, stale keys, the fingerprint and
-  whether it matches the local graph — plus the two documents it *would* write.
-  It ignores any per-edge fingerprint in the file and recomputes each edge id
-  from the normalized endpoints, reusing the local `edge_id` rule, so a forged id
-  cannot smuggle an edge in. Imported scenes get a fresh id. Strings, edge counts,
-  scene counts and package bytes are bounded by constants; an unknown
-  `schemaVersion` is rejected and unknown fields are dropped rather than stored.
-- `apply_import(...)` writes both documents through a temp file plus an atomic
-  replace; if the second write fails, the first file is restored, so a failed
-  import leaves both originals untouched. `undo_import(...)` filters by
-  `importId`, removing only that import's edges and scenes.
+  `updated`, `skipped`, `conflicts`, `unknown`, stale keys, the `downgraded` list,
+  the fingerprint and whether it matches the local graph — plus the two documents
+  it *would* write. It ignores any per-edge fingerprint in the file and recomputes
+  each edge id from the normalized endpoints, reusing the local `edge_id` rule, so
+  a forged id cannot smuggle an edge in. Imported scenes get a fresh id. Strings,
+  edge counts, scene counts and package bytes are bounded by constants; an
+  unknown `schemaVersion` is rejected and unknown fields are dropped rather
+  than stored.
+
+  **Trust is never inherited; a confirmation is only a reference.** Status is
+  decided by the local catalog first, then the sender's hint: an endpoint missing
+  from the cached table/column catalog, an incompatible column type, or no catalog
+  to check at all forces the edge to `pending` (a missing table or column is also
+  marked `stale`) regardless of what the sender claimed. Only when the catalog
+  agrees does a sender `confirmed`/`trusted` become local `confirmed` — never
+  `trusted` — with `confirmCount` reset to zero; a sender `pending` stays
+  `pending`. Each edge lowered to pending carries a `downgradeReason`
+  (`missing_table`, `missing_column`, `type_incompatible`, `not_checked`, or
+  `pending_all` when the reader chose the "make everything pending" toggle), and
+  is listed in `downgraded`. The preview reads **only** the locally cached catalog
+  (`store.load_catalog`); it opens no connection and queries no data. With no
+  cache it reports `catalogHint` and imports everything pending. The toggle
+  `respectStatus=False` forces every edge pending.
+- `apply_import(...)` takes the import lock, re-reads the current documents, and
+  writes both through a temp file plus an atomic replace; every temp and final
+  file is created with mode `0600` (on POSIX). If the second write fails, the
+  first file is restored, so a failed import leaves both originals untouched and
+  no temp files behind. `undo_import(...)` filters by `importId`, removing only
+  that import's edges and scenes. A preview carries a `revision`; if the graph
+  changes between preview and import, the import detects the stale revision,
+  refuses to write, and asks the reader to preview again.
 
 ### The panel remembers where it was
 

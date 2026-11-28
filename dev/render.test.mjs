@@ -777,9 +777,12 @@ check('audit refresh: the button reports the busy state', /disabled: auditBusy,\
 // it back through a preview/confirm two-step; an import can be undone by id.
 check('share: the tab renders a single card driven by share state', /const renderShare = \(\) =>/.test(source) && /tab !== 'share' \? null : renderShare\(\)/.test(source))
 check('share: export downloads the bundle through the host CLI route', /apiGet\(`\/bundle\/export\?datasource=\$\{encodeURIComponent\(shareTarget\)\}`\)/.test(source) && /createObjectURL/.test(source))
-check('share: import is a two-step preview then confirm', /apiPost\('\/bundle\/preview', \{ datasource: shareTarget, payload \}\)/.test(source) && /apiPost\('\/bundle\/import', \{ datasource: shareTarget, payload \}\)/.test(source))
+check('share: import is a two-step preview then confirm', /apiPost\('\/bundle\/preview', \{/.test(source) && /respectStatus: shareRespectStatus/.test(source) && /apiPost\('\/bundle\/import', \{/.test(source) && /expectedRevision: sharePreview && sharePreview\.revision/.test(source))
 check('share: the preview names conflicts and stale keys before applying', /sharePreview\.conflicts/.test(source) && /sharePreview\.stale/.test(source) && /sharePreview\.importId/.test(source))
 check('share: an import can be undone by its importId', /apiPost\('\/bundle\/undo', \{ datasource: shareTarget, importId: shareLastImport \}\)/.test(source))
+check('share: status mode toggles between original status and all pending', /share\.statusOriginal/.test(source) && /share\.statusPendingAll/.test(source) && /setShareRespectStatus\(event\.target\.value !== 'pending'\)/.test(source))
+check('share: a preview with no catalog or downgrades says why', /sharePreview\.catalogHint/.test(source) && /t\('share\.noCatalog'\)/.test(source) && /sharePreview\.downgraded/.test(source) && /share\.reason\./.test(source))
+check('share: a stale preview is reported and cleared', /stale_preview/.test(source) && /setShareNotice\(t\('share\.stalePreview'\)\)/.test(source))
 
 // Every outside client can be wired up either way: one button writes a stdio
 // command entry, the other writes the shared HTTP endpoint. The chosen form is

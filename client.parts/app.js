@@ -2149,6 +2149,10 @@ function groupTables(tables) {
          table names, so neither is written to the browser store. */
       const [shareBundle, setShareBundle] = React.useState('')
       const [sharePreview, setSharePreview] = React.useState(null)
+      /* Default is "import by the sender's status (when the catalog allows it)";
+         the toggle makes every edge arrive pending. Both are decided here, not
+         remembered — the same bundle can be imported into different databases. */
+      const [shareRespectStatus, setShareRespectStatus] = React.useState(true)
       const [shareLastImport, setShareLastImport] = React.useState('')
       const [shareBusy, setShareBusy] = React.useState(false)
       const [shareError, setShareError] = React.useState(null)
@@ -2854,7 +2858,11 @@ function groupTables(tables) {
         setShareError(null)
         setSharePreview(null)
         try {
-          const data = await apiPost('/bundle/preview', { datasource: shareTarget, payload })
+          const data = await apiPost('/bundle/preview', {
+            datasource: shareTarget,
+            payload,
+            respectStatus: shareRespectStatus,
+          })
           if (!data || data.ok === false) {
             setShareError(bundleFailure(data))
             return
@@ -2876,9 +2884,18 @@ function groupTables(tables) {
         setShareBusy(true)
         setShareError(null)
         try {
-          const data = await apiPost('/bundle/import', { datasource: shareTarget, payload })
+          const data = await apiPost('/bundle/import', {
+            datasource: shareTarget,
+            payload,
+            respectStatus: shareRespectStatus,
+            expectedRevision: sharePreview && sharePreview.revision,
+          })
           if (!data || data.ok === false) {
             setShareError(bundleFailure(data))
+            if (data && data.error && data.error.code === 'stale_preview') {
+              setSharePreview(null)
+              setShareNotice(t('share.stalePreview'))
+            }
             return
           }
           setShareLastImport(data.importId || '')
@@ -4394,6 +4411,15 @@ function groupTables(tables) {
         const conflicts = (sharePreview && sharePreview.conflicts) || []
         const stale = (sharePreview && sharePreview.stale) || []
         const scenes = (sharePreview && sharePreview.scenes) || []
+        const downgraded = (sharePreview && sharePreview.downgraded) || []
+        // Literal t() calls so the i18n dead-key check can see every reason.
+        const downgradeReason = {
+          missing_table: t('share.reason.missing_table'),
+          missing_column: t('share.reason.missing_column'),
+          type_incompatible: t('share.reason.type_incompatible'),
+          not_checked: t('share.reason.not_checked'),
+          pending_all: t('share.reason.pending_all'),
+        }
         return h(
           Card,
           { title: t('share.title') },
@@ -4437,6 +4463,25 @@ function groupTables(tables) {
             }),
           ),
           h(
+            'label',
+            { className: 'dbmcp-cell' },
+            h('span', { className: 'dbmcp-label' }, t('share.statusMode')),
+            h(
+              'select',
+              {
+                className: 'dbmcp-select',
+                value: shareRespectStatus ? 'original' : 'pending',
+                'aria-label': t('share.statusMode'),
+                onChange: (event) => {
+                  setShareRespectStatus(event.target.value !== 'pending')
+                  setSharePreview(null)
+                },
+              },
+              h('option', { value: 'original' }, t('share.statusOriginal')),
+              h('option', { value: 'pending' }, t('share.statusPendingAll')),
+            ),
+          ),
+          h(
             'div',
             { className: 'dbmcp-inline' },
             h(
@@ -4473,6 +4518,19 @@ function groupTables(tables) {
                   ' — ',
                   sharePreview.fingerprintMatches ? t('share.fingerprintMatch') : t('share.fingerprintMismatch'),
                 ),
+                sharePreview.catalogHint
+                  ? h('p', { className: 'dbmcp-hint is-warn' }, t('share.noCatalog'))
+                  : null,
+                downgraded.length
+                  ? h(
+                      'div',
+                      null,
+                      h('p', { className: 'dbmcp-label' }, t('share.downgraded')),
+                      downgraded.map((item, index) =>
+                        h('p', { key: index, className: 'dbmcp-hint' }, `${item.table}.${item.column} — ${downgradeReason[item.reason] || item.reason}`),
+                      ),
+                    )
+                  : null,
                 sharePreview.importId
                   ? h('p', { className: 'dbmcp-hint' }, h('span', { className: 'dbmcp-label' }, `${t('share.undo')}: `), h('code', null, sharePreview.importId))
                   : null,
