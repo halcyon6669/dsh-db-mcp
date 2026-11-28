@@ -679,6 +679,111 @@ class SchemaAwarePreview(unittest.TestCase):
         result = bundle.import_bundle(self.profile, self._payload(), catalog=catalog)
         self.assertEqual(result["relationsDoc"]["edges"][0]["status"], "confirmed")
 
+    def test_a_column_only_another_schema_holds_is_named_not_adopted(self):
+        # The configured schema knows both tables but not `t_line.order_id`; the
+        # `sales` cache holds that column. Switching to `sales` would silently
+        # answer from a schema the caller did not configure, so the answer is
+        # "pending" with a reason that names where the column was seen.
+        result = bundle.import_bundle(
+            self.profile,
+            self._payload(),
+            catalog=self._catalog({"sku": "text"}),
+            schemas={"sales": self._catalog({"order_id": "integer"})},
+            preferred_schema="public",
+        )
+        edge = result["relationsDoc"]["edges"][0]
+        self.assertEqual(edge["status"], "pending")
+        reasons = [item.get("reason") for item in result.get("downgraded", [])]
+        self.assertIn("column_in_other_schema", reasons)
+        self.assertEqual(result.get("catalogSchema"), "public", "the configured schema stays the answer")
+        self.assertIn("sales", json.dumps(result, ensure_ascii=False), "the reason names the schema")
+        # The schema name is data, not prose: the panel has to be able to point at
+        # it without parsing a sentence, so it travels in `detail`.
+        self.assertEqual(edge.get("downgradeDetail"), "sales", "the edge carries the schema")
+        entry = [item for item in result["downgraded"] if item.get("reason") == "column_in_other_schema"][0]
+        self.assertEqual(entry.get("detail"), "sales", "the plan entry carries the schema")
+
+    def test_a_column_two_other_schemas_hold_names_both_of_them(self):
+        # With the column in `sales` and in `archive`, naming only the first one
+        # found would be a half-truth: the reader would go to `sales` and find the
+        # join still not working in `archive`. Both are listed, in a stable order.
+        result = bundle.import_bundle(
+            self.profile,
+            self._payload(),
+            catalog=self._catalog({"sku": "text"}),
+            schemas={
+                "sales": self._catalog({"order_id": "integer"}),
+                "archive": self._catalog({"order_id": "bigint"}),
+            },
+            preferred_schema="public",
+        )
+        edge = result["relationsDoc"]["edges"][0]
+        self.assertEqual(edge["status"], "pending")
+        entry = [item for item in result["downgraded"] if item.get("reason") == "column_in_other_schema"][0]
+        self.assertEqual(entry.get("detail"), "archive, sales", "every schema holding the column is named")
+        self.assertEqual(edge.get("downgradeDetail"), "archive, sales")
+        self.assertEqual(result.get("catalogSchema"), "public", "the configured schema still answers")
+
+    def test_the_schema_list_does_not_depend_on_cache_insertion_order(self):
+        # Two caches in the other order must produce the same sentence, otherwise
+        # the message changes between two identical runs.
+        first = bundle.import_bundle(
+            self.profile,
+            self._payload(),
+            catalog=self._catalog({"sku": "text"}),
+            schemas={
+                "sales": self._catalog({"order_id": "integer"}),
+                "archive": self._catalog({"order_id": "bigint"}),
+            },
+            preferred_schema="public",
+        )
+        second = bundle.import_bundle(
+            self.profile,
+            self._payload(),
+            catalog=self._catalog({"sku": "text"}),
+            schemas={
+                "archive": self._catalog({"order_id": "bigint"}),
+                "sales": self._catalog({"order_id": "integer"}),
+            },
+            preferred_schema="public",
+        )
+        pick = lambda result: [
+            item.get("detail") for item in result["downgraded"] if item.get("reason") == "column_in_other_schema"
+        ]
+        self.assertEqual(pick(first), pick(second))
+
+    def test_a_column_no_cached_schema_holds_is_plainly_missing(self):
+        # Neither schema carries the column: this is not a schema question at all.
+        result = bundle.import_bundle(
+            self.profile,
+            self._payload(),
+            catalog=self._catalog({"sku": "text"}),
+            schemas={"sales": self._catalog({"sku": "text"})},
+            preferred_schema="public",
+        )
+        reasons = [item.get("reason") for item in result.get("downgraded", [])]
+        self.assertIn("missing_column", reasons)
+
+    def test_two_schemas_with_different_column_sets_do_not_merge(self):
+        # `t_line` carries sku in `public` and order_id in `sales`. A reader that
+        # unioned the two would think this table holds both columns and confirm a
+        # join the configured schema cannot serve.
+        result = bundle.import_bundle(
+            self.profile,
+            self._payload(),
+            catalog=self._catalog({"sku": "text"}),
+            schemas={"sales": self._catalog({"order_id": "integer"})},
+            preferred_schema="public",
+        )
+        sales = self._catalog({"order_id": "integer"})
+        self.assertIsNone(
+            bundle._schema_columns(sales, "t_line", "sku"),
+            "a cache only claims the columns it read itself",
+        )
+        self.assertEqual(result["relationsDoc"]["edges"][0]["status"], "pending")
+        reasons = [item.get("reason") for item in result.get("downgraded", [])]
+        self.assertIn("column_in_other_schema", reasons)
+
 
 class UnreadTables(unittest.TestCase):
     """Unknown and absent are different words, so the cache has to keep them apart.

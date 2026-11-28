@@ -111,6 +111,20 @@ def _bundle(*pairs: tuple[str, str]) -> dict:
     return {"schemaVersion": 1, "kind": "db-mcp-bundle", "edges": edges, "scenes": []}
 
 
+def _status_bundle(*edges: tuple[str, str, str, str, str], scenes: list | None = None) -> dict:
+    """A bundle whose edges carry a status: ``(from_table, from_col, to_table, to_col, status)``."""
+    items = []
+    for frm_table, frm_column, to_table, to_column, status in edges:
+        items.append(
+            {
+                "from": {"table": frm_table, "column": frm_column},
+                "to": {"table": to_table, "column": to_column},
+                "status": status,
+            }
+        )
+    return {"schemaVersion": 1, "kind": "db-mcp-bundle", "edges": items, "scenes": list(scenes or [])}
+
+
 class RefreshScope(unittest.TestCase):
     """Which tables a refresh reads, and what it reports about the rest."""
 
@@ -230,6 +244,88 @@ class RefreshScope(unittest.TestCase):
         cached = store.load_catalog(self.profile, "sales")
         self.assertIsNotNone(cached, "the cache is keyed by datasource + schema")
         self.assertIsNone(store.load_catalog(self.profile), "no schema-free file is written")
+
+
+class RefreshOrder(unittest.TestCase):
+    """A budget is spent on what matters, not on whatever came first in the JSON.
+
+    A bundle lists edges in the order the sender's file happened to hold them, and
+    a pending edge is the one whose tables are least likely to be in the cache. So
+    the read order is by weight: endpoints of a confirmed/trusted edge, then scene
+    members, then endpoints of a pending edge.
+    """
+
+    def setUp(self):
+        self.saved = os.environ.get("DB_MCP_RUNTIME")
+        self.tmp = tempfile.TemporaryDirectory()
+        os.environ["DB_MCP_RUNTIME"] = self.tmp.name
+        self.profile = _profile()
+        self.engine = FakeEngine(
+            {
+                "t_confirmed": {"id": "integer"},
+                "t_scene": {"id": "integer"},
+                "t_pending": {"id": "integer"},
+                "t_trusted": {"id": "integer"},
+            }
+        )
+        self.saved_engines = bundle_cli.engines
+        bundle_cli.engines = self.engine
+
+    def tearDown(self):
+        bundle_cli.engines = self.saved_engines
+        if self.saved is None:
+            os.environ.pop("DB_MCP_RUNTIME", None)
+        else:
+            os.environ["DB_MCP_RUNTIME"] = self.saved
+        self.tmp.cleanup()
+
+    def _payload(self) -> dict:
+        # Deliberately listed backwards: the pending edge first, the trusted one
+        # last, so a reader that just follows the JSON order fails this test.
+        return _status_bundle(
+            ("t_pending", "id", "t_pending", "id", "pending"),
+            ("t_scene", "id", "t_scene", "id", "pending"),
+            ("t_confirmed", "id", "t_confirmed", "id", "confirmed"),
+            ("t_trusted", "id", "t_trusted", "id", "trusted"),
+            scenes=[{"name": "订单到收款", "tables": ["t_scene"]}],
+        )
+
+    def test_a_trusted_endpoint_is_read_before_a_pending_one(self):
+        bundle_cli.refresh(self.profile, payload=self._payload())
+        asked = [name.casefold() for name in self.engine.asked]
+        self.assertLess(asked.index("t_confirmed"), asked.index("t_pending"))
+        self.assertLess(asked.index("t_trusted"), asked.index("t_pending"))
+
+    def test_a_scene_member_sits_between_a_confirmation_and_a_pending_edge(self):
+        bundle_cli.refresh(self.profile, payload=self._payload())
+        asked = [name.casefold() for name in self.engine.asked]
+        self.assertLess(asked.index("t_confirmed"), asked.index("t_scene"))
+        self.assertLess(asked.index("t_scene"), asked.index("t_pending"))
+
+    def test_each_table_is_asked_for_once_however_many_edges_named_it(self):
+        payload = _status_bundle(
+            ("t_confirmed", "id", "t_pending", "id", "confirmed"),
+            ("t_confirmed", "code", "t_trusted", "id", "trusted"),
+        )
+        bundle_cli.refresh(self.profile, payload=payload)
+        asked = [name.casefold() for name in self.engine.asked]
+        self.assertEqual(asked.count("t_confirmed"), 1, asked)
+
+    def test_the_budget_gives_up_on_the_last_batch_not_a_mixed_one(self):
+        # Two tables fit inside the budget, two are left over. The leftovers must
+        # be exactly the pending endpoints — never a confirmed one. The pending
+        # edges are listed FIRST, so a refresh that follows the JSON order fails.
+        ticks = iter([0, 1, 1, 10_000, 10_000, 10_000, 10_000])
+        payload = _status_bundle(
+            ("t_pending", "id", "t_pending", "id", "pending"),
+            ("t_scene", "id", "t_scene", "id", "pending"),
+            ("t_confirmed", "id", "t_confirmed", "id", "confirmed"),
+            ("t_trusted", "id", "t_trusted", "id", "trusted"),
+            scenes=[{"name": "订单到收款", "tables": ["t_scene"]}],
+        )
+        result = bundle_cli.refresh(self.profile, payload=payload, timeout_ms=5_000, clock=lambda: next(ticks))
+        self.assertEqual(result["checked"], ["t_confirmed", "t_trusted"], result)
+        self.assertEqual(sorted(name.casefold() for name in result["notChecked"]), ["t_pending", "t_scene"])
 
 
 if __name__ == "__main__":

@@ -225,6 +225,48 @@ def _choose_catalog(catalog: dict | None, schemas: dict | None, frm: dict, to: d
     return first if first is not None else (None, None)
 
 
+def _schemas_holding(chosen: dict | None, schemas: dict | None, table: str, column: str) -> list[str]:
+    """Every other cached schema that holds a column the chosen one lacks.
+
+    Used only to explain a downgrade: the preview still answers from the
+    configured schema, and a column that exists solely elsewhere means the join
+    was written against a different shape of that table.
+
+    All of them are named, not just the first one found: with two schemas holding
+    the column, "it is in sales" would be a half-truth that sends the reader to
+    the wrong place half the time. The list is sorted so the same caches always
+    produce the same sentence.
+    """
+    wanted = str(column or "").casefold()
+    found: list[str] = []
+    for name, item in (schemas or {}).items():
+        if not isinstance(item, dict) or item is chosen:
+            continue
+        label = str(item.get("schema") or name)
+        if _schema_columns(item, table, column) is not None:
+            found.append(label)
+            continue
+        # `_schema_columns` returns None both for "no such column" and for a
+        # column whose stored type is None, so ask the table entry directly —
+        # a column the catalog knows nothing about is still a column that exists.
+        tables = item.get("tables")
+        if not isinstance(tables, dict):
+            continue
+        for table_name, info in tables.items():
+            if str(table_name).casefold() != str(table or "").casefold():
+                continue
+            if not isinstance(info, dict):
+                continue
+            cols = info.get("columns") or {}
+            keys = cols.keys() if isinstance(cols, dict) else [
+                entry.get("name") for entry in cols if isinstance(entry, dict)
+            ]
+            if any(str(key or "").casefold() == wanted for key in keys):
+                found.append(label)
+                break
+    return sorted(set(found))
+
+
 def _resolve_status(wire: dict, catalog: dict | None, respect_status: bool, catalog_is_stale: bool = False,
                     schemas: dict | None = None, preferred_schema: str | None = None):
     """Recompute a join's status from the reader's cached catalog.
@@ -242,6 +284,11 @@ def _resolve_status(wire: dict, catalog: dict | None, respect_status: bool, cata
     that case is ``ambiguous_schema``, a refusal to guess. It is checked before
     the type comparison, because a disagreement between schemas means even the
     configured schema's type cannot be trusted.
+
+    A column the configured schema lacks but another one holds is
+    ``column_in_other_schema``: the answer still comes from the configured schema,
+    it just says where the column does exist instead of switching to it. When
+    several schemas hold it, the detail names them all.
     """
     sender = wire.get("status")
     if not respect_status:
@@ -287,6 +334,17 @@ def _resolve_status(wire: dict, catalog: dict | None, respect_status: bool, cata
     left_type = lookup(left, frm.get("column"))
     right_type = lookup(right, to.get("column"))
     if left_type is None or right_type is None:
+        # The configured schema holds both tables but not this column. Another
+        # cached schema may hold it — say where, but never answer from there: the
+        # caller configured one schema, and a column that only exists elsewhere
+        # means the join was written against a different shape of the table.
+        missing_point = frm if left_type is None else to
+        held_by = _schemas_holding(chosen, schemas, missing_point.get("table"), missing_point.get("column"))
+        if held_by:
+            # The reason key stays machine-readable; the schemas that have the
+            # column travel beside it, so the panel can say "column exists in
+            # schema sales, archive" instead of picking one of them.
+            return "pending", ("column_in_other_schema", ", ".join(held_by)), False
         return "pending", "missing_column", True
 
     # A second schema that disagrees about the same column makes the answer
@@ -455,6 +513,9 @@ def import_bundle(
         status, reason, stale = _resolve_status(
             wire, catalog, respect_status, catalog_stale, schemas, preferred_schema
         )
+        # A reason is either a plain key or ``(key, detail)`` — the detail (which
+        # schema holds the column) travels beside the key, never inside it.
+        reason_key, reason_detail = reason if isinstance(reason, tuple) else (reason, None)
         chosen, chosen_schema = _choose_catalog(catalog, schemas, frm, to)
         if chosen is not None and chosen_schema and chosen_schema not in used_schemas:
             # Which schema actually answered this preview, so the panel can say so
@@ -470,14 +531,19 @@ def import_bundle(
             edge["stats"]["confirmCount"] = 0
             if stale:
                 edge["stale"] = True
-            if reason:
-                edge["downgradeReason"] = reason
-                downgraded.append({
+            if reason_key:
+                edge["downgradeReason"] = reason_key
+                if reason_detail:
+                    edge["downgradeDetail"] = reason_detail
+                entry = {
                     "edge": target_id,
                     "table": frm["table"],
                     "column": frm["column"],
-                    "reason": reason,
-                })
+                    "reason": reason_key,
+                }
+                if reason_detail:
+                    entry["detail"] = reason_detail
+                downgraded.append(entry)
             places = wire.get("places")
             if isinstance(places, list):
                 edge["places"] = [str(place) for place in places if str(place).strip()][:relations.PLACES_LIMIT]

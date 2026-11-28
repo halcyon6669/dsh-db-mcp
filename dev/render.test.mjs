@@ -795,6 +795,11 @@ check('share: the refresh echoes what it read, missed and never got to', /setSha
 check('share: an unread table is called unread, never missing', /t\('share\.refreshNotChecked'\)/.test(source) && /notChecked/.test(source) && /t\('share\.reason\.not_checked'\)/.test(source))
 check('share: the schema being read can be named and is shown', /shareSchema/.test(source) && /apiPost\('\/bundle\/refresh-catalog', \{\s*datasource: shareTarget,\s*schema: schemaValue\(\)/.test(source) && /t\('share\.schemaUsed'\)/.test(source))
 check('share: two schemas that disagree are ambiguous, not a guess', /ambiguous_schema:/.test(source) && /t\('share\.reason\.ambiguous_schema'\)/.test(source))
+check(
+  'share: a column held by another schema names it instead of switching',
+  /column_in_other_schema: t\('share\.reason\.column_in_other_schema'\)/.test(source) &&
+    /item\.detail \? ` \(\$\{item\.detail\}\)`/.test(source),
+)
 check('share: the preview names the schema it was checked against', /sharePreview\.catalogSchema/.test(source) && /t\('share\.schemaUsed'\)/.test(source))
 check('runtime: a catalog write failure is shown, not swallowed', /t\('diag\.catalogFailures'\)/.test(source) && /catalogHealth/.test(source) && /t\('diag\.catalogLastFailure'\)/.test(source))
 

@@ -370,6 +370,7 @@ window.__ModuleLoader__.load({
         'share.reason.pending_all': 'imported as pending by choice',
         'share.reason.stale_cache': 'cached directory is old',
         'share.reason.ambiguous_schema': 'two schemas disagree about this column',
+        'share.reason.column_in_other_schema': 'the configured schema has no such column',
         'share.stalePreview': 'The graph changed since the preview — look at the new preview and confirm again.',
         'graph.title': 'Relation graph',
         'graph.hint': 'Every join this datasource knows about. An edge is a claim, so it only gets followed once you have confirmed it — pending edges are listed but never walked.',
@@ -984,6 +985,7 @@ window.__ModuleLoader__.load({
         'share.reason.pending_all': '选择按待确认导入',
         'share.reason.stale_cache': '目录缓存较旧',
         'share.reason.ambiguous_schema': '两个 schema 对这个列的判断不一致',
+        'share.reason.column_in_other_schema': '配置的 schema 里没有这个列',
         'share.stalePreview': '预览之后关系图有变化——请查看新的预览再确认。',
         'graph.title': '关系图',
         'graph.hint': '这个数据源知道的所有表间连接。一条边是一个「说法」，只有你确认过才会被跟随——待确认的边会列出来，但从不参与追踪。',
@@ -8814,6 +8816,7 @@ function groupTables(tables) {
           pending_all: t('share.reason.pending_all'),
           stale_cache: t('share.reason.stale_cache'),
           ambiguous_schema: t('share.reason.ambiguous_schema'),
+          column_in_other_schema: t('share.reason.column_in_other_schema'),
         }
         // How old is the cached directory? The server stamps it on every write;
         // a stamp older than seven days is only a hint, never enough to vouch
@@ -9022,7 +9025,16 @@ function groupTables(tables) {
                       null,
                       h('p', { className: 'dbmcp-label' }, t('share.downgraded')),
                       downgraded.map((item, index) =>
-                        h('p', { key: index, className: 'dbmcp-hint' }, `${item.table}.${item.column} — ${downgradeReason[item.reason] || item.reason}`),
+                        h(
+                          'p',
+                          { key: index, className: 'dbmcp-hint' },
+                          `${item.table}.${item.column} — ${downgradeReason[item.reason] || item.reason}`,
+                          // `column_in_other_schema` names the schema that does
+                          // hold the column: the answer still came from the
+                          // configured schema, so the reader needs to know where
+                          // to look rather than being sent somewhere else.
+                          item.detail ? ` (${item.detail})` : '',
+                        ),
                       ),
                     )
                   : null,

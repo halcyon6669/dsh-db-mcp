@@ -720,6 +720,14 @@ its current size. All of the bundle logic lives in `server/bundle.py`:
   `missing_table`. The plan reports every unreachable table in
   `catalogNotChecked`, apart from `downgraded`.
 
+  **The column exists, just not here.** When the configured schema has the
+  endpoint's table but not the column, the edge is still lowered to `pending`, and
+  the reason is `column_in_other_schema` with a `detail` naming the cached schema
+  that does hold it. The answer keeps coming from the configured schema — the
+  import does not switch schemas on its own, because a column with the right name
+  in another schema is a hint for a person, not a join. If no cached schema holds
+  the column the reason is plain `missing_column`.
+
   **One table, several schemas.** The cache file is keyed by data source *and*
   schema (`<source>.json` for the schema-free key, `<source>__<schema>.json`
   otherwise), so one source can be cached per schema. The preview looks in the
@@ -728,7 +736,8 @@ its current size. All of the bundle logic lives in `server/bundle.py`:
   schema that answered in `catalogSchema`. If two cached schemas disagree about
   the type of the same column the edge is lowered with `ambiguous_schema` instead
   of guessing — a disagreement means no cached type can be trusted for that
-  column.
+  column. A cache only ever claims the columns it read itself; two schemas are
+  never merged into one table view.
 
   The cache is filled as a side effect of the catalog tools (`list_tables`,
   `describe_table`, `discover_relations`), each stamping only the tables *it*
@@ -739,7 +748,12 @@ its current size. All of the bundle logic lives in `server/bundle.py`:
   variants an engine may insist on (Oracle upper case, GaussDB lower case), with
   no table ceiling; it reports `checked`, `missing` and `notChecked` separately,
   where `notChecked` means timed out, past the run's deadline, or otherwise
-  failed. The Share page shows all three counts and the schema that was read.
+  failed. Tables are read in order of how much the bundle trusts them: endpoints
+  of `confirmed`/`trusted` edges first, then scene members, then endpoints of
+  `pending` edges, each table once however many edges name it — so when the
+  deadline runs out it is the least trusted tables that go unread, never a mixed
+  selection from every rank. The Share page shows all three counts and the schema
+  that was read.
   Each table entry carries its own `readAt`; a partial read (a filtered
   `list_tables`, one `describe_table`) updates only the tables it touched, so it
   cannot make an old table look fresh. A table's staleness is judged by its own

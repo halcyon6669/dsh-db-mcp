@@ -4472,6 +4472,7 @@ function groupTables(tables) {
           pending_all: t('share.reason.pending_all'),
           stale_cache: t('share.reason.stale_cache'),
           ambiguous_schema: t('share.reason.ambiguous_schema'),
+          column_in_other_schema: t('share.reason.column_in_other_schema'),
         }
         // How old is the cached directory? The server stamps it on every write;
         // a stamp older than seven days is only a hint, never enough to vouch
@@ -4680,7 +4681,16 @@ function groupTables(tables) {
                       null,
                       h('p', { className: 'dbmcp-label' }, t('share.downgraded')),
                       downgraded.map((item, index) =>
-                        h('p', { key: index, className: 'dbmcp-hint' }, `${item.table}.${item.column} — ${downgradeReason[item.reason] || item.reason}`),
+                        h(
+                          'p',
+                          { key: index, className: 'dbmcp-hint' },
+                          `${item.table}.${item.column} — ${downgradeReason[item.reason] || item.reason}`,
+                          // `column_in_other_schema` names the schema that does
+                          // hold the column: the answer still came from the
+                          // configured schema, so the reader needs to know where
+                          // to look rather than being sent somewhere else.
+                          item.detail ? ` (${item.detail})` : '',
+                        ),
                       ),
                     )
                   : null,

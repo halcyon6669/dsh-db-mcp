@@ -31,12 +31,17 @@ import store
 
 
 def _wanted_tables(payload: dict) -> list:
-    """The tables a bundle actually mentions, in the order it mentions them.
+    """The tables a bundle actually mentions, most trustworthy first.
 
-    Edge endpoints come first (the joins are what a preview compares), then scene
-    members. Reading "the first 500 tables" answered a question nobody asked and
-    left the rest of a real schema silently unknown; this reads what is needed and
-    nothing else, with no ceiling.
+    Edge endpoints come before scene members, and an edge whose status is
+    ``confirmed``/``trusted`` comes before a ``pending`` one. That order is what a
+    limited budget should spend itself on: a confirmed join is the one a reader
+    will act on, while a pending edge is a guess the sender has not checked. A
+    scene member sits in between — someone wrote it down on purpose.
+
+    Reading "the first 500 tables" answered a question nobody asked and left the
+    rest of a real schema silently unknown; this reads what is needed and nothing
+    else, with no ceiling.
     """
     order: list = []
     seen: set[str] = set()
@@ -49,19 +54,28 @@ def _wanted_tables(payload: dict) -> list:
         order.append(text)
 
     edges = payload.get("edges") if isinstance(payload, dict) else None
-    for edge in edges if isinstance(edges, list) else []:
-        if not isinstance(edge, dict):
-            continue
-        for side in ("from", "to"):
-            point = edge.get(side)
-            if isinstance(point, dict):
-                add(point.get("table"))
+    trusted = {"confirmed", "trusted"}
+    edge_items = [edge for edge in (edges if isinstance(edges, list) else []) if isinstance(edge, dict)]
+
+    def add_edges(want_trusted: bool) -> None:
+        for edge in edge_items:
+            if (str(edge.get("status") or "").casefold() in trusted) != want_trusted:
+                continue
+            for side in ("from", "to"):
+                point = edge.get(side)
+                if isinstance(point, dict):
+                    add(point.get("table"))
+
+    # Confirmed/trusted endpoints first, then scene members, then pending edges:
+    # a scene is someone's deliberate table list, a pending edge is a guess.
+    add_edges(True)
     scenes = payload.get("scenes") if isinstance(payload, dict) else None
     for scene in scenes if isinstance(scenes, list) else []:
         if not isinstance(scene, dict):
             continue
         for name in scene.get("tables") or []:
             add(name)
+    add_edges(False)
     return order
 
 
