@@ -37,10 +37,29 @@ report of each version in more detail.
   "use the sender status" (default) or "make every join pending"; the preview
   reads no connection and writes nothing. **Refresh directory** fills the local
   table/column catalog (metadata only, no row data); the cache is also filled as
-  you browse catalogs, is timestamped, and a cache older than seven days is
-  treated as stale — a hint that still lets you continue. Imports run under a
+  you browse catalogs. Imports run under a
   lock, re-read the current graph, detect a stale preview, write 0600 temp and
   final files (POSIX), and can be undone by `importId`.
+- **Refreshing the cached directory now reads what the bundle actually mentions.**
+  Instead of listing "the first 500 tables", a refresh reads exactly the tables the
+  pasted bundle names — every edge endpoint plus every scene member — trying the case
+  variants an engine may insist on (Oracle upper case, GaussDB lower case), with no
+  table ceiling and a whole-run deadline. It reports three outcomes apart: tables
+  read, tables that really are gone, and tables it never got to (timed out or
+  failed). A table it never reached is *unknown*, so the preview lowers that join as
+  `not_checked` and lists it in `catalogNotChecked` instead of calling it
+  `missing_table` — the difference decides whether a join is called absent or merely
+  unchecked. Each table entry carries its own `readAt`, so a partial read (a filtered
+  `list_tables`, one `describe_table`) can no longer make an old table look fresh;
+  a cache written before per-table stamps still works through its file-level
+  `savedAt`. A cache older than seven days is still treated as stale — a hint that
+  tells you to refresh but lets you continue.
+- **The directory is cached per schema.** The cache file is keyed by data source and
+  schema, the refresh button takes an optional schema (blank = the data source's
+  configured one), and the Share page says which schema was read. The preview looks
+  in the configured schema first, then in any other schema cached for that source; if
+  two cached schemas disagree about a column's type the join is lowered as
+  `ambiguous_schema` rather than guessed.
 - **An edge now knows what it costs.** `propose_relation` and `feedback_relation`
   read the target column's index and the table's row estimate from the catalogue
   (`pg_class.reltuples`, `information_schema.TABLES.TABLE_ROWS`, `ALL_TABLES.NUM_ROWS`

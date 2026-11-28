@@ -98,36 +98,130 @@ def _source_key(profile: dict) -> str:
     return str(profile.get("id") or "default")
 
 
-def catalog_path(profile: dict) -> Path:
-    return runtime_dir() / "catalog" / f"{_source_key(profile)}.json"
+def catalog_path(profile: dict, schema: str | None = None) -> Path:
+    """Where one datasource's cached directory lives.
+
+    The key is datasource **and** schema: the same table name in two schemas is
+    two different tables, and a cache that mixed them could report a column type
+    that belongs to the other one. A datasource with no schema keeps the plain
+    ``<id>.json`` name, which is also where a cache written before schemas were
+    part of the key already sits — so an upgrade never loses it.
+    """
+    stem = _source_key(profile)
+    name = stem if not schema else f"{stem}__{schema}"
+    return runtime_dir() / "catalog" / f"{name}.json"
 
 
-def load_catalog(profile: dict) -> dict | None:
+def catalog_schema(profile: dict) -> str | None:
+    """The schema this datasource is configured to read, if any."""
+    config = profile.get("config")
+    if not isinstance(config, dict):
+        return None
+    name = str(config.get("schema") or "").strip()
+    return name or None
+
+
+def catalog_schemas(profile: dict) -> list:
+    """Every schema this datasource has a cache for, ``None`` last.
+
+    A preview walks these in order, so a table known to one schema is still found
+    when the configured schema has not been read yet.
+    """
+    folder = runtime_dir() / "catalog"
+    stem = _source_key(profile)
+    found: list = []
+    try:
+        names = sorted(entry.name for entry in folder.iterdir() if entry.suffix == ".json")
+    except OSError:
+        names = []
+    for name in names:
+        base = name[: -len(".json")]
+        if base == stem:
+            found.append(None)
+        elif base.startswith(f"{stem}__"):
+            found.append(base[len(stem) + 2 :] or None)
+    # A named schema answers more questions than the schema-free file, so it is
+    # tried first; `None` stays last as the fallback.
+    named = [item for item in found if item]
+    return named + ([None] if None in found else [])
+
+
+def load_catalog(profile: dict, schema: str | None = None) -> dict | None:
     """Read a cached table/column catalog, or None when one was never saved.
 
     A preview consults this only — it must never open a database connection or
     look at table data. A missing or malformed file reads as "not checked", which
     is the honest answer when the reader has no local directory to compare with.
+
+    With ``schema`` given, a schema-free cache is the fallback: it was written by
+    an older build that did not know about schemas, and it is still the best
+    local answer rather than "never checked".
     """
-    data = _read_json(catalog_path(profile), None)
+    data = _read_json(catalog_path(profile, schema), None)
+    if not isinstance(data, dict) and schema:
+        data = _read_json(catalog_path(profile), None)
     if not isinstance(data, dict):
         return None
     return data
 
 
-def save_catalog(profile: dict, catalog: dict) -> dict:
-    """Write a catalog snapshot, stamping when it was read.
-
-    Callers populate ``tables`` from list_tables/describe_table/discover_relations;
-    this function owns the timestamp so a cache can never claim to be fresher
-    than the moment it was written. Returns the document actually written.
-    """
+def _stamp() -> str:
     from datetime import datetime, timezone
 
+    moment = datetime.now(timezone.utc)
+    return moment.strftime("%Y-%m-%dT%H:%M:%S.") + f"{moment.microsecond // 1000:03d}Z"
+
+
+def save_catalog(profile: dict, catalog: dict, schema: str | None = None, read=()) -> dict:
+    """Write a catalog snapshot, stamping what was actually read this time.
+
+    Callers populate ``tables`` from list_tables/describe_table/discover_relations;
+    this function owns the timestamps so a cache can never claim to be fresher
+    than the moment it was written. ``read`` names the tables this call actually
+    looked at (a table name, or ``(table, columns)``): only those get a fresh
+    ``readAt``, so a narrow listing cannot make a table read last week look new.
+    Reading a table also clears its "unread" mark.
+
+    Returns the document actually written.
+    """
     doc = dict(catalog)
-    stamp = datetime.now(timezone.utc)
-    doc["savedAt"] = stamp.strftime("%Y-%m-%dT%H:%M:%S.") + f"{stamp.microsecond // 1000:03d}Z"
-    path = catalog_path(profile)
+    stamp = _stamp()
+    doc["savedAt"] = stamp
+    if schema:
+        doc["schema"] = schema
+    tables = doc.get("tables")
+    if not isinstance(tables, dict):
+        tables = {}
+        doc["tables"] = tables
+    touched = []
+    for item in read or ():
+        if isinstance(item, (tuple, list)):
+            name = str(item[0]) if item else ""
+            columns = item[1] if len(item) > 1 and isinstance(item[1], dict) else None
+        else:
+            name, columns = str(item), None
+        if not name:
+            continue
+        entry = tables.get(name)
+        if not isinstance(entry, dict):
+            entry = {}
+            tables[name] = entry
+        if columns is not None:
+            known = entry.get("columns")
+            if not isinstance(known, dict):
+                known = {}
+                entry["columns"] = known
+            for key, type_name in columns.items():
+                # A union from foreign keys has no type; never let it erase a
+                # type a describe_table call already recorded.
+                if key not in known or known[key] is None or type_name is not None:
+                    known[key] = type_name
+        entry["readAt"] = stamp
+        touched.append(name.casefold())
+    unread = doc.get("unread")
+    if isinstance(unread, list) and touched:
+        doc["unread"] = [name for name in unread if str(name).casefold() not in touched]
+    path = catalog_path(profile, schema)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as handle:
         json.dump(doc, handle, indent=2, ensure_ascii=False)
@@ -136,6 +230,28 @@ def save_catalog(profile: dict, catalog: dict) -> dict:
     except OSError:
         pass
     return doc
+
+
+def table_stamp(catalog: dict | None, table: str) -> str | None:
+    """When one table was last read, falling back to the file stamp.
+
+    A cache written before per-table times existed only has ``savedAt``; treating
+    it as every table's read time keeps that cache usable, and the whole-file
+    comparison still downgrades it once it is old.
+    """
+    if not isinstance(catalog, dict):
+        return None
+    wanted = str(table or "").casefold()
+    tables = catalog.get("tables")
+    if isinstance(tables, dict):
+        for name, entry in tables.items():
+            if str(name).casefold() != wanted:
+                continue
+            if isinstance(entry, dict) and entry.get("readAt"):
+                return str(entry["readAt"])
+            break
+    stamp = catalog.get("savedAt")
+    return str(stamp) if stamp else None
 
 
 def password_of(profile: dict, secrets: dict | None = None) -> str | None:

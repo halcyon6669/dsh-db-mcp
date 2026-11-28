@@ -355,13 +355,26 @@ connection details or result rows, so it is safe to paste into a ticket.
   confirmation count reset to zero — it still needs three local confirmations
   before a walk follows it. The preview lists every lowered join and the reason
   (missing table / missing column / incompatible types / catalog not checked /
-  cached directory is old), and says how old the cached directory is.
+  two schemas disagree / cached directory is old), and says how old the cached
+  directory is.
 - **Refresh directory** refreshes the cached table/column catalog. It is the only
   action here that opens a connection, and it reads metadata only — never row
-  data. The cache is also filled as you browse tables and relations elsewhere. A
-  cache older than seven days is treated as stale: the preview still works, but
-  it warns you to refresh first and lowers any status it would have lifted. You
-  can always continue with an old cache; the warning is a hint, not a block.
+  data. It reads exactly the tables the pasted bundle mentions, not "the first
+  five hundred", and tries the case variants an engine may insist on. Three
+  outcomes are reported apart: tables read, tables that really are gone, and
+  tables it never got to (timed out or failed) — a table it never reached is
+  *unknown*, so the preview says "not checked" instead of calling the join
+  missing. The cache is also filled as you browse tables and relations
+  elsewhere, and each table keeps its own read time, so a partial read cannot
+  make an old table look fresh. A cache older than seven days is treated as
+  stale: the preview still works, but it warns you to refresh first and lowers
+  any status it would have lifted. You can always continue with an old cache;
+  the warning is a hint, not a block.
+- **Schema** can be named next to the refresh button; leave it blank to use the
+  schema the data source is configured with. The directory is cached per schema,
+  and the preview looks in the configured schema first, then in any other schema
+  cached for that source — if two of them disagree about a column's type, the
+  join is lowered as *ambiguous* rather than guessed.
 - **Import for real** applies the previewed plan atomically under a lock: it
   re-reads the current graph first, so a change between preview and import is
   detected and you are asked to preview again. Every join imported this way gets

@@ -345,8 +345,16 @@ window.__ModuleLoader__.load({
         'share.statusPendingAll': 'Make every join pending',
         'share.noCatalog': 'No cached catalog for this source — nothing was checked, so every join arrives pending.',
         'share.refreshCatalog': 'Refresh directory',
-        'share.refreshCatalogHint': 'Read table and column metadata only — no row data. Click to refresh the cached directory.',
-        'share.catalogRefreshed': 'Directory refreshed: {n} table(s).',
+        'share.refreshCatalogHint': 'Read table and column metadata for the tables this bundle mentions — no row data. Click to refresh the cached directory.',
+        'share.catalogRefreshed': 'Directory refreshed: {read} read, {missing} gone, {skipped} not read.',
+        'share.schemaLabel': 'Schema',
+        'share.schemaPlaceholder': 'the one this source is configured with',
+        'share.schemaHint': 'Leave it blank to read the schema the data source is configured with. The directory is cached per schema.',
+        'share.schemaUsed': 'Read against schema: {schema}',
+        'share.refreshChecked': 'Read ({n}): {names}',
+        'share.refreshMissing': 'Gone ({n}): {names}',
+        'share.refreshNotChecked': 'Not read ({n}): {names} — unknown, not missing',
+        'share.notCheckedTables': 'The directory was not read completely ({n} table(s) not checked): {names}',
         'share.catalogAge': 'Directory cached {age} ago',
         'share.staleCatalog': 'This directory cache is over 7 days old — refresh it before trusting the status match. You can still continue.',
         'share.downgraded': 'Lowered to pending (trust is never inherited):',
@@ -356,6 +364,7 @@ window.__ModuleLoader__.load({
         'share.reason.not_checked': 'catalog not checked',
         'share.reason.pending_all': 'imported as pending by choice',
         'share.reason.stale_cache': 'cached directory is old',
+        'share.reason.ambiguous_schema': 'two schemas disagree about this column',
         'share.stalePreview': 'The graph changed since the preview — look at the new preview and confirm again.',
         'graph.title': 'Relation graph',
         'graph.hint': 'Every join this datasource knows about. An edge is a claim, so it only gets followed once you have confirmed it — pending edges are listed but never walked.',
@@ -945,8 +954,16 @@ window.__ModuleLoader__.load({
         'share.statusPendingAll': '全部作为待确认',
         'share.noCatalog': '这个数据源没有已缓存的目录——未作对照，所有连接都按待确认导入。',
         'share.refreshCatalog': '刷新目录',
-        'share.refreshCatalogHint': '只读表和列的元数据，不读业务数据。点击可刷新缓存的目录。',
-        'share.catalogRefreshed': '目录已刷新：{n} 张表。',
+        'share.refreshCatalogHint': '只读这个包里提到的表的元数据，不读业务数据。点击可刷新缓存的目录。',
+        'share.catalogRefreshed': '目录已刷新：读到 {read} 张，缺 {missing} 张，未查 {skipped} 张。',
+        'share.schemaLabel': 'schema',
+        'share.schemaPlaceholder': '留空＝数据源配置的那个',
+        'share.schemaHint': '留空就读数据源配置里的 schema。目录按 schema 分别缓存。',
+        'share.schemaUsed': '按 schema 读取：{schema}',
+        'share.refreshChecked': '已读（{n}）：{names}',
+        'share.refreshMissing': '确实没有（{n}）：{names}',
+        'share.refreshNotChecked': '未检查（{n}）：{names}——是未知，不是缺失',
+        'share.notCheckedTables': '目录未完整读取（{n} 张未查）：{names}',
         'share.catalogAge': '目录缓存于 {age} 前',
         'share.staleCatalog': '这份目录缓存已超过 7 天——建议先刷新再相信状态对照。你仍可继续。',
         'share.downgraded': '降为待确认（信任不可继承）：',
@@ -956,6 +973,7 @@ window.__ModuleLoader__.load({
         'share.reason.not_checked': '未对照目录',
         'share.reason.pending_all': '选择按待确认导入',
         'share.reason.stale_cache': '目录缓存较旧',
+        'share.reason.ambiguous_schema': '两个 schema 对这个列的判断不一致',
         'share.stalePreview': '预览之后关系图有变化——请查看新的预览再确认。',
         'graph.title': '关系图',
         'graph.hint': '这个数据源知道的所有表间连接。一条边是一个「说法」，只有你确认过才会被跟随——待确认的边会列出来，但从不参与追踪。',
@@ -6471,6 +6489,13 @@ function groupTables(tables) {
       const [shareBusy, setShareBusy] = React.useState(false)
       const [shareError, setShareError] = React.useState(null)
       const [shareNotice, setShareNotice] = React.useState(null)
+      /* What the last "refresh directory" actually read, so the panel can repeat
+         it: which tables it got to, which were gone, and which it never reached. */
+      const [shareRefresh, setShareRefresh] = React.useState(null)
+      /* Blank means "whatever the datasource is configured with"; typing a name
+         reads that schema instead, and the cache is kept per schema. Not stored:
+         which schema matters depends on the database being shared into. */
+      const [shareSchema, setShareSchema] = React.useState('')
       /* The trace form is remembered field by field, not as a whole: the value
          and the datasource are what a reader re-types most often. */
       const [traceValue, setTraceValue] = React.useState(() => String(savedPanel.traceValue || ''))
@@ -7154,23 +7179,44 @@ function groupTables(tables) {
       }
       const refreshCatalog = async () => {
         // The only action in this tab that opens a database connection, and it
-        // reads catalog metadata only — a person asked for it by clicking.
+        // reads catalog metadata only — a person asked for it by clicking. It
+        // reads exactly the tables the pasted bundle mentions, so the answer
+        // covers the joins being previewed and nothing else.
         setShareBusy(true)
         setShareError(null)
+        setSharePreview(null)
         try {
-          const data = await apiPost('/bundle/refresh-catalog', { datasource: shareTarget })
+          const data = await apiPost('/bundle/refresh-catalog', {
+            datasource: shareTarget,
+            schema: schemaValue(),
+          })
           if (!data || data.ok === false) {
             setShareError(bundleFailure(data))
             return
           }
-          setShareNotice(fmt(t('share.catalogRefreshed'), { n: data.tableCount || 0 }))
-          setSharePreview(null)
+          // "read", "gone" and "never got to it" are three different answers and
+          // the panel shows all three rather than one total.
+          setShareRefresh({
+            checked: (data.checked || []).slice(0),
+            missing: (data.missing || []).slice(0),
+            notChecked: (data.notChecked || []).slice(0),
+            savedAt: data.savedAt || null,
+            schema: data.schema || null,
+          })
+          setShareNotice(
+            fmt(t('share.catalogRefreshed'), {
+              read: (data.checked || []).length,
+              missing: (data.missing || []).length,
+              skipped: (data.notChecked || []).length,
+            }),
+          )
         } catch (error) {
           setShareError(String((error && error.message) || error))
         } finally {
           setShareBusy(false)
         }
       }
+      const schemaValue = () => String(shareSchema || '').trim()
       const parseBundle = () => {
         const text = String(shareBundle || '').trim()
         if (!text) return null
@@ -7195,6 +7241,7 @@ function groupTables(tables) {
             datasource: shareTarget,
             payload,
             respectStatus: shareRespectStatus,
+            schema: schemaValue(),
           })
           if (!data || data.ok === false) {
             setShareError(bundleFailure(data))
@@ -8753,6 +8800,7 @@ function groupTables(tables) {
           not_checked: t('share.reason.not_checked'),
           pending_all: t('share.reason.pending_all'),
           stale_cache: t('share.reason.stale_cache'),
+          ambiguous_schema: t('share.reason.ambiguous_schema'),
         }
         // How old is the cached directory? The server stamps it on every write;
         // a stamp older than seven days is only a hint, never enough to vouch
@@ -8765,6 +8813,12 @@ function groupTables(tables) {
           return Math.max(0, Date.now() - saved)
         })()
         const catalogStale = Boolean(sharePreview && sharePreview.catalogStale)
+        // Which schema answered. The server says so explicitly because a table
+        // may have been found in another cached schema than the configured one.
+        const catalogSchema = sharePreview && sharePreview.catalogSchema
+        // Tables the last refresh could not reach at all. They are unknown, not
+        // absent, and the preview must not call them missing.
+        const catalogUnread = (sharePreview && sharePreview.catalogNotChecked) || []
         const catalogAgeText = (() => {
           if (catalogAge === null) return t('share.noCatalog')
           const minutes = Math.floor(catalogAge / 60000)
@@ -8811,6 +8865,56 @@ function groupTables(tables) {
               t('share.refreshCatalog'),
             ),
           ),
+          h(
+            'label',
+            { className: 'dbmcp-cell' },
+            h('span', { className: 'dbmcp-label' }, t('share.schemaLabel')),
+            h('input', {
+              className: 'dbmcp-input',
+              value: shareSchema,
+              placeholder: t('share.schemaPlaceholder'),
+              'aria-label': t('share.schemaLabel'),
+              onChange: (event) => setShareSchema(event.target.value),
+            }),
+            h('p', { className: 'dbmcp-hint' }, t('share.schemaHint')),
+          ),
+          shareRefresh
+            ? h(
+                'div',
+                { className: 'dbmcp-hint dbmcp-share-refresh' },
+                h(
+                  'p',
+                  null,
+                  fmt(t('share.refreshChecked'), {
+                    n: (shareRefresh.checked || []).length,
+                    names: (shareRefresh.checked || []).join(', '),
+                  }),
+                ),
+                (shareRefresh.missing || []).length
+                  ? h(
+                      'p',
+                      { className: 'dbmcp-share-missing' },
+                      fmt(t('share.refreshMissing'), {
+                        n: shareRefresh.missing.length,
+                        names: shareRefresh.missing.join(', '),
+                      }),
+                    )
+                  : null,
+                (shareRefresh.notChecked || []).length
+                  ? h(
+                      'p',
+                      { className: 'dbmcp-share-skipped' },
+                      fmt(t('share.refreshNotChecked'), {
+                        n: shareRefresh.notChecked.length,
+                        names: shareRefresh.notChecked.join(', '),
+                      }),
+                    )
+                  : null,
+                shareRefresh.schema
+                  ? h('p', null, fmt(t('share.schemaUsed'), { schema: shareRefresh.schema }))
+                  : null,
+              )
+            : null,
           h(
             'label',
             { className: 'dbmcp-cell' },
@@ -8883,6 +8987,19 @@ function groupTables(tables) {
                 sharePreview.catalogHint
                   ? h('p', { className: 'dbmcp-hint is-warn' }, t('share.noCatalog'))
                   : h('p', { className: 'dbmcp-hint' }, catalogAgeText),
+                catalogSchema
+                  ? h('p', { className: 'dbmcp-hint' }, fmt(t('share.schemaUsed'), { schema: catalogSchema }))
+                  : null,
+                catalogUnread.length
+                  ? h(
+                      'p',
+                      { className: 'dbmcp-hint is-warn' },
+                      fmt(t('share.notCheckedTables'), {
+                        n: catalogUnread.length,
+                        names: catalogUnread.join(', '),
+                      }),
+                    )
+                  : null,
                 catalogStale
                   ? h('p', { className: 'dbmcp-hint is-warn' }, t('share.staleCatalog'))
                   : null,

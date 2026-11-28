@@ -560,5 +560,192 @@ class StatusFromCatalog(unittest.TestCase):
         self.assertEqual(result.get("catalogSavedAt"), catalog["savedAt"])
 
 
+class SchemaAwarePreview(unittest.TestCase):
+    """The cache is keyed by datasource + schema, so a lookup has an order.
+
+    A table can live in more than one schema and carry different columns in each
+    — a currency code as ``char(3)`` in one and ``integer`` in another. Taking
+    either one silently would bind a join to a column it does not match, so the
+    lookup tries the configured schema first, then the other cached schemas, and
+    refuses to decide when they disagree: ``pending`` with ``ambiguous_schema``.
+    """
+
+    def setUp(self):
+        import os
+        import tempfile
+
+        self.saved = os.environ.get("DB_MCP_RUNTIME")
+        self.tmp = tempfile.TemporaryDirectory()
+        os.environ["DB_MCP_RUNTIME"] = self.tmp.name
+        self.profile = {"id": "trace-demo", "kind": "gauss"}
+
+    def tearDown(self):
+        import os
+
+        if self.saved is None:
+            os.environ.pop("DB_MCP_RUNTIME", None)
+        else:
+            os.environ["DB_MCP_RUNTIME"] = self.saved
+        self.tmp.cleanup()
+
+    def _payload(self, status="confirmed"):
+        wire = {
+            "from": {"table": "t_order", "column": "id"},
+            "to": {"table": "t_line", "column": "order_id"},
+            "status": status,
+        }
+        return {"schemaVersion": bundle.SCHEMA_VERSION, "edges": [wire], "scenes": []}
+
+    def _catalog(self, columns_line, stamp=None):
+        return {
+            "savedAt": stamp or bundle._now(),
+            "tables": {
+                "t_order": {"columns": {"id": "integer"}},
+                "t_line": {"columns": dict(columns_line)},
+            },
+        }
+
+    def test_the_configured_schema_is_asked_for_first(self):
+        result = bundle.import_bundle(
+            self.profile,
+            self._payload(),
+            catalog=self._catalog({"order_id": "integer"}),
+            schemas={"sales": self._catalog({"order_id": "integer"})},
+            preferred_schema="sales",
+        )
+        self.assertEqual(result.get("catalogSchema"), "sales")
+        self.assertEqual(result["relationsDoc"]["edges"][0]["status"], "confirmed")
+
+    def test_another_cached_schema_is_tried_when_the_first_lacks_the_table(self):
+        result = bundle.import_bundle(
+            self.profile,
+            self._payload(),
+            catalog=None,
+            schemas={"public": self._catalog({"order_id": "integer"})},
+            preferred_schema="sales",
+        )
+        self.assertEqual(result.get("catalogSchema"), "public")
+        self.assertEqual(result["relationsDoc"]["edges"][0]["status"], "confirmed")
+
+    def test_disagreeing_columns_across_schemas_are_ambiguous_not_a_guess(self):
+        result = bundle.import_bundle(
+            self.profile,
+            self._payload(),
+            catalog=self._catalog({"order_id": "character varying(8)"}),
+            schemas={"sales": self._catalog({"order_id": "integer"})},
+            preferred_schema="public",
+        )
+        self.assertEqual(result["relationsDoc"]["edges"][0]["status"], "pending")
+        reasons = [item.get("reason") for item in result.get("downgraded", [])]
+        self.assertIn("ambiguous_schema", reasons)
+
+    def test_agreement_across_schemas_is_not_ambiguous(self):
+        result = bundle.import_bundle(
+            self.profile,
+            self._payload(),
+            catalog=self._catalog({"order_id": "integer"}),
+            schemas={"sales": self._catalog({"order_id": "integer"})},
+            preferred_schema="public",
+        )
+        self.assertEqual(result["relationsDoc"]["edges"][0]["status"], "confirmed")
+
+    def test_a_table_no_cached_schema_holds_is_still_missing(self):
+        empty = {"savedAt": bundle._now(), "tables": {"t_order": {"columns": {"id": "integer"}}}}
+        result = bundle.import_bundle(
+            self.profile,
+            self._payload(),
+            catalog=empty,
+            schemas={"sales": empty},
+            preferred_schema="public",
+        )
+        self.assertEqual(result["relationsDoc"]["edges"][0]["status"], "pending")
+        reasons = [item.get("reason") for item in result.get("downgraded", [])]
+        self.assertIn("missing_table", reasons)
+
+    def test_a_table_whose_stamp_is_old_downgrades_even_when_the_file_is_new(self):
+        import datetime
+
+        old = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=30)).isoformat()
+        catalog = self._catalog({"order_id": "integer"})
+        catalog["tables"]["t_line"]["readAt"] = old
+        result = bundle.import_bundle(self.profile, self._payload(), catalog=catalog)
+        self.assertEqual(result["relationsDoc"]["edges"][0]["status"], "pending")
+        reasons = [item.get("reason") for item in result.get("downgraded", [])]
+        self.assertIn("stale_cache", reasons)
+
+    def test_a_table_stamp_is_compared_on_its_own_not_on_the_file_stamp(self):
+        catalog = self._catalog({"order_id": "integer"})
+        catalog["tables"]["t_line"]["readAt"] = bundle._now()
+        result = bundle.import_bundle(self.profile, self._payload(), catalog=catalog)
+        self.assertEqual(result["relationsDoc"]["edges"][0]["status"], "confirmed")
+
+
+class UnreadTables(unittest.TestCase):
+    """Unknown and absent are different words, so the cache has to keep them apart.
+
+    A refresh that timed out, gave up on its deadline, or failed did not learn
+    that a table is absent — it only failed to look. Recording those tables under
+    ``unread`` lets a preview say "not checked" instead of "missing table", which
+    is the difference between "your join is wrong" and "look again".
+    """
+
+    def setUp(self):
+        import os
+        import tempfile
+
+        self.saved = os.environ.get("DB_MCP_RUNTIME")
+        self.tmp = tempfile.TemporaryDirectory()
+        os.environ["DB_MCP_RUNTIME"] = self.tmp.name
+        self.profile = {"id": "trace-demo", "kind": "gauss"}
+
+    def tearDown(self):
+        import os
+
+        if self.saved is None:
+            os.environ.pop("DB_MCP_RUNTIME", None)
+        else:
+            os.environ["DB_MCP_RUNTIME"] = self.saved
+        self.tmp.cleanup()
+
+    def _payload(self):
+        wire = {
+            "from": {"table": "t_order", "column": "id"},
+            "to": {"table": "t_line", "column": "order_id"},
+            "status": "confirmed",
+        }
+        return {"schemaVersion": bundle.SCHEMA_VERSION, "edges": [wire], "scenes": []}
+
+    def _catalog(self, unread=()):
+        return {
+            "savedAt": bundle._now(),
+            "unread": list(unread),
+            "tables": {"t_order": {"columns": {"id": "integer"}}},
+        }
+
+    def test_a_table_the_refresh_never_read_is_not_checked(self):
+        result = bundle.import_bundle(self.profile, self._payload(), catalog=self._catalog(["t_line"]))
+        self.assertEqual(result["relationsDoc"]["edges"][0]["status"], "pending")
+        reasons = [item.get("reason") for item in result.get("downgraded", [])]
+        self.assertIn("not_checked", reasons)
+        self.assertNotIn("missing_table", reasons)
+
+    def test_a_table_that_was_read_and_absent_is_still_missing(self):
+        result = bundle.import_bundle(self.profile, self._payload(), catalog=self._catalog([]))
+        reasons = [item.get("reason") for item in result.get("downgraded", [])]
+        self.assertIn("missing_table", reasons)
+
+    def test_the_plan_lists_what_was_not_checked(self):
+        result = bundle.import_bundle(self.profile, self._payload(), catalog=self._catalog(["t_line"]))
+        self.assertEqual(result.get("catalogNotChecked"), ["t_line"])
+
+    def test_a_table_read_later_stops_being_unread(self):
+        import store
+
+        store.save_catalog(self.profile, self._catalog(["t_line"]))
+        store.save_catalog(self.profile, {"tables": {"t_line": {"columns": {"order_id": "integer"}}}}, read=[("t_line", {"order_id": "integer"})])
+        loaded = store.load_catalog(self.profile)
+        self.assertNotIn("t_line", loaded.get("unread") or [], "reading a table clears its unread mark")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

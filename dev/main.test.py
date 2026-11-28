@@ -1132,5 +1132,5 @@ class CatalogCacheWiring(unittest.TestCase):
         self.assertTrue(any(item.get("reason") == "missing_table" for item in result.get("downgraded", [])))
 
 
-if __name__ == "__main__":
+
     sys.exit(unittest.main(verbosity=2))

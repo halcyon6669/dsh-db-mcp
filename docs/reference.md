@@ -671,9 +671,10 @@ The panel has two pages that talk to the graph, and neither of them accepts SQL:
 
 ### Sharing a graph between machines
 
-The panel's Share page is backed by four host routes — `GET /bundle/export`,
-`POST /bundle/preview`, `POST /bundle/import` and `POST /bundle/undo` — served
-with the same origin check as every other panel write and no new MCP tool. The
+The panel's Share page is backed by five host routes — `GET /bundle/export`,
+`POST /bundle/preview`, `POST /bundle/import`, `POST /bundle/undo` and
+`POST /bundle/refresh-catalog` — served with the same origin check as every other
+panel write and no new MCP tool. The
 Host calls a thin stdin/stdout Python CLI (`server/bundle_cli.py`) that reuses the
 same pure functions in `server/bundle.py`, so the agent's tool catalog stays at
 its current size. All of the bundle logic lives in `server/bundle.py`:
@@ -703,7 +704,8 @@ its current size. All of the bundle logic lives in `server/bundle.py`:
   agrees does a sender `confirmed`/`trusted` become local `confirmed` — never
   `trusted` — with `confirmCount` reset to zero; a sender `pending` stays
   `pending`. Each edge lowered to pending carries a `downgradeReason`
-  (`missing_table`, `missing_column`, `type_incompatible`, `not_checked`, or
+  (`missing_table`, `missing_column`, `type_incompatible`, `not_checked`,
+  `ambiguous_schema`, or
   `pending_all` when the reader chose the "make everything pending" toggle, or
   `stale_cache` when the cached directory is old), and is listed in `downgraded`.
   The preview reads **only** the locally cached catalog (`store.load_catalog`);
@@ -711,15 +713,43 @@ its current size. All of the bundle logic lives in `server/bundle.py`:
   `catalogHint` and imports everything pending. The toggle `respectStatus=False`
   forces every edge pending.
 
+  **Known-unknown is not missing.** A table the cache never managed to read is
+  not a table that does not exist, so when a refresh left an endpoint unread the
+  edge is lowered with `not_checked` rather than `missing_table`; only a table
+  the refresh looked for and could not find under any case variant is
+  `missing_table`. The plan reports every unreachable table in
+  `catalogNotChecked`, apart from `downgraded`.
+
+  **One table, several schemas.** The cache file is keyed by data source *and*
+  schema (`<source>.json` for the schema-free key, `<source>__<schema>.json`
+  otherwise), so one source can be cached per schema. The preview looks in the
+  configured schema first and then in every other schema cached for that source:
+  a table found in a fallback schema still resolves, and the plan names the
+  schema that answered in `catalogSchema`. If two cached schemas disagree about
+  the type of the same column the edge is lowered with `ambiguous_schema` instead
+  of guessing — a disagreement means no cached type can be trusted for that
+  column.
+
   The cache is filled as a side effect of the catalog tools (`list_tables`,
-  `describe_table`, `discover_relations`) and by the Share page's **Refresh
-  directory** button, which is the one action that opens a connection — and even
-  that reads table/column metadata only, never row data. Each entry is stamped
-  with the time it was read; a cache older than seven days (or one with no
+  `describe_table`, `discover_relations`), each stamping only the tables *it*
+  read, and by the Share page's **Refresh directory** button, which is the one
+  action that opens a connection — and even that reads table/column metadata
+  only, never row data. A refresh reads exactly the tables the pasted bundle
+  mentions (every edge endpoint plus every scene member), trying the case
+  variants an engine may insist on (Oracle upper case, GaussDB lower case), with
+  no table ceiling; it reports `checked`, `missing` and `notChecked` separately,
+  where `notChecked` means timed out, past the run's deadline, or otherwise
+  failed. The Share page shows all three counts and the schema that was read.
+  Each table entry carries its own `readAt`; a partial read (a filtered
+  `list_tables`, one `describe_table`) updates only the tables it touched, so it
+  cannot make an old table look fresh. A table's staleness is judged by its own
+  stamp, falling back to the file-level `savedAt` for a cache written before
+  per-table stamps existed. A cache older than seven days (or one with no
   timestamp) is treated as stale: the preview still works and can still be
   applied, but it reports `catalogStale`, says how old the cache is, and lowers
   every status-lifted edge with reason `stale_cache`. The cache is local metadata
   only: it is never exported in a bundle and never contains row values.
+
 - `apply_import(...)` takes the import lock, re-reads the current documents, and
   writes both through a temp file plus an atomic replace; every temp and final
   file is created with mode `0600` (on POSIX). If the second write fails, the

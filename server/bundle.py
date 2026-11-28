@@ -101,6 +101,33 @@ def _wire_edge(edge: dict) -> dict:
     }
 
 
+def _parse_stamp(stamp) -> datetime | None:
+    """Read one ISO stamp, treating a naive one as UTC; None when unreadable."""
+    if not stamp:
+        return None
+    try:
+        moment = datetime.fromisoformat(str(stamp).replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return None
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    return moment
+
+
+def _stale_stamp(stamp) -> bool:
+    moment = _parse_stamp(stamp)
+    if moment is None:
+        return True
+    return datetime.now(timezone.utc) - moment > CATALOG_MAX_AGE
+
+
+def _catalog_is_old(catalog: dict | None) -> bool:
+    """True when this cache's file stamp is too old to vouch for a confirmation."""
+    if not isinstance(catalog, dict):
+        return True
+    return _stale_stamp(catalog.get("savedAt"))
+
+
 def _catalog_stale(catalog: dict | None) -> bool:
     """A cached directory older than a week cannot vouch for today's types.
 
@@ -110,19 +137,96 @@ def _catalog_stale(catalog: dict | None) -> bool:
     """
     if not isinstance(catalog, dict):
         return True
-    stamp = catalog.get("savedAt")
-    if not stamp:
-        return True
-    try:
-        saved = datetime.fromisoformat(str(stamp).replace("Z", "+00:00"))
-        if saved.tzinfo is None:
-            saved = saved.replace(tzinfo=timezone.utc)
-    except (ValueError, TypeError):
-        return True
-    return datetime.now(timezone.utc) - saved > CATALOG_MAX_AGE
+    return _stale_stamp(catalog.get("savedAt"))
 
 
-def _resolve_status(wire: dict, catalog: dict | None, respect_status: bool, catalog_is_stale: bool = False):
+def _table_stale(catalog: dict, table: str) -> bool:
+    """How old this one table is, not how old the file is.
+
+    A refresh reads only what a bundle mentions, so the file can be a minute old
+    while a table in it was described a month ago. What matters for a join is the
+    age of the two tables it names.
+    """
+    if not isinstance(catalog, dict):
+        return True
+    wanted = str(table or "").casefold()
+    tables = catalog.get("tables")
+    entry = None
+    if isinstance(tables, dict):
+        for name, info in tables.items():
+            if str(name).casefold() == wanted:
+                entry = info if isinstance(info, dict) else {}
+                break
+    stamp = entry.get("readAt") if isinstance(entry, dict) else None
+    # A cache written before per-table stamps only knows the file stamp; using it
+    # for every table keeps that cache usable rather than suddenly untrustworthy.
+    return _stale_stamp(stamp or catalog.get("savedAt"))
+
+
+def _unread_names(catalog: dict | None) -> set[str]:
+    """Tables a refresh could not look at — unknown, which is not the same as absent."""
+    if not isinstance(catalog, dict):
+        return set()
+    names = catalog.get("unread")
+    if not isinstance(names, list):
+        return set()
+    return {str(name).casefold() for name in names if str(name or "").strip()}
+
+
+def _schema_columns(catalog: dict, table: str, column: str):
+    """The (type) this catalog claims for one column, or None when it says nothing."""
+    tables = catalog.get("tables") if isinstance(catalog, dict) else None
+    if not isinstance(tables, dict):
+        return None
+    wanted = str(table or "").casefold()
+    for name, info in tables.items():
+        if str(name).casefold() != wanted or not isinstance(info, dict):
+            continue
+        cols = info.get("columns") or {}
+        if isinstance(cols, dict):
+            for key, value in cols.items():
+                if str(key).casefold() == str(column or "").casefold():
+                    return value
+            return None
+        for item in cols:
+            if isinstance(item, dict) and str(item.get("name", "")).casefold() == str(column or "").casefold():
+                return item.get("type")
+        return None
+    return None
+
+
+def _choose_catalog(catalog: dict | None, schemas: dict | None, frm: dict, to: dict):
+    """The cached directory that holds both ends of a join, and its schema name.
+
+    The configured schema is consulted first. When it cannot speak for both
+    tables, another cached schema may — a table read under ``public`` is still the
+    same table when the configured schema has not been read yet. Returns
+    ``(catalog, schema_name)``; ``(None, None)`` when nothing can answer.
+    """
+    ends = {str(frm.get("table") or "").casefold(), str(to.get("table") or "").casefold()}
+    candidates: list[tuple[dict, str | None]] = []
+    if isinstance(catalog, dict):
+        candidates.append((catalog, catalog.get("schema")))
+    for name, item in (schemas or {}).items():
+        if isinstance(item, dict):
+            candidates.append((item, item.get("schema") or name))
+    first: tuple[dict, str | None] | None = None
+    for item, name in candidates:
+        tables = item.get("tables")
+        if not isinstance(tables, dict):
+            continue
+        if first is None:
+            first = (item, name)
+        known = {str(entry).casefold() for entry in tables}
+        if ends <= known:
+            return item, name
+    # Nothing holds both ends. The first cache is still the one to report
+    # "missing" (or "not read") against, rather than answering from nowhere.
+    return first if first is not None else (None, None)
+
+
+def _resolve_status(wire: dict, catalog: dict | None, respect_status: bool, catalog_is_stale: bool = False,
+                    schemas: dict | None = None, preferred_schema: str | None = None):
     """Recompute a join's status from the reader's cached catalog.
 
     Returns ``(status, reason, stale)``. The sender's ``status`` is only consulted
@@ -131,16 +235,26 @@ def _resolve_status(wire: dict, catalog: dict | None, respect_status: bool, cata
     whenever the join lands in ``pending`` so the panel can explain the downgrade.
     An old or undated catalog cannot vouch for a confirmation, so it downgrades
     with the ``stale_cache`` reason.
+
+    ``schemas`` holds the caches of the other schemas this datasource has been
+    read under. A table can exist in two of them with different column types, and
+    taking either silently would bind a join to a column it does not match —
+    that case is ``ambiguous_schema``, a refusal to guess. It is checked before
+    the type comparison, because a disagreement between schemas means even the
+    configured schema's type cannot be trusted.
     """
     sender = wire.get("status")
     if not respect_status:
         return "pending", "pending_all", False
-    if not isinstance(catalog, dict):
-        return "pending", "not_checked", False
-
     frm = wire.get("from") or {}
     to = wire.get("to") or {}
-    raw_tables = catalog.get("tables")
+    if not isinstance(catalog, dict) and not any(isinstance(item, dict) for item in (schemas or {}).values()):
+        return "pending", "not_checked", False
+
+    chosen, chosen_schema = _choose_catalog(catalog, schemas, frm, to)
+    if chosen is None:
+        return "pending", "not_checked", False
+    raw_tables = chosen.get("tables")
     if not isinstance(raw_tables, dict):
         return "pending", "not_checked", False
     tables = {
@@ -161,16 +275,43 @@ def _resolve_status(wire: dict, catalog: dict | None, respect_status: bool, cata
     left = tables.get(str(frm.get("table") or "").casefold())
     right = tables.get(str(to.get("table") or "").casefold())
     if left is None or right is None:
+        # Nothing holds both ends. If a refresh told us it never got to one of
+        # them, say "not checked" — absent and unknown are different answers.
+        unread: set[str] = set()
+        for item in [catalog, *(schemas or {}).values()]:
+            unread |= _unread_names(item)
+        ends = {str(frm.get("table") or "").casefold(), str(to.get("table") or "").casefold()}
+        if unread & ends:
+            return "pending", "not_checked", False
         return "pending", "missing_table", True
     left_type = lookup(left, frm.get("column"))
     right_type = lookup(right, to.get("column"))
     if left_type is None or right_type is None:
         return "pending", "missing_column", True
+
+    # A second schema that disagrees about the same column makes the answer
+    # ambiguous: either type could be the truth, and guessing picks the wrong one.
+    for other_name, other in (schemas or {}).items():
+        if not isinstance(other, dict) or other is chosen:
+            continue
+        for point, expected in ((frm, left_type), (to, right_type)):
+            found = _schema_columns(other, point.get("table"), point.get("column"))
+            if found is None:
+                continue
+            if engines.column_family(found) != engines.column_family(expected):
+                return "pending", "ambiguous_schema", False
+
     left_family = engines.column_family(left_type)
     right_family = engines.column_family(right_type)
     if left_family != right_family and "any" not in (left_family, right_family):
         return "pending", "type_incompatible", False
-    if catalog_is_stale:
+    # Age is a property of the cache that answered, not of whichever cache the
+    # caller happened to name first: a fresh `public` cache can vouch for a join
+    # even when the configured schema was never read.
+    stale = _catalog_is_old(chosen)
+    if not stale:
+        stale = _table_stale(chosen, frm.get("table")) or _table_stale(chosen, to.get("table"))
+    if stale:
         return "pending", "stale_cache", False
     if sender in ("confirmed", "trusted"):
         # A confirmation is a reference; trust is earned here, so the ceiling is
@@ -226,6 +367,8 @@ def import_bundle(
     catalog: dict | None = None,
     respect_status: bool = True,
     expected_revision: str | None = None,
+    schemas: dict | None = None,
+    preferred_schema: str | None = None,
 ) -> dict:
     """Calculate an import without writing anything.
 
@@ -234,8 +377,10 @@ def import_bundle(
     current files are read, but never changed. ``catalog`` is the reader's cached
     table/column directory: no connection is opened, no data is queried. It is
     the yardstick every sender status is checked against. ``respect_status=False``
-    is the panel's "make everything pending" toggle. The returned documents are
-    what ``apply_import`` will write.
+    is the panel's "make everything pending" toggle. ``schemas`` carries this
+    datasource's other cached schemas, so a table known to a different schema is
+    still found (and a disagreement about its columns is reported rather than
+    guessed). The returned documents are what ``apply_import`` will write.
     """
     if not isinstance(payload, dict):
         raise store.StoreError("user_error", "a bundle must be an object", "export one from the sharing page and paste it as-is")
@@ -288,6 +433,7 @@ def import_bundle(
     conflicts: list[dict] = []
     unknown: list[str] = []
     downgraded: list[dict] = []
+    used_schemas: list[str] = []
 
     for wire in raw_edges:
         if not isinstance(wire, dict):
@@ -306,7 +452,14 @@ def import_bundle(
         target_id = relations.edge_id(frm, to)
         condition = wire.get("condition")
         local = by_id.get(target_id)
-        status, reason, stale = _resolve_status(wire, catalog, respect_status, catalog_stale)
+        status, reason, stale = _resolve_status(
+            wire, catalog, respect_status, catalog_stale, schemas, preferred_schema
+        )
+        chosen, chosen_schema = _choose_catalog(catalog, schemas, frm, to)
+        if chosen is not None and chosen_schema and chosen_schema not in used_schemas:
+            # Which schema actually answered this preview, so the panel can say so
+            # instead of implying the configured one was consulted.
+            used_schemas.append(chosen_schema)
         if local is None:
             edge = relations._blank_edge(frm, to, "imported", wire.get("note"))
             edge["condition"] = condition
@@ -388,6 +541,22 @@ def import_bundle(
         "catalogHint": not catalog_checked,
         "catalogStale": catalog_stale,
         "catalogSavedAt": (catalog or {}).get("savedAt") if isinstance(catalog, dict) else None,
+        # Which schema answered the preview. When the configured one could not
+        # speak for both ends of some join, another cached schema did, and saying
+        # "public" is more honest than implying the configured one was used.
+        "catalogSchema": (used_schemas[0] if used_schemas else (preferred_schema if isinstance(catalog, dict) else None)),
+        # A refresh may not have reached every table; the panel says "not read"
+        # rather than "missing" for those.
+        "catalogNotChecked": sorted(
+            {
+                name
+                for item in [catalog, *(schemas or {}).values()]
+                if isinstance(item, dict)
+                for name in (item.get("unread") or [])
+                if str(name or "").strip()
+            },
+            key=str.casefold,
+        ),
         "respectStatus": bool(respect_status),
         "revision": revision,
         "stalePreview": stale_preview,

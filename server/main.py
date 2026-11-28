@@ -208,21 +208,30 @@ def _remember_catalog(profile: dict, tables=(), columns=()) -> None:
     `list_tables` contributes table names, `describe_table` contributes typed
     columns and `discover_relations` contributes column names on both ends. Each
     call merges into what is already cached, so a walk through the panel builds a
-    usable directory over time. The write is best-effort: a broken cache must not
-    turn a successful metadata read into an error.
+    usable directory over time, and only the tables this call actually looked at
+    get a fresh read time — a filtered listing cannot make the rest look new.
+
+    The write is best-effort: a broken cache must not turn a successful metadata
+    read into an error. It is not silent, though: a failed write is counted and
+    the last reason kept, so the diagnostics page can explain why previews keep
+    saying "not checked".
     """
+    touched: list = []
+    payload: dict | None = None
     try:
         catalog = store.load_catalog(profile) or {"tables": {}}
         known = catalog.get("tables")
         if not isinstance(known, dict):
             known = {}
             catalog["tables"] = known
+        typed: dict[str, dict] = {}
         for name in tables or ():
             entry = known.setdefault(str(name), {})
             if not isinstance(entry, dict):
                 entry = {}
                 known[str(name)] = entry
             entry.setdefault("columns", {})
+            touched.append(str(name))
         for table, column, type_name in columns or ():
             entry = known.setdefault(str(table), {})
             if not isinstance(entry, dict):
@@ -237,9 +246,20 @@ def _remember_catalog(profile: dict, tables=(), columns=()) -> None:
             # a describe_table call already recorded for the same column.
             if key not in cols or cols[key] is None or type_name is not None:
                 cols[key] = type_name
-        store.save_catalog(profile, catalog)
+            typed.setdefault(str(table), {})[key] = cols[key]
+        payload = typed
     except Exception:  # noqa: BLE001 - the cache is an aid, never the answer
-        pass
+        return
+    # `read` names exactly what this call saw, so save_catalog restamps those
+    # tables and leaves every other table's read time alone.
+    read = [(name, payload.get(name) if payload else None) for name in touched]
+    for table, columns_seen in (payload or {}).items():
+        if all(name != table for name in touched):
+            read.append((table, columns_seen))
+    try:
+        store.save_catalog(profile, catalog, schema=store.catalog_schema(profile), read=read)
+    except Exception:  # noqa: BLE001 - a broken cache is not a failed read
+        return
 
 
 def _inline_profile(kind: str, config: Any, read_only: Optional[bool]) -> dict:

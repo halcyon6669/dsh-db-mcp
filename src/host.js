@@ -3676,9 +3676,15 @@ export function createHost(options = {}) {
       }
       if (route === "/bundle/refresh-catalog") {
         // A person pressed "refresh directory": read metadata only, no row data.
+        // The schema is the panel's choice; absent it, the Python side falls back
+        // to the one the datasource is configured with.
         const result = await callBundleCli({
           op: "refresh_catalog",
           datasource: trimmed(payload.datasource) || undefined,
+          schema: trimmed(payload.schema) || undefined,
+          timeoutMs: Number.isFinite(Number(payload.timeoutMs))
+            ? Number(payload.timeoutMs)
+            : undefined,
         });
         return sendJson(response, result.ok === false ? 400 : 200, result);
       }

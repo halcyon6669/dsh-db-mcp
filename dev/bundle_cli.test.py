@@ -174,32 +174,70 @@ class RefreshCatalogCli(unittest.TestCase):
         os.environ.update(self.saved)
         self.tmp.cleanup()
 
-    def test_refresh_reports_a_saved_at_and_the_tables_it_read(self):
-        result = _invoke({"op": "refresh_catalog", "datasource": "shop"}, self.dir)
+    def _payload(self):
+        """A bundle naming both tables — refresh reads the tables a bundle names."""
+        return {
+            "schemaVersion": 1,
+            "kind": "db-mcp-bundle",
+            "edges": [{
+                "from": {"table": "t_trans", "column": "order_id"},
+                "to": {"table": "t_order", "column": "id"},
+                "status": "trusted",
+            }],
+            "scenes": [],
+        }
+
+    def test_refresh_reads_the_tables_the_bundle_names_and_stamps_them(self):
+        result = _invoke(
+            {"op": "refresh_catalog", "datasource": "shop", "payload": self._payload()},
+            self.dir,
+        )
         self.assertTrue(result.get("ok"), result)
         self.assertTrue(result.get("savedAt"))
+        self.assertEqual(sorted(result.get("checked") or []), ["t_order", "t_trans"])
+        self.assertEqual(result.get("missing"), [])
+        self.assertEqual(result.get("notChecked"), [])
         self.assertEqual(result.get("tableCount"), 2)
         cache = self.dir / "catalog" / "shop.json"
         self.assertTrue(cache.exists(), "refresh writes a timestamped cache")
         doc = json.loads(cache.read_text(encoding="utf-8"))
         self.assertEqual(doc["savedAt"], result["savedAt"])
-        self.assertIn("t_order", doc["tables"])
-        self.assertIn("t_trans", doc["tables"])
+        for name in ("t_order", "t_trans"):
+            self.assertIn(name, doc["tables"])
+            # Each table carries the moment it was read, not just the file stamp.
+            self.assertTrue(doc["tables"][name].get("readAt"))
+
+    def test_refresh_does_not_cache_a_table_the_bundle_never_names(self):
+        import sqlite3
+
+        seed = sqlite3.connect(str(self.db))
+        try:
+            seed.execute("create table t_unrelated (id integer primary key)")
+            seed.commit()
+        finally:
+            seed.close()
+        result = _invoke(
+            {"op": "refresh_catalog", "datasource": "shop", "payload": self._payload()},
+            self.dir,
+        )
+        self.assertTrue(result.get("ok"), result)
+        doc = json.loads((self.dir / "catalog" / "shop.json").read_text(encoding="utf-8"))
+        self.assertNotIn("t_unrelated", doc["tables"])
 
     def test_a_preview_after_refresh_uses_the_fresh_catalog(self):
-        refreshed = _invoke({"op": "refresh_catalog", "datasource": "shop"}, self.dir)
+        refreshed = _invoke(
+            {"op": "refresh_catalog", "datasource": "shop", "payload": self._payload()},
+            self.dir,
+        )
         self.assertTrue(refreshed.get("ok"), refreshed)
-        edge = {
-            "from": {"table": "t_trans", "column": "order_id"},
-            "to": {"table": "t_order", "column": "id"},
-            "status": "trusted",
-        }
-        bundle = {"schemaVersion": 1, "kind": "db-mcp-bundle", "edges": [edge], "scenes": []}
-        result = _invoke({"op": "preview", "datasource": "shop", "payload": bundle}, self.dir)
+        result = _invoke({"op": "preview", "datasource": "shop", "payload": self._payload()}, self.dir)
         self.assertTrue(result.get("ok"), result)
-        self.assertFalse(result["plan"]["catalogHint"])
-        self.assertFalse(result["plan"]["catalogStale"])
-        self.assertNotIn("not_checked", [item["reason"] for item in result["plan"]["downgraded"]])
+        plan = result["plan"]
+        self.assertFalse(plan["catalogHint"])
+        self.assertFalse(plan["catalogStale"])
+        self.assertEqual(plan["downgraded"], [])
+        self.assertEqual(plan["imported"], 1)
+        self.assertEqual(plan["catalogSchema"], None)
 
 
 if __name__ == "__main__":

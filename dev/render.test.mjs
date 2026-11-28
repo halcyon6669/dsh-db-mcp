@@ -785,9 +785,17 @@ check('share: a preview with no catalog or downgrades says why', /sharePreview\.
 check('share: a stale preview is reported and cleared', /stale_preview/.test(source) && /setShareNotice\(t\('share\.stalePreview'\)\)/.test(source))
 // The directory is a cache, not a fact: a person refreshes it explicitly (the
 // only action that opens a connection), and a preview says how old it is.
-check('share: refreshing the directory is a person-triggered CLI call', /apiPost\('\/bundle\/refresh-catalog', \{ datasource: shareTarget \}\)/.test(source) && /share\.refreshCatalog/.test(source))
+check('share: refreshing the directory is a person-triggered CLI call', /apiPost\('\/bundle\/refresh-catalog', \{\s*datasource: shareTarget/.test(source) && /share\.refreshCatalog/.test(source))
 check('share: the preview says how old the cached directory is', /sharePreview\.catalogSavedAt/.test(source) && /t\('share\.catalogAge'\)/.test(source) && /share\.staleCatalog/.test(source))
 check('share: a stale cache is a listed downgrade reason', /stale_cache:/.test(source) && /t\('share\.reason\.stale_cache'\)/.test(source))
+// A refresh reads the tables the bundle mentions, not "the first 500", and three
+// outcomes are reported apart: read, absent, and not read (timed out or failed).
+// "Not read" must never read as "absent" or a join looks wrong when it is unknown.
+check('share: the refresh echoes what it read, missed and never got to', /setShareRefresh\(\{/.test(source) && /share\.refreshChecked/.test(source) && /share\.refreshNotChecked/.test(source) && /share\.refreshMissing/.test(source))
+check('share: an unread table is called unread, never missing', /t\('share\.refreshNotChecked'\)/.test(source) && /notChecked/.test(source) && /t\('share\.reason\.not_checked'\)/.test(source))
+check('share: the schema being read can be named and is shown', /shareSchema/.test(source) && /apiPost\('\/bundle\/refresh-catalog', \{\s*datasource: shareTarget,\s*schema: schemaValue\(\)/.test(source) && /t\('share\.schemaUsed'\)/.test(source))
+check('share: two schemas that disagree are ambiguous, not a guess', /ambiguous_schema:/.test(source) && /t\('share\.reason\.ambiguous_schema'\)/.test(source))
+check('share: the preview names the schema it was checked against', /sharePreview\.catalogSchema/.test(source) && /t\('share\.schemaUsed'\)/.test(source))
 
 // Every outside client can be wired up either way: one button writes a stdio
 // command entry, the other writes the shared HTTP endpoint. The chosen form is

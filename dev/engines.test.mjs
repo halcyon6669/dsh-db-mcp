@@ -35,6 +35,8 @@ const testFiles = [
   join(packageDir, 'dev', 'main.test.py'),
   join(packageDir, 'dev', 'bundle.test.py'),
   join(packageDir, 'dev', 'bundle_cli.test.py'),
+  join(packageDir, 'dev', 'store.test.py'),
+  join(packageDir, 'dev', 'catalog.test.py'),
   join(packageDir, 'dev', 'upgrade.test.py'),
 ]
 
